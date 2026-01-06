@@ -235,10 +235,9 @@ function renderTableHead() {
     serviceItems.forEach((item, index) => {
         html += `<th class="service-header">
       <div style="display: flex; align-items: center; justify-content: space-between;">
-        <span class="service-header-text" data-service="${item}">${item}</span>
+        <span class="service-header-text service-header-editable" data-service="${item}">${item}</span>
         <div class="header-actions">
-          <button class="header-btn edit-service-btn" data-service="${item}" title="編輯">✏️</button>
-          <button class="header-btn delete delete-service-btn" data-service="${item}" title="刪除">🗑️</button>
+          <button class="header-btn delete delete-service-btn" data-service="${item}" title="刪除">❌</button>
         </div>
       </div>
     </th>`;
@@ -247,9 +246,9 @@ function renderTableHead() {
     html += '</tr>';
     thead.innerHTML = html;
 
-    // 設定服事項目編輯按鈕事件
-    document.querySelectorAll('.edit-service-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+    // 設定服事項目名稱點擊編輯事件（類似日期）
+    document.querySelectorAll('.service-header-editable').forEach(span => {
+        span.addEventListener('click', (e) => {
             const serviceName = e.target.dataset.service;
             openEditServiceModal(serviceName);
         });
@@ -751,9 +750,11 @@ async function addPersonToCell(date, service, person) {
     delete data.date;
     await saveSchedule(date, data);
 
-    // 更新顯示
-    renderCurrentPersonChips();
-    renderPersonDropdown();
+    // 更新顯示（只在編輯模態框開啟時才更新）
+    if (currentEditingCell) {
+        renderCurrentPersonChips();
+        renderPersonDropdown();
+    }
     renderTable();
 }
 

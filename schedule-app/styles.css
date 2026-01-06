@@ -216,7 +216,7 @@ body {
 .table-scroll {
   overflow-x: auto;
   overflow-y: auto;
-  max-height: calc(100vh - 300px);
+  max-height: calc(100vh - 200px);
 }
 
 .schedule-table {
@@ -239,7 +239,7 @@ body {
   font-weight: 600;
   font-size: 13px;
   text-align: left;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-sm);
   border-bottom: 2px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   white-space: nowrap;
@@ -251,15 +251,15 @@ body {
 }
 
 .schedule-table th.date-header {
-  min-width: 140px;
+  min-width: 90px;
 }
 
 .schedule-table th.service-header {
-  min-width: 180px;
+  min-width: 90px;
 }
 
 .schedule-table td {
-  padding: var(--spacing-md);
+  padding: var(--spacing-xs);
   border-bottom: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   vertical-align: top;
@@ -310,11 +310,24 @@ body {
   opacity: 1;
 }
 
+/* 服事項目標題可編輯樣式 */
+.service-header-editable {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--border-radius);
+  transition: all var(--transition-fast);
+}
+
+.service-header-editable:hover {
+  background: var(--primary-light);
+  color: var(--primary-color);
+}
+
 /* ===========================
    服務單元格
    =========================== */
 .service-cell {
-  min-height: 60px;
+  min-height: 30px;
   cursor: pointer;
   position: relative;
 }
@@ -323,7 +336,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 40px;
+  min-height: 30px;
 }
 
 .service-cell.drag-over {
