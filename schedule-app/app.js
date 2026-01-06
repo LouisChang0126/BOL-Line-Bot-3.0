@@ -233,7 +233,10 @@ function renderTableHead() {
     html += '<th class="date-header">日期</th>';
 
     serviceItems.forEach((item, index) => {
-        html += `<th class="service-header">
+        html += `<th class="service-header" 
+                    draggable="true" 
+                    data-service="${item}" 
+                    data-index="${index}">
       <div style="display: flex; align-items: center; justify-content: space-between;">
         <span class="service-header-text service-header-editable" data-service="${item}">${item}</span>
         <div class="header-actions">
@@ -249,6 +252,7 @@ function renderTableHead() {
     // 設定服事項目名稱點擊編輯事件（類似日期）
     document.querySelectorAll('.service-header-editable').forEach(span => {
         span.addEventListener('click', (e) => {
+            e.stopPropagation();
             const serviceName = e.target.dataset.service;
             openEditServiceModal(serviceName);
         });
@@ -257,8 +261,87 @@ function renderTableHead() {
     // 設定服事項目刪除按鈕事件
     document.querySelectorAll('.delete-service-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const serviceName = e.target.dataset.service;
             deleteServiceItem(serviceName);
+        });
+    });
+
+    // 設定服事標題拖拉排序事件
+    setupServiceHeaderDragAndDrop();
+}
+
+// 服事標題拖拉排序
+function setupServiceHeaderDragAndDrop() {
+    const headers = document.querySelectorAll('.service-header[draggable="true"]');
+
+    let draggedHeader = null;
+    let draggedIndex = null;
+
+    headers.forEach(header => {
+        header.addEventListener('dragstart', (e) => {
+            // 如果是從編輯文字或刪除按鈕開始拖拉，不處理
+            if (e.target.closest('.service-header-editable') || e.target.closest('.delete-service-btn')) {
+                e.preventDefault();
+                return;
+            }
+            draggedHeader = header;
+            draggedIndex = parseInt(header.dataset.index);
+            header.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', header.dataset.service);
+        });
+
+        header.addEventListener('dragend', (e) => {
+            header.classList.remove('dragging');
+            headers.forEach(h => h.classList.remove('drag-over'));
+        });
+
+        header.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (header !== draggedHeader) {
+                header.classList.add('drag-over');
+            }
+        });
+
+        header.addEventListener('dragleave', (e) => {
+            header.classList.remove('drag-over');
+        });
+
+        header.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            header.classList.remove('drag-over');
+
+            if (!draggedHeader || draggedHeader === header) return;
+
+            const targetIndex = parseInt(header.dataset.index);
+
+            if (draggedIndex === targetIndex) return;
+
+            updateStatus('移動服事項目中...');
+
+            try {
+                // 重新排序 serviceItems
+                const draggedService = serviceItems[draggedIndex];
+                serviceItems.splice(draggedIndex, 1);
+                serviceItems.splice(targetIndex, 0, draggedService);
+
+                // 儲存新順序到 metadata
+                await saveMetadata();
+
+                // 重新渲染表格
+                renderTable();
+                updateStatus('服事項目順序已更新');
+
+            } catch (error) {
+                console.error('移動服事項目失敗:', error);
+                alert('移動服事項目失敗');
+                updateStatus('就緒');
+            }
+
+            draggedHeader = null;
+            draggedIndex = null;
         });
     });
 }
@@ -301,7 +384,6 @@ function renderTableBody() {
                         data-index="${personIndex}"
                         style="background: ${chipColor};">
                      ${person}
-                     <button class="remove-btn" data-date="${row.date}" data-service="${item}" data-person="${person}">×</button>
                    </div>`;
                 });
                 html += '</div>';
@@ -326,22 +408,11 @@ function renderTableBody() {
     // 設定服事欄位點擊事件
     document.querySelectorAll('.service-cell').forEach(cell => {
         cell.addEventListener('click', (e) => {
-            if (!e.target.closest('.person-chip') && !e.target.closest('.remove-btn')) {
+            if (!e.target.closest('.person-chip')) {
                 const date = cell.dataset.date;
                 const service = cell.dataset.service;
                 openEditPersonModal(date, service);
             }
-        });
-    });
-
-    // 設定人員刪除按鈕事件
-    document.querySelectorAll('.person-chip .remove-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const date = btn.dataset.date;
-            const service = btn.dataset.service;
-            const person = btn.dataset.person;
-            removePerson(date, service, person);
         });
     });
 
@@ -655,15 +726,27 @@ function openEditPersonModal(date, service) {
 function renderPersonDropdown() {
     const dropdown = document.getElementById('personDropdown');
 
-    if (allPersonNames.size === 0) {
-        dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請在下方輸入新人員</div>';
+    // 取得目前服事的人員列表
+    const { date, service } = currentEditingCell;
+    const row = scheduleData.find(r => r.date === date);
+    const currentPersons = row[service] || [];
+
+    // 過濾掉已經在目前服事的人
+    const availableNames = Array.from(allPersonNames)
+        .filter(name => !currentPersons.includes(name))
+        .sort();
+
+    if (availableNames.length === 0) {
+        if (allPersonNames.size === 0) {
+            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請在下方輸入新人員</div>';
+        } else {
+            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">所有人員皆已指派</div>';
+        }
         return;
     }
 
-    const sortedNames = Array.from(allPersonNames).sort();
-
     let html = '';
-    sortedNames.forEach(name => {
+    availableNames.forEach(name => {
         const chipColor = getPersonColor(name);
         html += `<div class="person-chip-selectable" data-person="${name}" style="background: ${chipColor};">${name}</div>`;
     });

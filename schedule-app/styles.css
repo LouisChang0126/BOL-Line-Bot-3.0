@@ -256,6 +256,21 @@ body {
 
 .schedule-table th.service-header {
   min-width: 90px;
+  cursor: grab;
+  transition: all var(--transition-fast);
+}
+
+.schedule-table th.service-header:active {
+  cursor: grabbing;
+}
+
+.schedule-table th.service-header.dragging {
+  opacity: 0.5;
+}
+
+.schedule-table th.service-header.drag-over {
+  background: var(--primary-light);
+  border: 2px dashed var(--primary-color);
 }
 
 .schedule-table td {
