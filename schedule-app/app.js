@@ -9,6 +9,45 @@ let currentEditingDateIndex = null; // 目前編輯的日期索引
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
 
 // ===========================
+// 30 種固定顏色供人名積木使用
+// ===========================
+const PERSON_CHIP_COLORS = [
+    '#E74C3C', // 紅色
+    '#3498DB', // 藍色
+    '#2ECC71', // 綠色
+    '#9B59B6', // 紫色
+    '#F39C12', // 橙色
+    '#1ABC9C', // 青色
+    '#E91E63', // 粉紅色
+    '#00BCD4', // 青藍色
+    '#8BC34A', // 淺綠色
+    '#FF5722', // 深橙色
+    '#673AB7', // 深紫色
+    '#009688', // 藍綠色
+    '#CDDC39', // 黃綠色
+    '#795548', // 棕色
+    '#607D8B', // 藍灰色
+    '#FF9800', // 橘色
+    '#4CAF50', // 正綠色
+    '#2196F3', // 正藍色
+    '#F44336', // 亮紅色
+    '#9C27B0', // 亮紫色
+    '#00ACC1', // 深青色
+    '#7CB342', // 草綠色
+    '#C0392B', // 磚紅色
+    '#D35400', // 南瓜色
+    '#16A085', // 深青綠色
+    '#8E44AD', // 紫羅蘭色
+    '#27AE60', // 翡翠綠
+    '#2980B9', // 海藍色
+    '#F1C40F', // 金黃色
+    '#34495E'  // 深灰藍色
+];
+
+// 人名到顏色的映射快取
+let personColorMap = new Map();
+
+// ===========================
 // 初始化應用程式
 // ===========================
 async function initApp() {
@@ -107,6 +146,9 @@ async function loadData() {
         else {
             console.log('已載入班表資料');
         }
+
+        // 重建人名顏色映射
+        rebuildPersonColorMap();
 
         // 渲染表格
         renderTable();
@@ -251,12 +293,14 @@ function renderTableBody() {
             } else {
                 html += '<div class="person-chips">';
                 persons.forEach((person, personIndex) => {
+                    const chipColor = getPersonColor(person);
                     html += `<div class="person-chip" 
                         draggable="true"
                         data-date="${row.date}"
                         data-service="${item}"
                         data-person="${person}"
-                        data-index="${personIndex}">
+                        data-index="${personIndex}"
+                        style="background: ${chipColor};">
                      ${person}
                      <button class="remove-btn" data-date="${row.date}" data-service="${item}" data-person="${person}">×</button>
                    </div>`;
@@ -613,7 +657,7 @@ function renderPersonDropdown() {
     const dropdown = document.getElementById('personDropdown');
 
     if (allPersonNames.size === 0) {
-        dropdown.innerHTML = '<div class="dropdown-item text-muted text-center">尚無人員記錄</div>';
+        dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請在下方輸入新人員</div>';
         return;
     }
 
@@ -621,13 +665,14 @@ function renderPersonDropdown() {
 
     let html = '';
     sortedNames.forEach(name => {
-        html += `<div class="dropdown-item" data-person="${name}">${name}</div>`;
+        const chipColor = getPersonColor(name);
+        html += `<div class="person-chip-selectable" data-person="${name}" style="background: ${chipColor};">${name}</div>`;
     });
 
     dropdown.innerHTML = html;
 
     // 設定點擊事件
-    dropdown.querySelectorAll('.dropdown-item').forEach(item => {
+    dropdown.querySelectorAll('.person-chip-selectable').forEach(item => {
         item.addEventListener('click', (e) => {
             const person = e.target.dataset.person;
             if (person) {
@@ -651,7 +696,8 @@ function renderCurrentPersonChips() {
 
     let html = '';
     persons.forEach(person => {
-        html += `<div class="person-chip">
+        const chipColor = getPersonColor(person);
+        html += `<div class="person-chip" style="background: ${chipColor};">
                ${person}
                <button class="remove-btn" data-person="${person}">×</button>
              </div>`;
@@ -895,11 +941,36 @@ function parseDateString(dateStr) {
 }
 
 function formatDateString(date) {
-    // 格式：yyyy.m.d
+    // 格式：yyyy.mm.dd（補零）
     const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
     return `${year}.${month}.${day}`;
+}
+
+// 根據人名取得對應顏色
+function getPersonColor(personName) {
+    // 如果已經有快取的顏色，直接回傳
+    if (personColorMap.has(personName)) {
+        return personColorMap.get(personName);
+    }
+
+    // 依照目前已分配的數量來分配新顏色
+    const colorIndex = personColorMap.size % PERSON_CHIP_COLORS.length;
+    const color = PERSON_CHIP_COLORS[colorIndex];
+    personColorMap.set(personName, color);
+
+    return color;
+}
+
+// 重新建立顏色映射（在載入資料時呼叫）
+function rebuildPersonColorMap() {
+    personColorMap.clear();
+    const sortedNames = Array.from(allPersonNames).sort();
+    sortedNames.forEach((name, index) => {
+        const colorIndex = index % PERSON_CHIP_COLORS.length;
+        personColorMap.set(name, PERSON_CHIP_COLORS[colorIndex]);
+    });
 }
 
 function updateStatus(text) {
