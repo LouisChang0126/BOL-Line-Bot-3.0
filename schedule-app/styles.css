@@ -519,6 +519,39 @@ body {
   justify-content: flex-end;
 }
 
+.modal-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+  font-weight: normal;
+}
+
+/* ===========================
+   右鍵選單
+   =========================== */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 1001;
+  min-width: 150px;
+  padding: var(--spacing-xs) 0;
+}
+
+.context-menu-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-primary);
+  transition: background var(--transition-fast);
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
 /* ===========================
    表單元素
    =========================== */

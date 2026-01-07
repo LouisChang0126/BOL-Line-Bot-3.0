@@ -46,6 +46,11 @@
         </table>
       </div>
     </div>
+
+    <!-- 右鍵選單 -->
+    <div class="context-menu hidden" id="contextMenu">
+      <div class="context-menu-item" id="contextMenuPaste">📋 從此格貼上</div>
+    </div>
   </div>
 
   <!-- 編輯日期對話框 -->
@@ -93,7 +98,12 @@
   <div class="modal-overlay hidden" id="editPersonModal">
     <div class="modal">
       <div class="modal-header">
-        <h2>編輯服事人員</h2>
+        <div>
+          <h2>編輯服事人員</h2>
+          <div class="modal-subtitle" id="editPersonModalSubtitle">
+            <!-- 動態顯示日期和服事項目 -->
+          </div>
+        </div>
         <button class="modal-close" onclick="closeModal('editPersonModal')">&times;</button>
       </div>
       <div class="modal-body">

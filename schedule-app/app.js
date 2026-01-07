@@ -418,6 +418,9 @@ function renderTableBody() {
 
     // 設定拖拉事件
     setupDragAndDrop();
+
+    // 設定右鍵選單事件
+    setupContextMenu();
 }
 
 // ===========================
@@ -713,6 +716,9 @@ async function deleteServiceItem(serviceName) {
 function openEditPersonModal(date, service) {
     currentEditingCell = { date, service };
 
+    // 顯示目前編輯的日期與服事項目
+    document.getElementById('editPersonModalSubtitle').textContent = `${date} - ${service}`;
+
     // 顯示所有人名下拉選單
     renderPersonDropdown();
 
@@ -731,16 +737,36 @@ function renderPersonDropdown() {
     const row = scheduleData.find(r => r.date === date);
     const currentPersons = row[service] || [];
 
-    // 過濾掉已經在目前服事的人
+    // 收集在其他週有出現在該服事項目過的人
+    const serviceVeterans = new Set();
+    scheduleData.forEach(r => {
+        if (r.date !== date && r[service]) {
+            r[service].forEach(name => serviceVeterans.add(name));
+        }
+    });
+
+    // 過濾條件：
+    // 1. 不在目前服事的人
+    // 2. 只顯示2個字的人
     const availableNames = Array.from(allPersonNames)
         .filter(name => !currentPersons.includes(name))
-        .sort();
+        .filter(name => name.length === 2);
+
+    // 排序：在該服事項目出現過的人排前面，其餘按字母排序
+    availableNames.sort((a, b) => {
+        const aIsVeteran = serviceVeterans.has(a);
+        const bIsVeteran = serviceVeterans.has(b);
+
+        if (aIsVeteran && !bIsVeteran) return -1;
+        if (!aIsVeteran && bIsVeteran) return 1;
+        return a.localeCompare(b, 'zh-TW');
+    });
 
     if (availableNames.length === 0) {
         if (allPersonNames.size === 0) {
-            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請在下方輸入新人員</div>';
+            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請輸入新人員</div>';
         } else {
-            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">所有人員皆已指派</div>';
+            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">無可用人員，請輸入新人員</div>';
         }
         return;
     }
@@ -748,7 +774,8 @@ function renderPersonDropdown() {
     let html = '';
     availableNames.forEach(name => {
         const chipColor = getPersonColor(name);
-        html += `<div class="person-chip-selectable" data-person="${name}" style="background: ${chipColor};">${name}</div>`;
+        const isVeteran = serviceVeterans.has(name);
+        html += `<div class="person-chip-selectable${isVeteran ? ' veteran' : ''}" data-person="${name}" style="background: ${chipColor};">${name}</div>`;
     });
 
     dropdown.innerHTML = html;
@@ -940,76 +967,134 @@ function setupDragAndDrop() {
 }
 
 // ===========================
-// Excel 複製貼上功能
+// 右鍵選單貼上功能
 // ===========================
+let pasteTargetCell = null; // 記錄右鍵點擊的格子位置
+
 function setupPasteHandler() {
-    document.addEventListener('paste', async (e) => {
-        // 如果焦點在輸入框上，不處理
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            return;
-        }
+    const contextMenu = document.getElementById('contextMenu');
+    const contextMenuPaste = document.getElementById('contextMenuPaste');
 
-        e.preventDefault();
-
-        const clipboardData = e.clipboardData || window.clipboardData;
-        const pastedData = clipboardData.getData('Text');
-
-        if (!pastedData) return;
-
-        // 解析貼上的資料
-        const rows = pastedData.split('\n').filter(row => row.trim() !== '');
-        if (rows.length === 0) return;
-
-        const confirm = window.confirm(`偵測到貼上 ${rows.length} 列資料，是否要匯入到班表中？`);
-        if (!confirm) return;
-
-        updateStatus('匯入資料中...');
-
-        try {
-            // 解析每一列
-            const parsedRows = rows.map(row => {
-                const cells = row.split('\t');
-                return cells;
-            });
-
-            // 從第一列資料開始處理
-            for (let i = 0; i < parsedRows.length && i < scheduleData.length; i++) {
-                const cells = parsedRows[i];
-                const rowData = scheduleData[i];
-
-                // cells[0] 是日期，從 cells[1] 開始是服事項目
-                for (let j = 1; j < cells.length && j - 1 < serviceItems.length; j++) {
-                    const serviceName = serviceItems[j - 1];
-                    const cellValue = cells[j].trim();
-
-                    if (cellValue === '') {
-                        rowData[serviceName] = [];
-                    } else {
-                        // 解析人名：支援 "/" 分隔
-                        const names = cellValue.split('/').map(n => n.trim()).filter(n => n !== '');
-                        rowData[serviceName] = names;
-
-                        // 加入到所有人名集合
-                        names.forEach(name => allPersonNames.add(name));
-                    }
-                }
-
-                // 儲存
-                const data = { ...rowData };
-                delete data.date;
-                await saveSchedule(rowData.date, data);
-            }
-
-            renderTable();
-            updateStatus('資料匯入完成');
-            alert('資料匯入成功！');
-
-        } catch (error) {
-            console.error('匯入資料失敗:', error);
-            alert('匯入資料失敗');
-            updateStatus('就緒');
+    // 點擊其他地方時關閉右鍵選單
+    document.addEventListener('click', (e) => {
+        if (!contextMenu.contains(e.target)) {
+            contextMenu.classList.add('hidden');
         }
     });
+
+    // 按 ESC 關閉右鍵選單
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            contextMenu.classList.add('hidden');
+        }
+    });
+
+    // 右鍵選單的貼上按鈕
+    contextMenuPaste.addEventListener('click', async () => {
+        contextMenu.classList.add('hidden');
+
+        if (!pasteTargetCell) return;
+
+        try {
+            // 讀取剪貼簿
+            const clipboardText = await navigator.clipboard.readText();
+            if (!clipboardText) {
+                alert('剪貼簿中沒有資料');
+                return;
+            }
+
+            await pasteDataFromCell(pasteTargetCell.dateIndex, pasteTargetCell.serviceIndex, clipboardText);
+        } catch (error) {
+            console.error('讀取剪貼簿失敗:', error);
+            alert('無法讀取剪貼簿，請確認已授予剪貼簿權限');
+        }
+    });
+}
+
+// 設定右鍵選單事件（在 renderTableBody 中呼叫）
+function setupContextMenu() {
+    const contextMenu = document.getElementById('contextMenu');
+
+    document.querySelectorAll('.service-cell').forEach(cell => {
+        cell.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+
+            const date = cell.dataset.date;
+            const service = cell.dataset.service;
+
+            // 找到日期和服事項目的索引
+            const dateIndex = scheduleData.findIndex(r => r.date === date);
+            const serviceIndex = serviceItems.indexOf(service);
+
+            if (dateIndex === -1 || serviceIndex === -1) return;
+
+            pasteTargetCell = { dateIndex, serviceIndex, date, service };
+
+            // 顯示右鍵選單
+            contextMenu.style.left = `${e.clientX}px`;
+            contextMenu.style.top = `${e.clientY}px`;
+            contextMenu.classList.remove('hidden');
+        });
+    });
+}
+
+// 從指定格子開始貼上資料
+async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) {
+    const rows = pastedData.split('\n').filter(row => row.trim() !== '');
+    if (rows.length === 0) return;
+
+    const confirm = window.confirm(`偵測到貼上 ${rows.length} 列資料，是否要從此格開始匯入？`);
+    if (!confirm) return;
+
+    updateStatus('匯入資料中...');
+
+    try {
+        // 解析每一列
+        const parsedRows = rows.map(row => {
+            const cells = row.split('\t');
+            return cells;
+        });
+
+        // 從指定位置開始處理
+        for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
+            const cells = parsedRows[i];
+            const rowData = scheduleData[startDateIndex + i];
+
+            // 從指定的服事項目欄位開始
+            for (let j = 0; j < cells.length && (startServiceIndex + j) < serviceItems.length; j++) {
+                const serviceName = serviceItems[startServiceIndex + j];
+                const cellValue = cells[j].trim();
+
+                if (cellValue === '') {
+                    rowData[serviceName] = [];
+                } else {
+                    // 解析人名：支援 "/" 分隔
+                    const names = cellValue.split('/').map(n => n.trim()).filter(n => n !== '');
+                    rowData[serviceName] = names;
+
+                    // 加入到所有人名集合
+                    names.forEach(name => allPersonNames.add(name));
+                }
+            }
+
+            // 儲存
+            const data = { ...rowData };
+            delete data.date;
+            await saveSchedule(rowData.date, data);
+        }
+
+        // 重建顏色映射
+        rebuildPersonColorMap();
+
+        renderTable();
+        updateStatus('資料匯入完成');
+        alert('資料匯入成功！');
+
+    } catch (error) {
+        console.error('匯入資料失敗:', error);
+        alert('匯入資料失敗');
+        updateStatus('就緒');
+    }
 }
 
 // ===========================
