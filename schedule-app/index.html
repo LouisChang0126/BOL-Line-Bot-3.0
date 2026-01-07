@@ -87,9 +87,12 @@
           <input type="text" class="form-control" id="serviceNameInput" placeholder="請輸入服事項目名稱">
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
-        <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button class="btn btn-danger" id="deleteServiceBtn">移除服事項目</button>
+        <div style="display: flex; gap: 16px;">
+          <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
+          <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
+        </div>
       </div>
     </div>
   </div>

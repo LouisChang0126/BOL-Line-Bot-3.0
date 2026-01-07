@@ -105,7 +105,7 @@ async function loadData() {
             serviceItems = metadataDoc.data().serviceItems || [];
         } else {
             // 如果沒有 metadata，使用預設值
-            serviceItems = ['主領', '音控', '字幕', '招待'];
+            serviceItems = ['主領', '副主領', '助唱', '司琴', '鼓手', '貝斯', '吉他', '彩排', '提醒人', '音控', '字幕', '司會', '奉獻', '招待', '先知性'];
             await saveMetadata();
         }
 
@@ -237,12 +237,7 @@ function renderTableHead() {
                     draggable="true" 
                     data-service="${item}" 
                     data-index="${index}">
-      <div style="display: flex; align-items: center; justify-content: space-between;">
-        <span class="service-header-text service-header-editable" data-service="${item}">${item}</span>
-        <div class="header-actions">
-          <button class="header-btn delete delete-service-btn" data-service="${item}" title="刪除">❌</button>
-        </div>
-      </div>
+      <span class="service-header-text service-header-editable" data-service="${item}">${item}</span>
     </th>`;
     });
 
@@ -255,15 +250,6 @@ function renderTableHead() {
             e.stopPropagation();
             const serviceName = e.target.dataset.service;
             openEditServiceModal(serviceName);
-        });
-    });
-
-    // 設定服事項目刪除按鈕事件
-    document.querySelectorAll('.delete-service-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const serviceName = e.target.dataset.service;
-            deleteServiceItem(serviceName);
         });
     });
 
@@ -674,6 +660,13 @@ document.getElementById('saveServiceBtn').addEventListener('click', async () => 
     }
 });
 
+// 刪除服事項目按鈕事件
+document.getElementById('deleteServiceBtn').addEventListener('click', () => {
+    if (currentEditingServiceName) {
+        deleteServiceItem(currentEditingServiceName);
+    }
+});
+
 async function deleteServiceItem(serviceName) {
     const confirm = window.confirm(`確定要刪除服事項目「${serviceName}」嗎？這將刪除所有相關資料。`);
     if (!confirm) return;
@@ -701,6 +694,7 @@ async function deleteServiceItem(serviceName) {
         await Promise.all(updates);
 
         renderTable();
+        closeModal('editServiceModal');
         updateStatus('服事項目已刪除');
 
     } catch (error) {
