@@ -9,6 +9,20 @@ let currentEditingDateIndex = null; // 目前編輯的日期索引
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
 
 // ===========================
+// 編輯記錄系統
+// ===========================
+let originalChart = null; // 進入頁面時的班表快照
+let hasEdited = false; // 是否有編輯過
+let editDifference = {}; // 記錄編輯差異
+
+// ===========================
+// 撤銷/重做系統 (最多 20 步)
+// ===========================
+const MAX_HISTORY_SIZE = 20;
+let historyStack = []; // 歷史記錄堆疊
+let historyIndex = -1; // 目前在歷史中的位置
+
+// ===========================
 // 30 種固定顏色供人名積木使用
 // ===========================
 const PERSON_CHIP_COLORS = [
@@ -59,11 +73,23 @@ async function initApp() {
     // 載入資料
     await loadData();
 
+    // 保存原始班表快照（用於編輯記錄）
+    saveOriginalChartSnapshot();
+
+    // 初始化歷史記錄
+    initHistory();
+
     // 設定事件監聽器
     setupEventListeners();
 
     // 設定貼上事件
     setupPasteHandler();
+
+    // 設定撤銷/重做事件
+    setupUndoRedoHandler();
+
+    // 設定頁面離開前儲存編輯記錄
+    setupBeforeUnloadHandler();
 
     updateStatus('就緒');
     console.log('應用程式初始化完成');
@@ -854,6 +880,10 @@ async function addPersonToCell(date, service, person) {
     delete data.date;
     await saveSchedule(date, data);
 
+    // 記錄歷史和差異
+    pushHistory();
+    recordDifference(date, service, row[service]);
+
     // 更新顯示（只在編輯模態框開啟時才更新）
     if (currentEditingCell) {
         renderCurrentPersonChips();
@@ -874,6 +904,10 @@ async function removePerson(date, service, person) {
         const data = { ...row };
         delete data.date;
         await saveSchedule(date, data);
+
+        // 記錄歷史和差異
+        pushHistory();
+        recordDifference(date, service, row[service]);
 
         // 更新顯示
         renderTable();
@@ -1184,4 +1218,213 @@ function setupEventListeners() {
             }
         });
     });
+}
+
+// ===========================
+// 編輯記錄功能
+// ===========================
+function saveOriginalChartSnapshot() {
+    // 深拷貝當前班表資料
+    originalChart = {
+        _metadata: { serviceItems: [...serviceItems] }
+    };
+
+    scheduleData.forEach(row => {
+        const rowData = {};
+        serviceItems.forEach(service => {
+            rowData[service] = row[service] ? [...row[service]] : [];
+        });
+        originalChart[row.date] = rowData;
+    });
+
+    console.log('已保存原始班表快照');
+}
+
+// 記錄編輯差異
+function recordDifference(date, service, newValue) {
+    if (!editDifference[date]) {
+        editDifference[date] = {};
+    }
+    editDifference[date][service] = Array.isArray(newValue) ? [...newValue] : newValue;
+    hasEdited = true;
+
+    // 每次編輯後嘗試儲存記錄
+    saveEditLog();
+}
+
+// 儲存編輯記錄到 Firestore
+async function saveEditLog() {
+    if (!hasEdited || Object.keys(editDifference).length === 0) {
+        return;
+    }
+
+    const sessionTime = window.SESSION_START_TIME || formatCurrentTime();
+    const lastEditedTime = formatCurrentTime();
+
+    try {
+        const { doc, setDoc } = window.firestore;
+        const logRef = doc(window.db, 'edit-chart-log', sessionTime);
+
+        await setDoc(logRef, {
+            'serve-name': window.COLLECTION_NAME,
+            'origin-chart': originalChart,
+            'difference': editDifference,
+            'last-edited-time': lastEditedTime
+        });
+
+        console.log('編輯記錄已儲存');
+    } catch (error) {
+        console.error('儲存編輯記錄失敗:', error);
+    }
+}
+
+function formatCurrentTime() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const h = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    return `${y}.${m}.${d}.${h}.${min}`;
+}
+
+// 頁面離開前儲存
+function setupBeforeUnloadHandler() {
+    window.addEventListener('beforeunload', () => {
+        if (hasEdited) {
+            saveEditLog();
+        }
+    });
+}
+
+// ===========================
+// 撤銷/重做功能
+// ===========================
+function initHistory() {
+    // 保存初始狀態
+    const initialState = JSON.stringify({
+        scheduleData: scheduleData.map(row => ({ ...row })),
+        serviceItems: [...serviceItems]
+    });
+    historyStack = [initialState];
+    historyIndex = 0;
+    updateUndoRedoButtons();
+}
+
+// 推入新的歷史記錄
+function pushHistory() {
+    // 移除當前位置之後的所有記錄
+    historyStack = historyStack.slice(0, historyIndex + 1);
+
+    // 推入新狀態
+    const newState = JSON.stringify({
+        scheduleData: scheduleData.map(row => {
+            const rowCopy = { ...row };
+            serviceItems.forEach(s => {
+                if (Array.isArray(rowCopy[s])) {
+                    rowCopy[s] = [...rowCopy[s]];
+                }
+            });
+            return rowCopy;
+        }),
+        serviceItems: [...serviceItems]
+    });
+    historyStack.push(newState);
+
+    // 限制最大歷史記錄數
+    if (historyStack.length > MAX_HISTORY_SIZE) {
+        historyStack.shift();
+    } else {
+        historyIndex++;
+    }
+
+    updateUndoRedoButtons();
+}
+
+// 撤銷
+function undo() {
+    if (historyIndex <= 0) return;
+
+    historyIndex--;
+    restoreFromHistory();
+    updateStatus('已撤銷');
+}
+
+// 重做
+function redo() {
+    if (historyIndex >= historyStack.length - 1) return;
+
+    historyIndex++;
+    restoreFromHistory();
+    updateStatus('已重做');
+}
+
+// 從歷史記錄恢復
+async function restoreFromHistory() {
+    const state = JSON.parse(historyStack[historyIndex]);
+
+    // 恢復資料
+    scheduleData = state.scheduleData;
+    serviceItems = state.serviceItems;
+
+    // 同步到 Firestore
+    try {
+        const updates = [];
+        scheduleData.forEach(row => {
+            const data = { ...row };
+            delete data.date;
+            updates.push(saveSchedule(row.date, data));
+        });
+        updates.push(saveMetadata());
+        await Promise.all(updates);
+    } catch (error) {
+        console.error('同步到 Firestore 失敗:', error);
+    }
+
+    // 重新渲染
+    renderTable();
+    updateUndoRedoButtons();
+}
+
+// 更新撤銷/重做按鈕狀態
+function updateUndoRedoButtons() {
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+
+    if (undoBtn) {
+        undoBtn.disabled = historyIndex <= 0;
+    }
+    if (redoBtn) {
+        redoBtn.disabled = historyIndex >= historyStack.length - 1;
+    }
+}
+
+// 設定撤銷/重做事件
+function setupUndoRedoHandler() {
+    // 鍵盤事件
+    document.addEventListener('keydown', (e) => {
+        // 如果焦點在輸入框上，不處理
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            return;
+        }
+
+        if (e.ctrlKey && e.key === 'z') {
+            e.preventDefault();
+            undo();
+        } else if (e.ctrlKey && e.key === 'y') {
+            e.preventDefault();
+            redo();
+        }
+    });
+
+    // 按鈕事件
+    const undoBtn = document.getElementById('undoBtn');
+    const redoBtn = document.getElementById('redoBtn');
+
+    if (undoBtn) {
+        undoBtn.addEventListener('click', undo);
+    }
+    if (redoBtn) {
+        redoBtn.addEventListener('click', redo);
+    }
 }

@@ -255,7 +255,7 @@ body {
 }
 
 .schedule-table th.service-header {
-  min-width: 90px;
+  min-width: 50px;
   cursor: grab;
   transition: all var(--transition-fast);
 }
@@ -378,7 +378,7 @@ body {
 .person-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
 }
 
 .person-chip {

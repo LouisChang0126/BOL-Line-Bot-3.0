@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教會服事班表 - 查看</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        /* 唯讀樣式 */
+        .service-cell {
+            cursor: default !important;
+        }
+
+        .service-cell:hover {
+            background: white !important;
+        }
+
+        .person-chip {
+            cursor: default;
+        }
+
+        .schedule-table th.service-header {
+            cursor: default;
+        }
+
+        .header-section {
+            justify-content: center;
+        }
+
+        .control-actions {
+            display: none;
+        }
+
+        .readonly-notice {
+            background: #f0f4f8;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 20px;
+            color: #64748b;
+            font-size: 14px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-container">
+        <div class="header-section">
+            <div class="app-title">
+                <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
+                <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
+            </div>
+            <div class="status-indicator">
+                <div class="text-muted" id="statusText">載入中...</div>
+            </div>
+        </div>
+
+        <div class="readonly-notice">
+            📖 此頁面為唯讀模式，僅供查看
+        </div>
+
+        <div class="table-container">
+            <div class="table-scroll">
+                <table class="schedule-table" id="scheduleTable">
+                    <thead id="tableHead"></thead>
+                    <tbody id="tableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, doc, getDocs, getDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig, COLLECTION_NAME } from '../firebase-config.js';
+
+        // 從 URL 參數取得 collection 名稱
+        const urlParams = new URLSearchParams(window.location.search);
+        const collectionName = urlParams.get('collection') || COLLECTION_NAME;
+
+        // Collection 名稱對照表
+        const COLLECTION_DISPLAY_NAMES = {
+            'youth-serve': '青年崇拜班表',
+            'kids-serve': '兒童主日班表',
+            'adult-serve': '成人崇拜班表'
+        };
+
+        // 更新頁面標題
+        const displayName = COLLECTION_DISPLAY_NAMES[collectionName] || collectionName;
+        document.getElementById('collectionTitle').textContent = displayName;
+        document.title = `${displayName} - 查看`;
+
+        // 顏色陣列
+        const PERSON_CHIP_COLORS = [
+            '#E74C3C', '#3498DB', '#2ECC71', '#9B59B6', '#F39C12',
+            '#1ABC9C', '#E91E63', '#00BCD4', '#8BC34A', '#FF5722',
+            '#673AB7', '#009688', '#CDDC39', '#795548', '#607D8B',
+            '#FF9800', '#4CAF50', '#2196F3', '#F44336', '#9C27B0',
+            '#00ACC1', '#7CB342', '#C0392B', '#D35400', '#16A085',
+            '#8E44AD', '#27AE60', '#2980B9', '#F1C40F', '#34495E'
+        ];
+
+        let scheduleData = [];
+        let serviceItems = [];
+        let personColorMap = new Map();
+        let allPersonNames = new Set();
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                const db = getFirestore(app);
+
+                // 載入資料
+                await loadData(db);
+
+                // 建立顏色映射
+                buildColorMap();
+
+                // 渲染表格
+                renderTable();
+
+                document.getElementById('statusText').textContent = '就緒';
+            } catch (error) {
+                console.error('初始化失敗:', error);
+                document.getElementById('statusText').textContent = '載入失敗';
+            }
+        }
+
+        async function loadData(db) {
+            document.getElementById('statusText').textContent = '載入資料中...';
+
+            // 載入 metadata
+            const metadataRef = doc(db, collectionName, '_metadata');
+            const metadataDoc = await getDoc(metadataRef);
+            if (metadataDoc.exists()) {
+                serviceItems = metadataDoc.data().serviceItems || [];
+            }
+
+            // 載入班表資料
+            const snapshot = await getDocs(collection(db, collectionName));
+            scheduleData = [];
+
+            snapshot.forEach(doc => {
+                if (doc.id !== '_metadata') {
+                    const data = doc.data();
+                    scheduleData.push({ date: doc.id, ...data });
+
+                    // 收集人名
+                    serviceItems.forEach(service => {
+                        if (data[service]) {
+                            data[service].forEach(name => allPersonNames.add(name));
+                        }
+                    });
+                }
+            });
+
+            // 按日期排序
+            scheduleData.sort((a, b) => a.date.localeCompare(b.date));
+        }
+
+        function buildColorMap() {
+            const sortedNames = Array.from(allPersonNames).sort();
+            sortedNames.forEach((name, index) => {
+                personColorMap.set(name, PERSON_CHIP_COLORS[index % PERSON_CHIP_COLORS.length]);
+            });
+        }
+
+        function getPersonColor(name) {
+            return personColorMap.get(name) || '#888888';
+        }
+
+        function renderTable() {
+            renderTableHead();
+            renderTableBody();
+        }
+
+        function renderTableHead() {
+            const thead = document.getElementById('tableHead');
+            let html = '<tr><th class="date-header">日期</th>';
+            serviceItems.forEach(item => {
+                html += `<th class="service-header">${item}</th>`;
+            });
+            html += '</tr>';
+            thead.innerHTML = html;
+        }
+
+        function renderTableBody() {
+            const tbody = document.getElementById('tableBody');
+            let html = '';
+
+            scheduleData.forEach(row => {
+                html += '<tr>';
+                html += `<td><div class="date-cell">${row.date}</div></td>`;
+
+                serviceItems.forEach(item => {
+                    const persons = row[item] || [];
+                    html += '<td class="service-cell">';
+                    if (persons.length > 0) {
+                        html += '<div class="person-chips">';
+                        persons.forEach(person => {
+                            const color = getPersonColor(person);
+                            html += `<div class="person-chip" style="background: ${color};">${person}</div>`;
+                        });
+                        html += '</div>';
+                    }
+                    html += '</td>';
+                });
+
+                html += '</tr>';
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>教會服事班表系統</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="app-container">
+    <!-- 頂部控制區 (合併標題與控制面板) -->
+    <div class="header-section">
+      <div class="app-title">
+        <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
+        <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
+      </div>
+
+      <div class="control-actions">
+        <button class="btn btn-secondary" id="undoBtn" title="上一步 (Ctrl+Z)" disabled>
+          ⬅️ 上一步
+        </button>
+        <button class="btn btn-secondary" id="redoBtn" title="下一步 (Ctrl+Y)" disabled>
+          ➡️ 下一步
+        </button>
+        <button class="btn btn-primary" id="addRowBtn">
+          ➕ 新增一週
+        </button>
+        <button class="btn btn-danger" id="deleteLastRowBtn">
+          ➖ 刪除最後一週
+        </button>
+        <button class="btn btn-secondary" id="addServiceBtn">
+          ✨ 新增服事項目
+        </button>
+      </div>
+
+      <div class="status-indicator">
+        <div class="text-muted" id="statusText">載入中...</div>
+      </div>
+    </div>
+
+    <!-- 表格容器 -->
+    <div class="table-container">
+      <div class="table-scroll">
+        <table class="schedule-table" id="scheduleTable">
+          <thead id="tableHead">
+            <!-- 動態生成 -->
+          </thead>
+          <tbody id="tableBody">
+            <!-- 動態生成 -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 右鍵選單 -->
+    <div class="context-menu hidden" id="contextMenu">
+      <div class="context-menu-item" id="contextMenuPaste">📋 從此格貼上</div>
+    </div>
+  </div>
+
+  <!-- 編輯日期對話框 -->
+  <div class="modal-overlay hidden" id="editDateModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>編輯日期</h2>
+        <button class="modal-close" onclick="closeModal('editDateModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>請輸入新的日期（格式：yyyy.mm.dd）</label>
+          <input type="text" class="form-control" id="dateInput" placeholder="2026.01.04">
+          <p class="text-muted mt-sm">注意：修改此日期後，其他日期會自動調整（保持7天間隔）</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('editDateModal')">取消</button>
+        <button class="btn btn-primary" id="saveDateBtn">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編輯服事項目對話框 -->
+  <div class="modal-overlay hidden" id="editServiceModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>編輯服事項目</h2>
+        <button class="modal-close" onclick="closeModal('editServiceModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>服事項目名稱</label>
+          <input type="text" class="form-control" id="serviceNameInput" placeholder="請輸入服事項目名稱">
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button class="btn btn-danger" id="deleteServiceBtn">移除服事項目</button>
+        <div style="display: flex; gap: 16px;">
+          <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
+          <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編輯人員對話框 -->
+  <div class="modal-overlay hidden" id="editPersonModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h2>編輯服事人員</h2>
+          <div class="modal-subtitle" id="editPersonModalSubtitle">
+            <!-- 動態顯示日期和服事項目 -->
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('editPersonModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>選擇現有人員或輸入新人員</label>
+          <div class="person-select-container" id="personSelectContainer">
+            <!-- 動態生成的現有人員積木 -->
+            <div class="person-chips-select" id="personDropdown">
+              <!-- 動態生成 -->
+            </div>
+            <!-- 輸入新人員的空白積木 -->
+            <div class="person-chip-input-wrapper">
+              <input type="text" class="person-chip-input" id="newPersonInput" placeholder="輸入新姓名...">
+              <button class="person-chip-input-btn" id="addPersonChipBtn">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>目前服事人員</label>
+          <div class="person-chips" id="currentPersonChips">
+            <!-- 動態生成 -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('editPersonModal')">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    console.log('🚀 開始初始化 Firebase...');
+
+    // 引入 Firebase
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+    import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+    // 引入配置
+    import { firebaseConfig, COLLECTION_NAME } from './firebase-config.js';
+
+    // 從 URL 參數取得 collection 名稱
+    const urlParams = new URLSearchParams(window.location.search);
+    const collectionName = urlParams.get('collection') || COLLECTION_NAME;
+
+    // Collection 名稱對照表
+    const COLLECTION_DISPLAY_NAMES = {
+      'youth-serve': '青年崇拜班表',
+      'kids-serve': '兒童主日班表',
+      'adult-serve': '成人崇拜班表'
+    };
+
+    // 更新頁面標題
+    const displayName = COLLECTION_DISPLAY_NAMES[collectionName] || collectionName;
+    document.getElementById('collectionTitle').textContent = displayName;
+    document.title = `${displayName} - 教會服事班表系統`;
+
+    // 記錄進入頁面的時間
+    const sessionStartTime = new Date();
+    const formatSessionTime = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const h = String(date.getHours()).padStart(2, '0');
+      const min = String(date.getMinutes()).padStart(2, '0');
+      return `${y}.${m}.${d}.${h}.${min}`;
+    };
+    window.SESSION_START_TIME = formatSessionTime(sessionStartTime);
+
+    console.log('📝 Firebase 配置:', {
+      projectId: firebaseConfig.projectId,
+      authDomain: firebaseConfig.authDomain,
+      collectionName: collectionName
+    });
+
+    // 初始化 Firebase
+    try {
+      const app = initializeApp(firebaseConfig);
+      console.log('✅ Firebase App 初始化成功');
+
+      const db = getFirestore(app);
+      console.log('✅ Firestore 連接成功');
+
+      // 將全域變數掛載到 window
+      window.db = db;
+      window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy };
+      window.COLLECTION_NAME = collectionName;
+
+      console.log('✅ Firebase 全域變數已設定');
+
+      // 載入主要應用程式（單一檔案 app.js）
+      import('./app.js').then(() => {
+        console.log('✅ app.js 已載入');
+      }).catch(error => {
+        console.error('❌ 載入應用程式失敗:', error);
+        document.getElementById('statusText').textContent = '載入失敗，請檢查 Firebase 配置';
+      });
+    } catch (error) {
+      console.error('❌ Firebase 初始化失敗:', error);
+      console.error('錯誤詳情:', {
+        name: error.name,
+        message: error.message,
+        code: error.code
+      });
+      document.getElementById('statusText').textContent = 'Firebase 初始化失敗';
+      alert(`Firebase 初始化失敗：${error.message}\n\n請檢查 firebase-config.js 中的配置是否正確。`);
+    }
+  </script>
+</body>
+
+</html>
