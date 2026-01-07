@@ -882,7 +882,7 @@ async function addPersonToCell(date, service, person) {
 
     // 記錄歷史和差異
     pushHistory();
-    recordDifference(date, service, row[service]);
+    updateEditDifference();
 
     // 更新顯示（只在編輯模態框開啟時才更新）
     if (currentEditingCell) {
@@ -907,7 +907,7 @@ async function removePerson(date, service, person) {
 
         // 記錄歷史和差異
         pushHistory();
-        recordDifference(date, service, row[service]);
+        updateEditDifference();
 
         // 更新顯示
         renderTable();
@@ -1121,6 +1121,10 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
         // 重建顏色映射
         rebuildPersonColorMap();
 
+        // 記錄歷史和差異
+        pushHistory();
+        updateEditDifference();
+
         renderTable();
         updateStatus('資料匯入完成');
 
@@ -1240,16 +1244,39 @@ function saveOriginalChartSnapshot() {
     console.log('已保存原始班表快照');
 }
 
-// 記錄編輯差異
-function recordDifference(date, service, newValue) {
-    if (!editDifference[date]) {
-        editDifference[date] = {};
-    }
-    editDifference[date][service] = Array.isArray(newValue) ? [...newValue] : newValue;
-    hasEdited = true;
+// 計算並更新編輯差異（比對原始值和當前值）
+function updateEditDifference() {
+    editDifference = {};
+    let hasDiff = false;
 
-    // 每次編輯後嘗試儲存記錄
-    saveEditLog();
+    scheduleData.forEach(row => {
+        const date = row.date;
+        const originalRow = originalChart[date];
+        if (!originalRow) return;
+
+        serviceItems.forEach(service => {
+            const originalValue = originalRow[service] || [];
+            const currentValue = row[service] || [];
+
+            // 比對陣列是否不同
+            const isDifferent = JSON.stringify(originalValue) !== JSON.stringify(currentValue);
+
+            if (isDifferent) {
+                if (!editDifference[date]) {
+                    editDifference[date] = {};
+                }
+                editDifference[date][service] = [...currentValue];
+                hasDiff = true;
+            }
+        });
+    });
+
+    hasEdited = hasDiff;
+
+    // 儲存編輯記錄
+    if (hasEdited) {
+        saveEditLog();
+    }
 }
 
 // 儲存編輯記錄到 Firestore
@@ -1380,6 +1407,9 @@ async function restoreFromHistory() {
     } catch (error) {
         console.error('同步到 Firestore 失敗:', error);
     }
+
+    // 更新差異記錄
+    updateEditDifference();
 
     // 重新渲染
     renderTable();

@@ -203,6 +203,7 @@
                     const serveName = log['serve-name'];
                     const displayName = SERVE_DISPLAY_NAMES[serveName] || serveName;
                     const difference = log['difference'] || {};
+                    const originChart = log['origin-chart'] || {};
                     const lastEdited = log['last-edited-time'] || log.id;
 
                     html += `
@@ -220,7 +221,7 @@
               </div>
               <div class="diff-section" id="diff-${log.id}" style="display: none;">
                 <div class="diff-title">變更內容</div>
-                ${renderDifference(difference)}
+                ${renderDifference(difference, originChart)}
               </div>
             </div>
           `;
@@ -233,20 +234,30 @@
             }
         }
 
-        function renderDifference(difference) {
+        function renderDifference(difference, originChart) {
             if (Object.keys(difference).length === 0) {
                 return '<div style="color: #94a3b8;">無變更</div>';
             }
 
             let html = '';
             Object.entries(difference).forEach(([date, services]) => {
-                Object.entries(services).forEach(([service, value]) => {
-                    const displayValue = Array.isArray(value) ? value.join(', ') : value;
+                Object.entries(services).forEach(([service, newValue]) => {
+                    // 取得原始值
+                    const originalRow = originChart && originChart[date];
+                    const originalValue = originalRow && originalRow[service];
+
+                    const originalDisplay = Array.isArray(originalValue) && originalValue.length > 0
+                        ? originalValue.join(', ')
+                        : '(空)';
+                    const newDisplay = Array.isArray(newValue) && newValue.length > 0
+                        ? newValue.join(', ')
+                        : '(空)';
+
                     html += `
             <div class="diff-item">
               <span class="diff-date">${date}</span>
               <span class="diff-service">${service}</span>
-              <span class="diff-value">→ ${displayValue || '(空)'}</span>
+              <span class="diff-value">${originalDisplay} → ${newDisplay}</span>
             </div>
           `;
                 });
