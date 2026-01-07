@@ -1040,7 +1040,14 @@ function setupContextMenu() {
 
 // 從指定格子開始貼上資料
 async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) {
-    const rows = pastedData.split('\n').filter(row => row.trim() !== '');
+    // 分割成列，保留中間的空白行，只移除最後的空行
+    let rows = pastedData.split('\n');
+
+    // 移除結尾的空行
+    while (rows.length > 0 && rows[rows.length - 1].trim() === '') {
+        rows.pop();
+    }
+
     if (rows.length === 0) return;
 
     const confirm = window.confirm(`偵測到貼上 ${rows.length} 列資料，是否要從此格開始匯入？`);
@@ -1049,7 +1056,7 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
     updateStatus('匯入資料中...');
 
     try {
-        // 解析每一列
+        // 解析每一列（保留空白行）
         const parsedRows = rows.map(row => {
             const cells = row.split('\t');
             return cells;
@@ -1088,7 +1095,6 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
 
         renderTable();
         updateStatus('資料匯入完成');
-        alert('資料匯入成功！');
 
     } catch (error) {
         console.error('匯入資料失敗:', error);
