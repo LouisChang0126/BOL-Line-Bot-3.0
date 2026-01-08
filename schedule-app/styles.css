@@ -952,6 +952,16 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+/* 拖拉插入指示器 */
+.drag-insert-indicator {
+  width: 4px;
+  height: 28px;
+  background: var(--primary-color);
+  border-radius: 2px;
+  margin: 0 -2px;
+  flex-shrink: 0;
+}
+
 .add-group-section {
   margin-bottom: 16px;
 }
@@ -994,23 +1004,27 @@ body {
 .group-filter {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  padding: 12px 16px;
+  align-items: center;
+  gap: 20px;
+  padding: 8px 16px;
   background: var(--bg-secondary);
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-left: auto;
 }
 
 .group-filter-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 500;
   color: var(--text-primary);
+  cursor: pointer;
 }
 
 .group-filter-item input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   cursor: pointer;
+  accent-color: var(--primary-color);
 }

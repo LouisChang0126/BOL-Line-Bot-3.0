@@ -1584,31 +1584,83 @@ window.handleDragStart = function (event) {
     event.target.classList.add('dragging');
     event.dataTransfer.setData('text/plain', event.target.dataset.service);
     event.dataTransfer.effectAllowed = 'move';
+    // 記錄拖拉中的元素
+    window.draggingElement = event.target;
 }
 
 // 拖拉結束
 window.handleDragEnd = function (event) {
     event.target.classList.remove('dragging');
+    window.draggingElement = null;
+    // 移除所有插入指示器
+    document.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
 }
 
-// 拖拉經過
+// 拖拉經過容器
 window.handleDragOver = function (event) {
     event.preventDefault();
-    event.currentTarget.classList.add('drag-over');
+    const container = event.currentTarget;
+    container.classList.add('drag-over');
+
+    // 移除此容器中的舊指示器
+    container.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
+
+    // 計算插入位置並顯示指示器
+    const draggables = Array.from(container.querySelectorAll('.draggable-service:not(.dragging)'));
+    const dropY = event.clientY;
+    const dropX = event.clientX;
+
+    let insertBefore = null;
+    let minDistance = Infinity;
+
+    for (const draggable of draggables) {
+        const rect = draggable.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const distance = Math.abs(dropX - centerX) + Math.abs(dropY - centerY) * 0.5;
+
+        // 找到最近且在滑鼠右側的元素
+        if (dropX < centerX && distance < minDistance) {
+            minDistance = distance;
+            insertBefore = draggable;
+        }
+    }
+
+    // 創建插入指示器
+    const indicator = document.createElement('div');
+    indicator.className = 'drag-insert-indicator';
+
+    if (insertBefore) {
+        container.insertBefore(indicator, insertBefore);
+    } else {
+        container.appendChild(indicator);
+    }
+
+    // 記錄插入位置
+    container.insertBeforeElement = insertBefore;
 }
 
 // 拖拉離開
 window.handleDragLeave = function (event) {
     event.currentTarget.classList.remove('drag-over');
+    event.currentTarget.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
 }
 
 // 放下處理
 window.handleDrop = function (event, targetGroupId) {
     event.preventDefault();
-    event.currentTarget.classList.remove('drag-over');
+    const container = event.currentTarget;
+    container.classList.remove('drag-over');
+
+    // 移除指示器
+    container.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
 
     const serviceName = event.dataTransfer.getData('text/plain');
     if (!serviceName) return;
+
+    // 取得插入位置
+    const insertBeforeElement = container.insertBeforeElement;
+    const insertBeforeService = insertBeforeElement ? insertBeforeElement.dataset.service : null;
 
     // 從所有群組和隱藏區域移除此項目
     tempDisplayConfig.groups.forEach(group => {
@@ -1622,15 +1674,36 @@ window.handleDrop = function (event, targetGroupId) {
         tempDisplayConfig.hidden.splice(hiddenIndex, 1);
     }
 
-    // 新增到目標群組
+    // 新增到目標群組的指定位置
     if (targetGroupId === 'hidden') {
-        tempDisplayConfig.hidden.push(serviceName);
+        if (insertBeforeService) {
+            const idx = tempDisplayConfig.hidden.indexOf(insertBeforeService);
+            if (idx > -1) {
+                tempDisplayConfig.hidden.splice(idx, 0, serviceName);
+            } else {
+                tempDisplayConfig.hidden.push(serviceName);
+            }
+        } else {
+            tempDisplayConfig.hidden.push(serviceName);
+        }
     } else {
         const targetGroup = tempDisplayConfig.groups.find(g => g.id === targetGroupId);
         if (targetGroup) {
-            targetGroup.items.push(serviceName);
+            if (insertBeforeService) {
+                const idx = targetGroup.items.indexOf(insertBeforeService);
+                if (idx > -1) {
+                    targetGroup.items.splice(idx, 0, serviceName);
+                } else {
+                    targetGroup.items.push(serviceName);
+                }
+            } else {
+                targetGroup.items.push(serviceName);
+            }
         }
     }
+
+    // 清除記錄
+    container.insertBeforeElement = null;
 
     // 重新渲染
     renderDisplayConfigModal();

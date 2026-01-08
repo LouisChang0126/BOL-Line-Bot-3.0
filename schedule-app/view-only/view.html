@@ -40,13 +40,12 @@
             <div class="app-title">
                 <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
             </div>
+            <!-- 分組過濾器 -->
+            <div class="group-filter" id="groupFilter" style="display: none;">
+                <!-- 動態生成 -->
+            </div>
             <div class="status-indicator">
             </div>
-        </div>
-
-        <!-- 分組過濾器 -->
-        <div class="group-filter" id="groupFilter" style="display: none;">
-            <!-- 動態生成 -->
         </div>
 
         <div class="table-container">
@@ -250,17 +249,24 @@
             }
 
             const visible = [];
+            const hidden = displayConfig.hidden || [];
+            let ungroupedItems = [];
 
+            // 先處理非 ungrouped 群組
             displayConfig.groups.forEach(group => {
-                // ungrouped 始終顯示，其他根據勾選狀態
-                if (group.id === 'ungrouped' || visibleGroups[group.id]) {
-                    visible.push(...group.items);
+                if (group.id === 'ungrouped') {
+                    // 儲存 ungrouped 項目稍後處理
+                    ungroupedItems = group.items.filter(item => !hidden.includes(item));
+                } else if (visibleGroups[group.id]) {
+                    // 其他群組根據勾選狀態加入
+                    visible.push(...group.items.filter(item => !hidden.includes(item)));
                 }
             });
 
-            // 結合隱藏的項目過濾
-            const hidden = displayConfig.hidden || [];
-            return visible.filter(item => !hidden.includes(item));
+            // 最後加入未分組的項目
+            visible.push(...ungroupedItems);
+
+            return visible;
         }
 
         // 更新的 renderTableHead
