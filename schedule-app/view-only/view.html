@@ -106,19 +106,25 @@
         ];
 
         let scheduleData = [];
+        let expiredData = []; // 過期資料
         let serviceItems = [];
         let personColorMap = new Map();
         let allPersonNames = new Set();
         let displayConfig = null;
         let visibleGroups = {}; // 記錄各群組的顯示狀態
+        let showExpired = false; // 是否顯示過期資料
+        let db = null; // Firebase db 參考
 
         async function init() {
             try {
                 const app = initializeApp(firebaseConfig);
-                const db = getFirestore(app);
+                db = getFirestore(app);
 
                 // 載入資料
                 await loadData(db);
+
+                // 載入過期資料
+                await loadExpiredData(db);
 
                 // 建立顏色映射
                 buildColorMap();
@@ -164,6 +170,31 @@
             scheduleData.sort((a, b) => a.date.localeCompare(b.date));
         }
 
+        // 載入過期資料（最後5筆）
+        async function loadExpiredData(db) {
+            const expiredCollectionName = `Expired-${collectionName}`;
+            try {
+                const snapshot = await getDocs(collection(db, expiredCollectionName));
+                expiredData = [];
+
+                snapshot.forEach(docRef => {
+                    if (docRef.id !== '_metadata') {
+                        const data = docRef.data();
+                        expiredData.push({ date: docRef.id, ...data });
+                    }
+                });
+
+                // 按日期排序（新到舊），取最後5筆
+                expiredData.sort((a, b) => b.date.localeCompare(a.date));
+                expiredData = expiredData.slice(0, 5);
+                // 反轉回舊到新的順序（顯示時先顯示舊的）
+                expiredData.reverse();
+            } catch (error) {
+                console.log('無過期資料或載入失敗:', error);
+                expiredData = [];
+            }
+        }
+
         function buildColorMap() {
             const sortedNames = Array.from(allPersonNames).sort();
             sortedNames.forEach((name, index) => {
@@ -199,41 +230,59 @@
         // 初始化分組過濾器
         function initGroupFilter() {
             const filterContainer = document.getElementById('groupFilter');
+            let html = '';
+            let hasContent = false;
 
             // 檢查是否有分組設定且有非 ungrouped 的群組
-            if (!displayConfig || !displayConfig.groups) {
-                filterContainer.style.display = 'none';
-                return;
+            if (displayConfig && displayConfig.groups) {
+                const nonUngroupedGroups = displayConfig.groups.filter(g => g.id !== 'ungrouped' && g.items.length > 0);
+
+                if (nonUngroupedGroups.length > 0) {
+                    hasContent = true;
+
+                    // 初始化各群組的顯示狀態
+                    displayConfig.groups.forEach(group => {
+                        visibleGroups[group.id] = group.defaultVisible !== false;
+                    });
+
+                    // 渲染分組 checkbox
+                    nonUngroupedGroups.forEach(group => {
+                        const checked = visibleGroups[group.id] ? 'checked' : '';
+                        html += `
+                            <label class="group-filter-item">
+                                <input type="checkbox" ${checked} data-group-id="${group.id}" onchange="window.handleGroupFilterChange(this)">
+                                ${group.name}
+                            </label>
+                        `;
+                    });
+                }
             }
 
-            const nonUngroupedGroups = displayConfig.groups.filter(g => g.id !== 'ungrouped' && g.items.length > 0);
-
-            if (nonUngroupedGroups.length === 0) {
-                filterContainer.style.display = 'none';
-                return;
-            }
-
-            // 顯示過濾器
-            filterContainer.style.display = 'flex';
-
-            // 初始化各群組的顯示狀態
-            displayConfig.groups.forEach(group => {
-                visibleGroups[group.id] = group.defaultVisible !== false;
-            });
-
-            // 渲染 checkbox
-            let html = '';
-            nonUngroupedGroups.forEach(group => {
-                const checked = visibleGroups[group.id] ? 'checked' : '';
+            // 如果有過期資料，新增「顯示前5週」選項
+            if (expiredData.length > 0) {
+                hasContent = true;
+                const separator = html ? 'style="margin-left: 16px; border-left: 1px solid #ddd; padding-left: 16px;"' : '';
                 html += `
-                    <label class="group-filter-item">
-                        <input type="checkbox" ${checked} data-group-id="${group.id}" onchange="window.handleGroupFilterChange(this)">
-                        ${group.name}
+                    <label class="group-filter-item" ${separator}>
+                        <input type="checkbox" id="showExpiredCheckbox" onchange="window.handleShowExpiredChange(this)">
+                        顯示前5週
                     </label>
                 `;
-            });
-            filterContainer.innerHTML = html;
+            }
+
+            if (hasContent) {
+                filterContainer.style.display = 'flex';
+                filterContainer.innerHTML = html;
+            } else {
+                filterContainer.style.display = 'none';
+            }
         }
+
+        // 處理顯示過期資料變更
+        window.handleShowExpiredChange = function (checkbox) {
+            showExpired = checkbox.checked;
+            renderTable();
+        };
 
         // 處理群組過濾器變更
         window.handleGroupFilterChange = function (checkbox) {
@@ -288,20 +337,28 @@
             const visibleItems = getVisibleServiceItems();
             let html = '';
 
-            scheduleData.forEach(row => {
-                html += '<tr>';
+            // 組合要顯示的資料
+            let dataToShow = [];
+            if (showExpired && expiredData.length > 0) {
+                dataToShow = [...expiredData, ...scheduleData];
+            } else {
+                dataToShow = scheduleData;
+            }
+
+            dataToShow.forEach((row, index) => {
+                // 過期資料添加淡化樣式
+                const isExpired = showExpired && index < expiredData.length;
+                const rowStyle = isExpired ? 'opacity: 0.6; background: #f8fafc;' : '';
+
+                html += `<tr style="${rowStyle}">`;
                 html += `<td><div class="date-cell">${row.date}</div></td>`;
 
                 visibleItems.forEach(item => {
                     const persons = row[item] || [];
                     html += '<td class="service-cell">';
                     if (persons.length > 0) {
-                        html += '<div class="person-chips">';
-                        persons.forEach(person => {
-                            const color = getPersonColor(person);
-                            html += `<div class="person-chip" style="background: ${color};">${person}</div>`;
-                        });
-                        html += '</div>';
+                        // 簡化顯示：文字用 / 連接
+                        html += `<span style="font-size: 16px; font-weight: 550">${persons.join('/')}</span>`;
                     }
                     html += '</td>';
                 });
