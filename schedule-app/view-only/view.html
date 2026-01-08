@@ -31,17 +31,6 @@
         .control-actions {
             display: none;
         }
-
-        .readonly-notice {
-            background: #f0f4f8;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 12px 20px;
-            color: #64748b;
-            font-size: 14px;
-            text-align: center;
-            margin-bottom: 16px;
-        }
     </style>
 </head>
 
@@ -49,16 +38,10 @@
     <div class="app-container">
         <div class="header-section">
             <div class="app-title">
-                <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
                 <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
             </div>
             <div class="status-indicator">
-                <div class="text-muted" id="statusText">載入中...</div>
             </div>
-        </div>
-
-        <div class="readonly-notice">
-            📖 此頁面為唯讀模式，僅供查看
         </div>
 
         <div class="table-container">
@@ -83,7 +66,7 @@
         // Collection 名稱對照表
         const COLLECTION_DISPLAY_NAMES = {
             'youth-serve': '青年崇拜班表',
-            'kids-serve': '兒童主日班表',
+            'kids-serve': '兒童崇拜班表',
             'adult-serve': '成人崇拜班表'
         };
 
@@ -120,17 +103,12 @@
 
                 // 渲染表格
                 renderTable();
-
-                document.getElementById('statusText').textContent = '就緒';
             } catch (error) {
                 console.error('初始化失敗:', error);
-                document.getElementById('statusText').textContent = '載入失敗';
             }
         }
 
         async function loadData(db) {
-            document.getElementById('statusText').textContent = '載入資料中...';
-
             // 載入 metadata
             const metadataRef = doc(db, collectionName, '_metadata');
             const metadataDoc = await getDoc(metadataRef);

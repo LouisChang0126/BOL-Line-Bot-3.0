@@ -4,319 +4,118 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>班表編輯記錄 - 管理員</title>
+    <title>班表編輯記錄 - 選擇</title>
     <link rel="stylesheet" href="../styles.css">
     <style>
-        .admin-page {
-            max-width: 1200px;
-            margin: 0 auto;
+        .selection-page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             padding: 32px;
         }
 
-        .page-header {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            margin-bottom: 32px;
+        .selection-title {
+            text-align: center;
+            margin-bottom: 48px;
         }
 
-        .page-header h1 {
-            font-size: 28px;
+        .selection-title h1 {
+            font-size: 32px;
             font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
         }
 
-        .log-list {
+        .selection-title p {
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+
+        .collection-cards {
             display: flex;
-            flex-direction: column;
-            gap: 16px;
+            flex-wrap: wrap;
+            gap: 24px;
+            justify-content: center;
+            max-width: 900px;
         }
 
-        .log-card {
+        .collection-card {
             background: white;
             border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            box-shadow: var(--shadow-sm);
-        }
-
-        .log-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 12px;
-        }
-
-        .log-header h3 {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .log-meta {
-            font-size: 13px;
-            color: var(--text-secondary);
-        }
-
-        .serve-badge {
-            display: inline-block;
-            padding: 4px 12px;
             border-radius: 16px;
-            font-size: 12px;
-            font-weight: 500;
-            background: var(--primary-light);
-            color: var(--primary-color);
-        }
-
-        .diff-section {
-            margin-top: 16px;
-            padding: 16px;
-            background: #f8fafc;
-            border-radius: 8px;
-        }
-
-        .diff-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--text-primary);
-        }
-
-        .diff-item {
-            display: flex;
-            gap: 12px;
-            padding: 8px 0;
-            border-bottom: 1px solid #e2e8f0;
-        }
-
-        .diff-item:last-child {
-            border-bottom: none;
-        }
-
-        .diff-date {
-            font-weight: 500;
-            min-width: 100px;
-        }
-
-        .diff-service {
-            color: var(--primary-color);
-            min-width: 80px;
-        }
-
-        .diff-value {
-            color: var(--text-primary);
-        }
-
-        .restore-btn {
-            background: #f97316;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-
-        .restore-btn:hover {
-            background: #ea580c;
-        }
-
-        .no-logs {
+            padding: 32px 48px;
             text-align: center;
-            color: var(--text-secondary);
-            padding: 60px 20px;
-        }
-
-        .toggle-btn {
-            background: transparent;
-            border: 1px solid var(--border-color);
-            padding: 6px 12px;
-            border-radius: 6px;
             cursor: pointer;
-            font-size: 13px;
+            transition: all 0.25s ease;
+            box-shadow: var(--shadow-md);
+            min-width: 200px;
+        }
+
+        .collection-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary-color);
+        }
+
+        .collection-card .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .collection-card .name {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .collection-card .description {
+            font-size: 14px;
             color: var(--text-secondary);
         }
 
-        .toggle-btn:hover {
-            background: var(--bg-hover);
+        .admin-badge {
+            background: #fef3c7;
+            color: #d97706;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            display: inline-block;
+            margin-top: 8px;
         }
     </style>
 </head>
 
 <body>
-    <div class="admin-page">
-        <div class="page-header">
+    <div class="selection-page">
+        <div class="selection-title">
             <h1>🔧 班表編輯記錄</h1>
+            <p>請選擇要查看編輯記錄的班表</p>
         </div>
 
-        <div class="log-list" id="logList">
-            <div class="no-logs">載入中...</div>
+        <div class="collection-cards">
+            <div class="collection-card" onclick="window.location.href='difference.html?collection=youth-serve'">
+                <div class="icon">🎸</div>
+                <div class="name">青年崇拜</div>
+                <div class="description">青年主日編輯記錄</div>
+                <div class="admin-badge">管理員</div>
+            </div>
+            <div class="collection-card" onclick="window.location.href='difference.html?collection=kids-serve'">
+                <div class="icon">🧒</div>
+                <div class="name">兒童崇拜</div>
+                <div class="description">兒童崇拜編輯記錄</div>
+                <div class="admin-badge">管理員</div>
+            </div>
+            <div class="collection-card" onclick="window.location.href='difference.html?collection=adult-serve'">
+                <div class="icon">⛪</div>
+                <div class="name">成人崇拜</div>
+                <div class="description">成人主日編輯記錄</div>
+                <div class="admin-badge">管理員</div>
+            </div>
         </div>
     </div>
-
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, doc, getDocs, getDoc, setDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-        import { firebaseConfig } from '../firebase-config.js';
-
-        const SERVE_DISPLAY_NAMES = {
-            'youth-serve': '青年崇拜',
-            'kids-serve': '兒童主日',
-            'adult-serve': '成人崇拜'
-        };
-
-        let db;
-
-        async function init() {
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                await loadLogs();
-            } catch (error) {
-                console.error('初始化失敗:', error);
-                document.getElementById('logList').innerHTML = '<div class="no-logs">載入失敗</div>';
-            }
-        }
-
-        async function loadLogs() {
-            const logList = document.getElementById('logList');
-
-            try {
-                const snapshot = await getDocs(collection(db, 'edit-chart-log'));
-
-                if (snapshot.empty) {
-                    logList.innerHTML = '<div class="no-logs">目前沒有編輯記錄</div>';
-                    return;
-                }
-
-                const logs = [];
-                snapshot.forEach(doc => {
-                    logs.push({ id: doc.id, ...doc.data() });
-                });
-
-                // 按時間倒序排列
-                logs.sort((a, b) => b.id.localeCompare(a.id));
-
-                let html = '';
-                logs.forEach(log => {
-                    const serveName = log['serve-name'];
-                    const displayName = SERVE_DISPLAY_NAMES[serveName] || serveName;
-                    const difference = log['difference'] || {};
-                    const originChart = log['origin-chart'] || {};
-                    const lastEdited = log['last-edited-time'] || log.id;
-
-                    html += `
-            <div class="log-card" data-log-id="${log.id}">
-              <div class="log-header">
-                <div>
-                  <h3>編輯記錄 ${log.id}</h3>
-                  <div class="log-meta">最後編輯：${lastEdited}</div>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <span class="serve-badge">${displayName}</span>
-                  <button class="toggle-btn" onclick="toggleDiff('${log.id}')">展開詳情</button>
-                  <button class="restore-btn" onclick="restoreChart('${log.id}')">還原</button>
-                </div>
-              </div>
-              <div class="diff-section" id="diff-${log.id}" style="display: none;">
-                <div class="diff-title">變更內容</div>
-                ${renderDifference(difference, originChart)}
-              </div>
-            </div>
-          `;
-                });
-
-                logList.innerHTML = html;
-            } catch (error) {
-                console.error('載入記錄失敗:', error);
-                logList.innerHTML = '<div class="no-logs">載入失敗</div>';
-            }
-        }
-
-        function renderDifference(difference, originChart) {
-            if (Object.keys(difference).length === 0) {
-                return '<div style="color: #94a3b8;">無變更</div>';
-            }
-
-            let html = '';
-            Object.entries(difference).forEach(([date, services]) => {
-                Object.entries(services).forEach(([service, newValue]) => {
-                    // 取得原始值
-                    const originalRow = originChart && originChart[date];
-                    const originalValue = originalRow && originalRow[service];
-
-                    const originalDisplay = Array.isArray(originalValue) && originalValue.length > 0
-                        ? originalValue.join(', ')
-                        : '(空)';
-                    const newDisplay = Array.isArray(newValue) && newValue.length > 0
-                        ? newValue.join(', ')
-                        : '(空)';
-
-                    html += `
-            <div class="diff-item">
-              <span class="diff-date">${date}</span>
-              <span class="diff-service">${service}</span>
-              <span class="diff-value">${originalDisplay} → ${newDisplay}</span>
-            </div>
-          `;
-                });
-            });
-            return html;
-        }
-
-        window.toggleDiff = function (logId) {
-            const diffEl = document.getElementById(`diff-${logId}`);
-            const btn = document.querySelector(`[data-log-id="${logId}"] .toggle-btn`);
-            if (diffEl.style.display === 'none') {
-                diffEl.style.display = 'block';
-                btn.textContent = '收起詳情';
-            } else {
-                diffEl.style.display = 'none';
-                btn.textContent = '展開詳情';
-            }
-        };
-
-        window.restoreChart = async function (logId) {
-            if (!confirm('確定要還原到此編輯之前的狀態嗎？這將覆蓋目前的班表資料。')) {
-                return;
-            }
-
-            try {
-                // 取得記錄
-                const logRef = doc(db, 'edit-chart-log', logId);
-                const logDoc = await getDoc(logRef);
-
-                if (!logDoc.exists()) {
-                    alert('找不到此記錄');
-                    return;
-                }
-
-                const logData = logDoc.data();
-                const serveName = logData['serve-name'];
-                const originChart = logData['origin-chart'];
-
-                if (!originChart) {
-                    alert('此記錄沒有原始資料');
-                    return;
-                }
-
-                // 還原資料
-                for (const [dateOrMeta, data] of Object.entries(originChart)) {
-                    const docRef = doc(db, serveName, dateOrMeta);
-                    await setDoc(docRef, data);
-                }
-
-                alert('還原成功！');
-                location.reload();
-            } catch (error) {
-                console.error('還原失敗:', error);
-                alert('還原失敗：' + error.message);
-            }
-        };
-
-        init();
-    </script>
 </body>
 
 </html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班表編輯記錄 - 管理員</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        .admin-page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .log-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .log-card.disabled {
+            opacity: 0.6;
+        }
+
+        .log-card.latest {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px var(--primary-light);
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .log-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .log-meta {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .latest-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            background: #dcfce7;
+            color: #16a34a;
+            margin-left: 8px;
+        }
+
+        .diff-section {
+            margin-top: 16px;
+            padding: 16px;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+
+        .diff-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .diff-item {
+            display: flex;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .diff-item:last-child {
+            border-bottom: none;
+        }
+
+        .diff-date {
+            font-weight: 500;
+            min-width: 100px;
+        }
+
+        .diff-service {
+            color: var(--primary-color);
+            min-width: 80px;
+        }
+
+        .diff-value {
+            color: var(--text-primary);
+        }
+
+        .restore-btn {
+            background: #f97316;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .restore-btn:hover {
+            background: #ea580c;
+        }
+
+        .restore-btn:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+        }
+
+        .no-logs {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 60px 20px;
+        }
+
+        .toggle-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .toggle-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .order-notice {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #92400e;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="admin-page">
+        <div class="page-header">
+            <a href="index.html" class="btn btn-secondary" style="padding: 6px 12px;">← 返回</a>
+            <h1>🔧 <span id="pageTitle">班表編輯記錄</span></h1>
+        </div>
+
+        <div class="order-notice">
+            ⚠️ 還原必須按照時間順序：請從最新的記錄開始還原，才能確保資料一致性。
+        </div>
+
+        <div class="log-list" id="logList">
+            <div class="no-logs">載入中...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig } from '../firebase-config.js';
+
+        const SERVE_DISPLAY_NAMES = {
+            'youth-serve': '青年崇拜',
+            'kids-serve': '兒童崇拜',
+            'adult-serve': '成人崇拜'
+        };
+
+        // 從 URL 取得 collection
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetCollection = urlParams.get('collection') || 'youth-serve';
+        const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
+
+        document.getElementById('pageTitle').textContent = `${displayName} 編輯記錄`;
+        document.title = `${displayName} 編輯記錄 - 管理員`;
+
+        let db;
+        let allLogs = [];
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                await loadLogs();
+            } catch (error) {
+                console.error('初始化失敗:', error);
+                document.getElementById('logList').innerHTML = '<div class="no-logs">載入失敗</div>';
+            }
+        }
+
+        async function loadLogs() {
+            const logList = document.getElementById('logList');
+
+            try {
+                const snapshot = await getDocs(collection(db, 'edit-chart-log'));
+
+                allLogs = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // 只顯示該 collection 的記錄
+                    if (data['serve-name'] === targetCollection) {
+                        allLogs.push({ id: doc.id, ...data });
+                    }
+                });
+
+                if (allLogs.length === 0) {
+                    logList.innerHTML = '<div class="no-logs">目前沒有編輯記錄</div>';
+                    return;
+                }
+
+                // 按時間倒序排列（最新的在最上面）
+                allLogs.sort((a, b) => b.id.localeCompare(a.id));
+
+                renderLogs();
+            } catch (error) {
+                console.error('載入記錄失敗:', error);
+                logList.innerHTML = '<div class="no-logs">載入失敗</div>';
+            }
+        }
+
+        function renderLogs() {
+            const logList = document.getElementById('logList');
+            let html = '';
+
+            allLogs.forEach((log, index) => {
+                const difference = log['difference'] || {};
+                const originChart = log['origin-chart'] || {};
+                const lastEdited = log['last-edited-time'] || log.id;
+                const isLatest = index === 0;
+                const canRestore = isLatest; // 只有最新的可以還原
+
+                html += `
+            <div class="log-card ${isLatest ? 'latest' : 'disabled'}" data-log-id="${log.id}">
+              <div class="log-header">
+                <div>
+                  <h3>編輯記錄 ${log.id}${isLatest ? '<span class="latest-badge">最新</span>' : ''}</h3>
+                  <div class="log-meta">最後編輯：${lastEdited}</div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button class="toggle-btn" onclick="toggleDiff('${log.id}')">展開詳情</button>
+                  <button class="restore-btn" onclick="restoreChart('${log.id}')" ${canRestore ? '' : 'disabled'}>
+                    ${canRestore ? '還原' : '請先還原較新記錄'}
+                  </button>
+                </div>
+              </div>
+              <div class="diff-section" id="diff-${log.id}" style="display: none;">
+                <div class="diff-title">變更內容</div>
+                ${renderDifference(difference, originChart)}
+              </div>
+            </div>
+          `;
+            });
+
+            logList.innerHTML = html;
+        }
+
+        function renderDifference(difference, originChart) {
+            if (Object.keys(difference).length === 0) {
+                return '<div style="color: #94a3b8;">無變更</div>';
+            }
+
+            // 按日期群組化，收集同一日期的所有變更
+            const dateGroups = {};
+            Object.entries(difference).forEach(([date, services]) => {
+                if (!dateGroups[date]) {
+                    dateGroups[date] = [];
+                }
+                Object.entries(services).forEach(([service, newValue]) => {
+                    const originalRow = originChart && originChart[date];
+                    const originalValue = originalRow && originalRow[service];
+
+                    const originalDisplay = Array.isArray(originalValue) && originalValue.length > 0
+                        ? originalValue.join(', ')
+                        : '(空)';
+                    const newDisplay = Array.isArray(newValue) && newValue.length > 0
+                        ? newValue.join(', ')
+                        : '(空)';
+
+                    dateGroups[date].push({ service, originalDisplay, newDisplay });
+                });
+            });
+
+            // 取得所有日期並正序排列（較早的在上面，較後的在下面）
+            const sortedDates = Object.keys(dateGroups).sort((a, b) => a.localeCompare(b));
+
+            let html = '';
+            sortedDates.forEach(date => {
+                const changes = dateGroups[date];
+                // 同一日期的變更合併成一行
+                const changesHtml = changes.map(c =>
+                    `<span class="diff-service">${c.service}</span> ${c.originalDisplay} → ${c.newDisplay}`
+                ).join('&nbsp;&nbsp;');
+
+                html += `
+            <div class="diff-item">
+              <span class="diff-date">${date}</span>
+              <span class="diff-value">${changesHtml}</span>
+            </div>
+          `;
+            });
+            return html;
+        }
+
+        window.toggleDiff = function (logId) {
+            const diffEl = document.getElementById(`diff-${logId}`);
+            const btn = document.querySelector(`[data-log-id="${logId}"] .toggle-btn`);
+            if (diffEl.style.display === 'none') {
+                diffEl.style.display = 'block';
+                btn.textContent = '收起詳情';
+            } else {
+                diffEl.style.display = 'none';
+                btn.textContent = '展開詳情';
+            }
+        };
+
+        window.restoreChart = async function (logId) {
+            // 確認是最新的記錄
+            if (allLogs.length === 0 || allLogs[0].id !== logId) {
+                alert('只能還原最新的記錄！請先還原較新的記錄。');
+                return;
+            }
+
+            if (!confirm('確定要還原到此編輯之前的狀態嗎？\n\n這將覆蓋目前的班表資料，並刪除此編輯記錄。')) {
+                return;
+            }
+
+            try {
+                // 取得記錄
+                const logRef = doc(db, 'edit-chart-log', logId);
+                const logDoc = await getDoc(logRef);
+
+                if (!logDoc.exists()) {
+                    alert('找不到此記錄');
+                    return;
+                }
+
+                const logData = logDoc.data();
+                const serveName = logData['serve-name'];
+                const originChart = logData['origin-chart'];
+
+                if (!originChart) {
+                    alert('此記錄沒有原始資料');
+                    return;
+                }
+
+                // 還原資料
+                for (const [dateOrMeta, data] of Object.entries(originChart)) {
+                    const docRef = doc(db, serveName, dateOrMeta);
+                    await setDoc(docRef, data);
+                }
+
+                // 刪除此編輯記錄
+                await deleteDoc(logRef);
+
+                alert('還原成功！記錄已刪除。');
+
+                // 重新載入
+                await loadLogs();
+            } catch (error) {
+                console.error('還原失敗:', error);
+                alert('還原失敗：' + error.message);
+            }
+        };
+
+        init();
+    </script>
+</body>
+
+</html>
