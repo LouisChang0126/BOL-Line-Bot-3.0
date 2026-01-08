@@ -7,6 +7,7 @@ let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格
 let currentEditingDateIndex = null; // 目前編輯的日期索引
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
+let displayConfig = null; // 服事項目分組顯示設定
 
 // ===========================
 // 編輯記錄系統
@@ -90,6 +91,10 @@ async function initApp() {
 
     // 設定頁面離開前儲存編輯記錄
     setupBeforeUnloadHandler();
+
+    // 初始化分組編輯功能
+    initDisplayConfigEditor();
+    await loadDisplayConfig();
 
     updateStatus('就緒');
     console.log('應用程式初始化完成');
@@ -217,9 +222,16 @@ async function saveMetadata() {
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
-    await setDoc(doc(db, COLLECTION_NAME, '_metadata'), {
+    const metadata = {
         serviceItems: serviceItems
-    });
+    };
+
+    // 如果有 displayConfig，也儲存
+    if (displayConfig) {
+        metadata.displayConfig = displayConfig;
+    }
+
+    await setDoc(doc(db, COLLECTION_NAME, '_metadata'), metadata);
 }
 
 // 儲存班表資料
@@ -1458,3 +1470,288 @@ function setupUndoRedoHandler() {
         redoBtn.addEventListener('click', redo);
     }
 }
+
+// ===========================
+// 分組顯示編輯功能
+// ===========================
+
+// 臨時編輯中的分組設定
+let tempDisplayConfig = null;
+
+// 初始化分組編輯功能
+function initDisplayConfigEditor() {
+    const editBtn = document.getElementById('editDisplayConfigBtn');
+    if (editBtn) {
+        editBtn.addEventListener('click', openDisplayConfigModal);
+    }
+
+    const addGroupBtn = document.getElementById('addGroupBtn');
+    if (addGroupBtn) {
+        addGroupBtn.addEventListener('click', addNewGroup);
+    }
+
+    const saveBtn = document.getElementById('saveDisplayConfigBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveDisplayConfig);
+    }
+}
+
+// 開啟編輯顯示欄位 Modal
+function openDisplayConfigModal() {
+    // 複製現有設定或建立預設設定
+    if (displayConfig) {
+        tempDisplayConfig = JSON.parse(JSON.stringify(displayConfig));
+    } else {
+        // 預設：所有項目放入 ungrouped 組別
+        tempDisplayConfig = {
+            groups: [{
+                id: 'ungrouped',
+                name: '未分組',
+                items: [...serviceItems],
+                defaultVisible: true
+            }],
+            hidden: []
+        };
+    }
+
+    renderDisplayConfigModal();
+    document.getElementById('displayConfigModal').classList.remove('hidden');
+}
+
+// 渲染分組編輯 Modal 內容
+function renderDisplayConfigModal() {
+    const groupsContainer = document.getElementById('displayConfigGroups');
+    const hiddenZoneItems = document.getElementById('hiddenZoneItems');
+
+    // 渲染群組
+    let groupsHtml = '';
+    tempDisplayConfig.groups.forEach((group, index) => {
+        const isUngrouped = group.id === 'ungrouped';
+        groupsHtml += `
+            <div class="group-container" data-group-id="${group.id}">
+                <div class="group-header">
+                    <input type="text" class="group-name-input" value="${group.name}" 
+                           onchange="updateGroupName('${group.id}', this.value)"
+                           ${isUngrouped ? 'disabled readonly style="background: #e5e7eb; cursor: not-allowed;"' : ''}>
+                    <label class="group-visibility-toggle" ${isUngrouped ? 'style="opacity: 0.5; pointer-events: none;"' : ''}>
+                        <input type="checkbox" ${group.defaultVisible ? 'checked' : ''} 
+                               onchange="toggleGroupVisibility('${group.id}', this.checked)"
+                               ${isUngrouped ? 'disabled' : ''}>
+                        預設顯示
+                    </label>
+                    ${!isUngrouped ? `<button class="group-delete-btn" onclick="deleteGroup('${group.id}')">🗑️</button>` : ''}
+                </div>
+                <div class="group-items" data-group-id="${group.id}"
+                     ondragover="handleDragOver(event)" 
+                     ondragleave="handleDragLeave(event)"
+                     ondrop="handleDrop(event, '${group.id}')">
+                    ${group.items.map(item => `
+                        <div class="draggable-service" draggable="true" 
+                             data-service="${item}"
+                             ondragstart="handleDragStart(event)"
+                             ondragend="handleDragEnd(event)">
+                            ${item}
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    });
+    groupsContainer.innerHTML = groupsHtml;
+
+    // 渲染隱藏區域
+    let hiddenHtml = '';
+    tempDisplayConfig.hidden.forEach(item => {
+        hiddenHtml += `
+            <div class="draggable-service" draggable="true" 
+                 data-service="${item}"
+                 ondragstart="handleDragStart(event)"
+                 ondragend="handleDragEnd(event)">
+                ${item}
+            </div>
+        `;
+    });
+    hiddenZoneItems.innerHTML = hiddenHtml || '<div style="color: #94a3b8; font-size: 13px;">拖入不想顯示的服事項目</div>';
+
+    // 設定隱藏區域的拖放事件
+    hiddenZoneItems.ondragover = window.handleDragOver;
+    hiddenZoneItems.ondragleave = window.handleDragLeave;
+    hiddenZoneItems.ondrop = (e) => window.handleDrop(e, 'hidden');
+}
+
+// 拖拉開始
+window.handleDragStart = function (event) {
+    event.target.classList.add('dragging');
+    event.dataTransfer.setData('text/plain', event.target.dataset.service);
+    event.dataTransfer.effectAllowed = 'move';
+}
+
+// 拖拉結束
+window.handleDragEnd = function (event) {
+    event.target.classList.remove('dragging');
+}
+
+// 拖拉經過
+window.handleDragOver = function (event) {
+    event.preventDefault();
+    event.currentTarget.classList.add('drag-over');
+}
+
+// 拖拉離開
+window.handleDragLeave = function (event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+// 放下處理
+window.handleDrop = function (event, targetGroupId) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+
+    const serviceName = event.dataTransfer.getData('text/plain');
+    if (!serviceName) return;
+
+    // 從所有群組和隱藏區域移除此項目
+    tempDisplayConfig.groups.forEach(group => {
+        const index = group.items.indexOf(serviceName);
+        if (index > -1) {
+            group.items.splice(index, 1);
+        }
+    });
+    const hiddenIndex = tempDisplayConfig.hidden.indexOf(serviceName);
+    if (hiddenIndex > -1) {
+        tempDisplayConfig.hidden.splice(hiddenIndex, 1);
+    }
+
+    // 新增到目標群組
+    if (targetGroupId === 'hidden') {
+        tempDisplayConfig.hidden.push(serviceName);
+    } else {
+        const targetGroup = tempDisplayConfig.groups.find(g => g.id === targetGroupId);
+        if (targetGroup) {
+            targetGroup.items.push(serviceName);
+        }
+    }
+
+    // 重新渲染
+    renderDisplayConfigModal();
+}
+
+// 新增群組
+function addNewGroup() {
+    const newGroupId = 'group-' + Date.now();
+    const groupCount = tempDisplayConfig.groups.filter(g => g.id !== 'ungrouped').length + 1;
+
+    tempDisplayConfig.groups.push({
+        id: newGroupId,
+        name: `群組 ${groupCount}`,
+        items: [],
+        defaultVisible: true
+    });
+
+    renderDisplayConfigModal();
+}
+
+// 更新群組名稱
+window.updateGroupName = function (groupId, newName) {
+    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
+    if (group) {
+        group.name = newName;
+    }
+}
+
+// 切換群組預設顯示
+window.toggleGroupVisibility = function (groupId, visible) {
+    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
+    if (group) {
+        group.defaultVisible = visible;
+    }
+}
+
+// 刪除群組
+window.deleteGroup = function (groupId) {
+    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
+    if (!group || group.id === 'ungrouped') return;
+
+    // 將此群組的項目移回 ungrouped
+    const ungrouped = tempDisplayConfig.groups.find(g => g.id === 'ungrouped');
+    if (ungrouped) {
+        ungrouped.items.push(...group.items);
+    }
+
+    // 移除群組
+    const index = tempDisplayConfig.groups.findIndex(g => g.id === groupId);
+    if (index > -1) {
+        tempDisplayConfig.groups.splice(index, 1);
+    }
+
+    renderDisplayConfigModal();
+}
+
+// 儲存分組設定
+async function saveDisplayConfig() {
+    try {
+        updateStatus('儲存分組設定中...');
+
+        // 移除空群組（保留 ungrouped）
+        tempDisplayConfig.groups = tempDisplayConfig.groups.filter(g =>
+            g.id === 'ungrouped' || g.items.length > 0
+        );
+
+        // 儲存到全域變數
+        displayConfig = JSON.parse(JSON.stringify(tempDisplayConfig));
+
+        // 儲存到 Firestore
+        const metadata = {
+            serviceItems: serviceItems,
+            displayConfig: displayConfig
+        };
+        await saveMetadata();
+
+        // 另外更新 displayConfig
+        const { doc, setDoc, getDoc } = window.firestore;
+        const metadataRef = doc(window.db, window.COLLECTION_NAME, '_metadata');
+        const metadataDoc = await getDoc(metadataRef);
+
+        if (metadataDoc.exists()) {
+            const existingData = metadataDoc.data();
+            await setDoc(metadataRef, {
+                ...existingData,
+                displayConfig: displayConfig
+            });
+        }
+
+        closeModal('displayConfigModal');
+        updateStatus('分組設定已儲存');
+    } catch (error) {
+        console.error('儲存分組設定失敗:', error);
+        alert('儲存失敗：' + error.message);
+        updateStatus('就緒');
+    }
+}
+
+// 載入分組設定
+async function loadDisplayConfig() {
+    try {
+        const { doc, getDoc } = window.firestore;
+        const metadataRef = doc(window.db, window.COLLECTION_NAME, '_metadata');
+        const metadataDoc = await getDoc(metadataRef);
+
+        if (metadataDoc.exists() && metadataDoc.data().displayConfig) {
+            displayConfig = metadataDoc.data().displayConfig;
+        } else {
+            // 預設設定：所有項目放入 ungrouped
+            displayConfig = {
+                groups: [{
+                    id: 'ungrouped',
+                    name: '未分組',
+                    items: [...serviceItems],
+                    defaultVisible: true
+                }],
+                hidden: []
+            };
+        }
+    } catch (error) {
+        console.error('載入分組設定失敗:', error);
+    }
+}
+

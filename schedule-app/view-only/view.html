@@ -44,6 +44,11 @@
             </div>
         </div>
 
+        <!-- 分組過濾器 -->
+        <div class="group-filter" id="groupFilter" style="display: none;">
+            <!-- 動態生成 -->
+        </div>
+
         <div class="table-container">
             <div class="table-scroll">
                 <table class="schedule-table" id="scheduleTable">
@@ -105,6 +110,8 @@
         let serviceItems = [];
         let personColorMap = new Map();
         let allPersonNames = new Set();
+        let displayConfig = null;
+        let visibleGroups = {}; // 記錄各群組的顯示狀態
 
         async function init() {
             try {
@@ -116,6 +123,10 @@
 
                 // 建立顏色映射
                 buildColorMap();
+
+                // 載入分組設定並初始化過濾器
+                await loadDisplayConfig(db);
+                initGroupFilter();
 
                 // 渲染表格
                 renderTable();
@@ -170,25 +181,112 @@
             renderTableBody();
         }
 
+        // 載入分組設定
+        async function loadDisplayConfig(db) {
+            try {
+                const metadataRef = doc(db, collectionName, '_metadata');
+                const metadataDoc = await getDoc(metadataRef);
+
+                if (metadataDoc.exists() && metadataDoc.data().displayConfig) {
+                    displayConfig = metadataDoc.data().displayConfig;
+                } else {
+                    displayConfig = null;
+                }
+            } catch (error) {
+                console.error('載入分組設定失敗:', error);
+            }
+        }
+
+        // 初始化分組過濾器
+        function initGroupFilter() {
+            const filterContainer = document.getElementById('groupFilter');
+
+            // 檢查是否有分組設定且有非 ungrouped 的群組
+            if (!displayConfig || !displayConfig.groups) {
+                filterContainer.style.display = 'none';
+                return;
+            }
+
+            const nonUngroupedGroups = displayConfig.groups.filter(g => g.id !== 'ungrouped' && g.items.length > 0);
+
+            if (nonUngroupedGroups.length === 0) {
+                filterContainer.style.display = 'none';
+                return;
+            }
+
+            // 顯示過濾器
+            filterContainer.style.display = 'flex';
+
+            // 初始化各群組的顯示狀態
+            displayConfig.groups.forEach(group => {
+                visibleGroups[group.id] = group.defaultVisible !== false;
+            });
+
+            // 渲染 checkbox
+            let html = '';
+            nonUngroupedGroups.forEach(group => {
+                const checked = visibleGroups[group.id] ? 'checked' : '';
+                html += `
+                    <label class="group-filter-item">
+                        <input type="checkbox" ${checked} data-group-id="${group.id}" onchange="window.handleGroupFilterChange(this)">
+                        ${group.name}
+                    </label>
+                `;
+            });
+            filterContainer.innerHTML = html;
+        }
+
+        // 處理群組過濾器變更
+        window.handleGroupFilterChange = function (checkbox) {
+            const groupId = checkbox.dataset.groupId;
+            visibleGroups[groupId] = checkbox.checked;
+            renderTable();
+        };
+
+        // 取得可見的服事項目
+        function getVisibleServiceItems() {
+            if (!displayConfig || !displayConfig.groups) {
+                return serviceItems;
+            }
+
+            const visible = [];
+
+            displayConfig.groups.forEach(group => {
+                // ungrouped 始終顯示，其他根據勾選狀態
+                if (group.id === 'ungrouped' || visibleGroups[group.id]) {
+                    visible.push(...group.items);
+                }
+            });
+
+            // 結合隱藏的項目過濾
+            const hidden = displayConfig.hidden || [];
+            return visible.filter(item => !hidden.includes(item));
+        }
+
+        // 更新的 renderTableHead
         function renderTableHead() {
             const thead = document.getElementById('tableHead');
+            const visibleItems = getVisibleServiceItems();
+
             let html = '<tr><th class="date-header">日期</th>';
-            serviceItems.forEach(item => {
+            visibleItems.forEach(item => {
                 html += `<th class="service-header">${item}</th>`;
             });
             html += '</tr>';
             thead.innerHTML = html;
         }
 
+        // 更新的 renderTableBody
         function renderTableBody() {
             const tbody = document.getElementById('tableBody');
+            const visibleItems = getVisibleServiceItems();
             let html = '';
 
             scheduleData.forEach(row => {
                 html += '<tr>';
                 html += `<td><div class="date-cell">${row.date}</div></td>`;
 
-                serviceItems.forEach(item => {
+                visibleItems.forEach(item => {
                     const persons = row[item] || [];
                     html += '<td class="service-cell">';
                     if (persons.length > 0) {

@@ -33,6 +33,9 @@
         <button class="btn btn-secondary" id="addServiceBtn">
           ✨ 新增服事項目
         </button>
+        <button class="btn btn-secondary" id="editDisplayConfigBtn">
+          📊 編輯顯示欄位
+        </button>
       </div>
 
       <div class="status-indicator">
@@ -140,6 +143,41 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeModal('editPersonModal')">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編輯顯示欄位對話框 -->
+  <div class="modal-overlay hidden" id="displayConfigModal">
+    <div class="modal" style="max-width: 800px; max-height: 80vh;">
+      <div class="modal-header">
+        <h2>📊 編輯顯示欄位</h2>
+        <button class="modal-close" onclick="closeModal('displayConfigModal')">&times;</button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
+        <!-- 群組區域 -->
+        <div id="displayConfigGroups" class="display-config-groups">
+          <!-- 動態生成 -->
+        </div>
+
+        <!-- 新增群組按鈕 -->
+        <div class="add-group-section">
+          <button class="btn btn-secondary" id="addGroupBtn" style="width: 100%;">
+            ➕ 新增群組
+          </button>
+        </div>
+
+        <!-- 不顯示區域 -->
+        <div class="hidden-zone" id="hiddenZone">
+          <div class="hidden-zone-title">🚫 不顯示區域 (拖入此處的項目會隱藏)</div>
+          <div class="hidden-zone-items" id="hiddenZoneItems">
+            <!-- 動態生成 -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('displayConfigModal')">取消</button>
+        <button class="btn btn-primary" id="saveDisplayConfigBtn">儲存設定</button>
       </div>
     </div>
   </div>
