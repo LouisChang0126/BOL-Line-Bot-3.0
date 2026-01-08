@@ -93,7 +93,7 @@ body {
 .app-container {
   max-width: 1600px;
   margin: 0 auto;
-  padding: var(--spacing-md) var(--spacing-lg);
+  padding: var(--spacing-md) var(--spacing-sm);
 }
 
 .header-section {
@@ -274,6 +274,7 @@ body {
 }
 
 .schedule-table td {
+  font-size: 16px;
   padding: var(--spacing-xs);
   border-bottom: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
@@ -303,8 +304,8 @@ body {
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm);
+  /* gap: var(--spacing-sm); */
+  /* padding: var(--spacing-xs); */
   border-radius: var(--border-radius);
   transition: all var(--transition-fast);
 }
@@ -791,13 +792,13 @@ body {
    =========================== */
 @media (max-width: 768px) {
   .app-container {
-    padding: var(--spacing-md);
+    padding: var(--spacing-sm);
   }
 
   .header-section {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--spacing-md);
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
   }
 
   .control-actions {
@@ -819,8 +820,20 @@ body {
 
   .schedule-table th,
   .schedule-table td {
-    padding: var(--spacing-sm);
+    padding: var(--spacing-xs);
     font-size: 12px;
+  }
+
+  .group-filter {
+    margin-left: 0;
+    width: fit-content;
+    align-self: flex-start;
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: calc(100vh - 50px);
   }
 }
 
@@ -1009,7 +1022,7 @@ body {
   padding: 8px 16px;
   background: var(--bg-secondary);
   border-radius: 8px;
-  margin-left: auto;
+  margin-left: 16px;
 }
 
 .group-filter-item {

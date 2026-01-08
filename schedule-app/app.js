@@ -613,6 +613,14 @@ async function addServiceItem() {
     try {
         serviceItems.push(trimmedName);
 
+        // 將新服事項目加入 displayConfig 的「未分組」群組
+        if (displayConfig && displayConfig.groups) {
+            const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
+            if (ungrouped) {
+                ungrouped.items.push(trimmedName);
+            }
+        }
+
         // 為所有現有資料新增此欄位
         const updates = [];
         scheduleData.forEach(row => {
@@ -622,7 +630,7 @@ async function addServiceItem() {
             updates.push(saveSchedule(row.date, data));
         });
 
-        // 儲存 metadata
+        // 儲存 metadata（包含 displayConfig）
         updates.push(saveMetadata());
 
         await Promise.all(updates);
@@ -716,6 +724,26 @@ async function deleteServiceItem(serviceName) {
         const index = serviceItems.indexOf(serviceName);
         serviceItems.splice(index, 1);
 
+        // 從 displayConfig 中移除該服事項目
+        if (displayConfig) {
+            // 從所有群組中移除
+            if (displayConfig.groups) {
+                displayConfig.groups.forEach(group => {
+                    const itemIndex = group.items.indexOf(serviceName);
+                    if (itemIndex > -1) {
+                        group.items.splice(itemIndex, 1);
+                    }
+                });
+            }
+            // 從隱藏列表中移除
+            if (displayConfig.hidden) {
+                const hiddenIndex = displayConfig.hidden.indexOf(serviceName);
+                if (hiddenIndex > -1) {
+                    displayConfig.hidden.splice(hiddenIndex, 1);
+                }
+            }
+        }
+
         // 更新所有資料
         const updates = [];
         scheduleData.forEach(row => {
@@ -726,7 +754,7 @@ async function deleteServiceItem(serviceName) {
             updates.push(saveSchedule(row.date, data));
         });
 
-        // 儲存 metadata
+        // 儲存 metadata（包含 displayConfig）
         updates.push(saveMetadata());
 
         await Promise.all(updates);
