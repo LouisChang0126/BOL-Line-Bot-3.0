@@ -340,9 +340,11 @@
         }
 
         // 更新的 renderTableBody
+        // 更新的 renderTableBody
         function renderTableBody() {
             const tbody = document.getElementById('tableBody');
             const visibleItems = getVisibleServiceItems();
+            const highlightUser = urlParams.get('user');
             let html = '';
 
             // 組合要顯示的資料
@@ -363,10 +365,18 @@
 
                 visibleItems.forEach(item => {
                     const persons = row[item] || [];
-                    html += '<td class="service-cell">';
+                    const personText = persons.join('/');
+                    let cellStyle = '';
+
+                    // 如果有指定 user 且內容包含該 user，則 highlight
+                    if (highlightUser && personText.includes(highlightUser)) {
+                        cellStyle = 'background-color: #ffe08a;'; // Yellow highlight
+                    }
+
+                    html += `<td class="service-cell" style="${cellStyle}">`;
                     if (persons.length > 0) {
                         // 簡化顯示：文字用 / 連接
-                        html += `<span style="font-weight: 550">${persons.join('/')}</span>`;
+                        html += `<span style="font-weight: 550">${personText}</span>`;
                     }
                     html += '</td>';
                 });
