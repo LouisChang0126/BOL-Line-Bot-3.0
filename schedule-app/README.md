@@ -1,16 +1,16 @@
 # 教會服事班表系統
 
-一個與 Firestore 連動的互動式教會服事班表網頁，採用 Airbnb 風格設計。
+一個與 Firestore 連動的互動式教會服事班表網頁
 
 ## ✨ 功能特色
 
-### 🎯 三種使用者角色
+### 🎯 二種使用者角色
 
 | 角色 | 路徑 | 功能 |
 |------|------|------|
-| 📖 **一般會友** | `view-only/` | 只能查看班表，無法編輯 |
-| ✏️ **普通管理員** | `schedule-app/` | 可編輯班表，支援撤銷/重做 |
-| 🔧 **高階管理員** | `chart-difference/` | 查看編輯記錄，一鍵還原 |
+| 📖 **一般會友** | `schedule-app/` | 只能查看班表，無法編輯 |
+| ✏️ **管理員** | `edit-chart/` | 可編輯班表，支援撤銷/重做 |
+| 🔧 **管理員** | `chart-difference/` | 查看編輯記錄，一鍵還原 |
 
 ### 📅 日期管理
 - ✏️ 編輯任一日期，其他日期自動調整（保持7天間隔）
@@ -59,32 +59,26 @@
 
 ### 3. 啟動應用程式
 
-使用 VS Code 的 Live Server 擴充功能，或：
-
-```bash
-# Python 3
-python -m http.server 8000
-```
-
-然後在瀏覽器開啟 http://localhost:8000
+已使用 Firebase Hosting 部署，且使用reCAPTCHA v3限定網域，只能從[這裡](https://bol-line-bot-3.web.app/)進入
 
 ## 📂 檔案結構
 
 ```
 schedule-app/
-├── index.html           # 班表選擇頁面
-├── edit-chart.html      # 班表編輯頁面
-├── app.js               # 核心應用程式邏輯
+├── index.html           # 班表選擇頁面 唯讀版本（給一般會友）
+├── view.html            # 班表查看頁面
 ├── styles.css           # Airbnb 風格樣式
 ├── firebase-config.js   # Firebase 配置
 ├── README.md            # 說明文件
 │
-├── view-only/           # 唯讀版本（給一般會友）
+├── edit-chart/          # 編輯班表（給管理員）
 │   ├── index.html       # 班表選擇頁面
-│   └── view.html        # 班表查看頁面
+│   ├── edit-chart.html  # 班表編輯頁面
+│   └── app.js           # 核心應用程式邏輯
 │
-└── chart-difference/    # 編輯記錄（給高階管理員）
-    └── index.html       # 編輯記錄查看與還原
+└── chart-difference/    # 編輯記錄（給管理員）
+    ├── index.html       # 班表選擇頁面
+    └── difference.html  # 編輯記錄查看與還原
 ```
 
 ## 📊 Firestore 資料結構

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>教會服事班表系統</title>
+    <title>教會服事班表 - 查看</title>
     <link rel="stylesheet" href="styles.css">
     <style>
         .selection-page {
@@ -76,10 +76,14 @@
             color: var(--text-secondary);
         }
 
-        .loading-message {
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 16px;
+        .readonly-badge {
+            background: #e2e8f0;
+            color: #64748b;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            display: inline-block;
+            margin-top: 8px;
         }
     </style>
 </head>
@@ -87,78 +91,31 @@
 <body>
     <div class="selection-page">
         <div class="selection-title">
-            <h1>⛪ 教會服事班表系統</h1>
-            <p>請選擇要編輯的班表</p>
+            <h1>📖 教會服事班表 - 唯讀</h1>
+            <p>請選擇要查看的班表</p>
         </div>
 
         <div class="collection-cards" id="collectionCards">
-            <div class="loading-message">載入中...</div>
+            <div class="collection-card" onclick="window.location.href='view.html?collection=youth-serve'">
+                <div class="icon">🎸</div>
+                <div class="name">青年崇拜</div>
+                <div class="description">青年主日服事班表</div>
+                <div class="readonly-badge">唯讀</div>
+            </div>
+            <div class="collection-card" onclick="window.location.href='view.html?collection=kids-serve'">
+                <div class="icon">🧒</div>
+                <div class="name">兒童崇拜</div>
+                <div class="description">兒童崇拜服事班表</div>
+                <div class="readonly-badge">唯讀</div>
+            </div>
+            <div class="collection-card" onclick="window.location.href='view.html?collection=adult-serve'">
+                <div class="icon">⛪</div>
+                <div class="name">成人崇拜</div>
+                <div class="description">成人主日服事班表</div>
+                <div class="readonly-badge">唯讀</div>
+            </div>
         </div>
     </div>
-
-    <script type="module">
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
-        import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-        import { firebaseConfig } from './firebase-config.js';
-
-        // 定義可用的 serve collections
-        const SERVE_COLLECTIONS = [
-            { id: 'youth-serve', name: '青年崇拜', icon: '🎸', description: '青年主日服事班表' },
-            { id: 'kids-serve', name: '兒童崇拜', icon: '🧒', description: '兒童崇拜服事班表' },
-            { id: 'adult-serve', name: '成人崇拜', icon: '⛪', description: '成人主日服事班表' }
-        ];
-
-        async function init() {
-            try {
-                const app = initializeApp(firebaseConfig);
-
-                // 初始化 App Check
-                const appCheck = initializeAppCheck(app, {
-                    provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
-                    isTokenAutoRefreshEnabled: true
-                });
-
-                const db = getFirestore(app);
-
-                // 確保 _config/serve-list 存在
-                const serveListRef = doc(db, '_config', 'serve-list');
-                const serveListDoc = await getDoc(serveListRef);
-
-                if (!serveListDoc.exists()) {
-                    // 創建預設的 serve-list
-                    await setDoc(serveListRef, {
-                        collections: SERVE_COLLECTIONS.map(c => c.id)
-                    });
-                }
-
-                renderCollectionCards();
-            } catch (error) {
-                console.error('初始化失敗:', error);
-                document.getElementById('collectionCards').innerHTML =
-                    '<div class="loading-message">載入失敗，請檢查網路連線</div>';
-            }
-        }
-
-        function renderCollectionCards() {
-            const container = document.getElementById('collectionCards');
-
-            let html = '';
-            SERVE_COLLECTIONS.forEach(collection => {
-                html += `
-          <div class="collection-card" onclick="window.location.href='edit-chart.html?collection=${collection.id}'">
-            <div class="icon">${collection.icon}</div>
-            <div class="name">${collection.name}</div>
-            <div class="description">${collection.description}</div>
-          </div>
-        `;
-            });
-
-            container.innerHTML = html;
-        }
-
-        init();
-    </script>
 </body>
 
 </html>
