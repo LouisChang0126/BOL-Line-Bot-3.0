@@ -930,6 +930,9 @@ async function addPersonToCell(date, service, person) {
         renderPersonDropdown();
     }
     renderTable();
+
+    // 刷新管理使用者按鈕警示
+    checkMissingUsers();
 }
 
 async function removePerson(date, service, person) {
@@ -951,6 +954,9 @@ async function removePerson(date, service, person) {
 
         // 更新顯示
         renderTable();
+
+        // 刷新管理使用者按鈕警示
+        checkMissingUsers();
     }
 }
 
@@ -1454,6 +1460,9 @@ async function restoreFromHistory() {
     // 重新渲染
     renderTable();
     updateUndoRedoButtons();
+
+    // 刷新管理使用者按鈕警示
+    checkMissingUsers();
 }
 
 // 更新撤銷/重做按鈕狀態
@@ -1878,31 +1887,64 @@ async function loadDisplayConfig() {
 }
 
 // ===========================
-// 使用者管理 - 檢查未註冊使用者
+// 使用者管理 - 檢查未註冊使用者或服事項目不完整
 // ===========================
 async function checkMissingUsers() {
     try {
-        const { collection, getDocs } = window.firestore;
+        const { collection, getDocs, doc, getDoc } = window.firestore;
         const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
 
-        // 取得所有 users collection 中的使用者名稱
+        // 取得所有 users collection 中的使用者資料
         const usersSnapshot = await getDocs(collection(db, 'users'));
-        const registeredUsers = new Set();
-        usersSnapshot.forEach(doc => {
-            registeredUsers.add(doc.id);
+        const registeredUsers = {};
+        usersSnapshot.forEach(docRef => {
+            registeredUsers[docRef.id] = docRef.data();
         });
 
-        // 檢查班表中的人名是否都有註冊
-        let hasMissingUsers = false;
-        for (const name of allPersonNames) {
-            if (!registeredUsers.has(name)) {
-                hasMissingUsers = true;
+        // 收集班表中每個人的服事項目
+        const personServeItems = {};
+        scheduleData.forEach(row => {
+            serviceItems.forEach(item => {
+                if (row[item] && Array.isArray(row[item])) {
+                    row[item].forEach(name => {
+                        if (!personServeItems[name]) {
+                            personServeItems[name] = new Set();
+                        }
+                        personServeItems[name].add(item);
+                    });
+                }
+            });
+        });
+
+        // 檢查是否有問題（只檢查 2 個字的名字）
+        let hasIssues = false;
+        for (const name of Object.keys(personServeItems)) {
+            // 忽略名字不是 2 個字的使用者
+            if (name.length !== 2) continue;
+
+            const userData = registeredUsers[name];
+
+            // 1. 使用者未註冊
+            if (!userData) {
+                hasIssues = true;
                 break;
             }
+
+            // 2. 使用者已註冊但服事項目不完整
+            const registeredServes = userData.serve_types?.[COLLECTION_NAME] || [];
+            const scheduleServes = personServeItems[name];
+            for (const serve of scheduleServes) {
+                if (!registeredServes.includes(serve)) {
+                    hasIssues = true;
+                    break;
+                }
+            }
+            if (hasIssues) break;
         }
 
         // 更新警示符號
-        updateUserAlertBadge(hasMissingUsers);
+        updateUserAlertBadge(hasIssues);
 
     } catch (error) {
         console.error('檢查未註冊使用者失敗:', error);

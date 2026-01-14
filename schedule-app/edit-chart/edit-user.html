@@ -38,6 +38,125 @@
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px var(--primary-light);
         }
+
+        /* 服事項目可編輯區塊 */
+        .serve-section {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: var(--border-radius);
+        }
+
+        .serve-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .serve-section-title {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .serve-items-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .serve-item-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: var(--primary-light);
+            color: var(--primary-color);
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .serve-item-remove {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0, 0, 0, 0.1);
+            color: var(--primary-color);
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .serve-item-remove:hover {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .add-serve-btn {
+            padding: 4px 10px;
+            background: white;
+            border: 1px dashed var(--border-color);
+            border-radius: 12px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        .add-serve-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        /* 新增使用者按鈕樣式 */
+        .add-user-card {
+            border: 2px dashed var(--border-color);
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100px;
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+
+        .add-user-card:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        /* 服事選擇下拉選單 */
+        .serve-dropdown {
+            position: absolute;
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-md);
+            z-index: 1100;
+            max-height: 200px;
+            overflow-y: auto;
+            min-width: 150px;
+        }
+
+        .serve-dropdown-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .serve-dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .serve-dropdown-item.disabled {
+            color: var(--text-light);
+            cursor: not-allowed;
+        }
     </style>
 </head>
 
@@ -51,18 +170,38 @@
         <!-- 快速操作區 -->
         <div class="quick-actions">
             <button class="btn btn-primary" id="autoAddUsersBtn">
-                🔄 自動加入所有新使用者
+                🔄 自動加入使用者 & 更新服事
             </button>
             <input type="text" class="search-box" id="searchBox" placeholder="搜尋使用者...">
             <div class="stats-info">
                 <span>總計 <strong id="totalUsers">0</strong> 位使用者</span>
-                <span>新增 <strong id="newUsers">0</strong> 位</span>
+                <span>待處理 <strong id="newUsers">0</strong> 位</span>
             </div>
         </div>
 
         <!-- 使用者列表 -->
         <div class="user-list" id="userList">
             <div style="text-align: center; padding: 40px; color: var(--text-secondary);">載入中...</div>
+        </div>
+    </div>
+
+    <!-- 新增使用者 Modal -->
+    <div class="modal-overlay hidden" id="addUserModal">
+        <div class="modal" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2>新增使用者</h2>
+                <button class="modal-close" onclick="closeModal('addUserModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>使用者名稱（2個字）</label>
+                    <input type="text" class="form-control" id="newUserNameInput" placeholder="請輸入使用者名稱" maxlength="10">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addUserModal')">取消</button>
+                <button class="btn btn-primary" id="confirmAddUserBtn">新增</button>
+            </div>
         </div>
     </div>
 
@@ -149,8 +288,10 @@
         let db;
         let allUsers = {}; // { userName: userData }
         let schedulePersons = new Set(); // 班表中出現的所有人名
-        let serviceItems = []; // 該崇拜的服事項目
+        let personServeItems = {}; // 班表中每個人的服事項目 { name: Set }
+        let serviceItemsByCollection = {}; // 各崇拜的服事項目 { collectionName: [] }
         let currentEditUser = null;
+        let currentEditServeTypes = {}; // 編輯中的 serve_types
 
         async function init() {
             try {
@@ -165,7 +306,7 @@
                 db = getFirestore(app);
 
                 // 載入資料
-                await loadServiceItems();
+                await loadAllServiceItems();
                 await loadSchedulePersons();
                 await loadUsers();
 
@@ -182,26 +323,42 @@
             }
         }
 
-        // 載入服事項目
-        async function loadServiceItems() {
-            const metadataRef = doc(db, targetCollection, '_metadata');
-            const metadataDoc = await getDoc(metadataRef);
-            if (metadataDoc.exists()) {
-                serviceItems = metadataDoc.data().serviceItems || [];
+        // 載入所有崇拜的服事項目
+        async function loadAllServiceItems() {
+            for (const collName of VALID_COLLECTIONS) {
+                try {
+                    const metadataRef = doc(db, collName, '_metadata');
+                    const metadataDoc = await getDoc(metadataRef);
+                    if (metadataDoc.exists()) {
+                        serviceItemsByCollection[collName] = metadataDoc.data().serviceItems || [];
+                    } else {
+                        serviceItemsByCollection[collName] = [];
+                    }
+                } catch (e) {
+                    serviceItemsByCollection[collName] = [];
+                }
             }
         }
 
-        // 載入班表中的所有人名
+        // 載入班表中的所有人名和服事項目
         async function loadSchedulePersons() {
+            const serviceItems = serviceItemsByCollection[targetCollection] || [];
             const snapshot = await getDocs(collection(db, targetCollection));
             schedulePersons = new Set();
+            personServeItems = {};
 
             snapshot.forEach(docRef => {
                 if (docRef.id !== '_metadata') {
                     const data = docRef.data();
                     serviceItems.forEach(item => {
                         if (data[item] && Array.isArray(data[item])) {
-                            data[item].forEach(name => schedulePersons.add(name));
+                            data[item].forEach(name => {
+                                schedulePersons.add(name);
+                                if (!personServeItems[name]) {
+                                    personServeItems[name] = new Set();
+                                }
+                                personServeItems[name].add(item);
+                            });
                         }
                     });
                 }
@@ -218,6 +375,26 @@
             });
         }
 
+        // 檢查使用者是否需要更新（名稱為2個字且班表有未記錄的服事）
+        function checkNeedsUpdate(name) {
+            // 只處理 2 個字的名字
+            if (name.length !== 2) return false;
+
+            const userData = allUsers[name];
+            if (!userData) return true; // 新使用者，需要加入
+
+            // 檢查服事項目是否完整
+            const scheduledServes = personServeItems[name] || new Set();
+            const registeredServes = userData.serve_types?.[targetCollection] || [];
+
+            for (const serve of scheduledServes) {
+                if (!registeredServes.includes(serve)) {
+                    return true; // 有缺少的服事
+                }
+            }
+            return false;
+        }
+
         // 渲染使用者列表
         function renderUserList(searchTerm = '') {
             const userList = document.getElementById('userList');
@@ -226,6 +403,14 @@
             const allNames = new Set([...schedulePersons, ...Object.keys(allUsers)]);
             let usersArray = Array.from(allNames).sort();
 
+            // 過濾：只顯示 2 個字的名字 或 已註冊的使用者
+            usersArray = usersArray.filter(name => {
+                // 已註冊的都顯示
+                if (allUsers[name]) return true;
+                // 未註冊的只顯示 2 個字的
+                return name.length === 2;
+            });
+
             // 搜尋過濾
             if (searchTerm) {
                 usersArray = usersArray.filter(name =>
@@ -233,20 +418,23 @@
                 );
             }
 
-            if (usersArray.length === 0) {
-                userList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">沒有找到使用者</div>';
-                return;
-            }
-
-            let newCount = 0;
+            let needsUpdateCount = 0;
             let html = '';
+
+            // 新增使用者卡片
+            html += `
+                <div class="user-card add-user-card" id="addUserCard">
+                    ➕ 手動新增使用者
+                </div>
+            `;
 
             usersArray.forEach(name => {
                 const userData = allUsers[name];
                 const isNew = !userData;
                 const isInSchedule = schedulePersons.has(name);
+                const needsUpdate = checkNeedsUpdate(name);
 
-                if (isNew) newCount++;
+                if (needsUpdate) needsUpdateCount++;
 
                 // 取得服事項目
                 let serveTags = '';
@@ -260,42 +448,80 @@
                 let otherServes = '';
                 if (userData && userData.serve_types) {
                     const others = Object.keys(userData.serve_types)
-                        .filter(c => c !== targetCollection)
+                        .filter(c => c !== targetCollection && userData.serve_types[c].length > 0)
                         .map(c => SERVE_DISPLAY_NAMES[c] || c);
                     if (others.length > 0) {
                         otherServes = `<div style="margin-top: 4px; font-size: 11px; color: var(--text-light);">也在：${others.join('、')}</div>`;
                     }
                 }
 
+                // 檢查缺少的服事
+                let missingServes = '';
+                if (userData && isInSchedule) {
+                    const scheduledServes = personServeItems[name] || new Set();
+                    const registeredServes = userData.serve_types?.[targetCollection] || [];
+                    const missing = Array.from(scheduledServes).filter(s => !registeredServes.includes(s));
+                    if (missing.length > 0) {
+                        missingServes = `<div style="margin-top: 4px; font-size: 11px; color: #f97316;">缺少：${missing.join('、')}</div>`;
+                    }
+                }
+
+                // 只有2個字的名字才顯示 new-user 高亮
+                const shouldHighlight = name.length === 2 && (isNew || needsUpdate);
+
                 html += `
-          <div class="user-card ${isNew ? 'new-user' : ''}" data-name="${name}">
-            <div class="user-card-header">
-              <span class="user-card-name">${name}</span>
-              ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
-              ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
-            </div>
-            <div class="user-card-body">
-              ${isInSchedule ? '<div>📋 在此崇拜班表中</div>' : '<div style="color: var(--text-light);">不在此崇拜班表中</div>'}
-              ${serveTags ? `<div class="user-card-serve">${serveTags}</div>` : ''}
-              ${otherServes}
-            </div>
-          </div>
-        `;
+                    <div class="user-card ${shouldHighlight ? 'new-user' : ''}" data-name="${name}">
+                        <div class="user-card-header">
+                            <span class="user-card-name">${name}</span>
+                            ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
+                            ${!isNew && needsUpdate ? '<span class="user-card-badge new">需更新</span>' : ''}
+                            ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
+                        </div>
+                        <div class="user-card-body">
+                            ${isInSchedule ? '<div>📋 在此崇拜班表中</div>' : '<div style="color: var(--text-light);">不在此崇拜班表中</div>'}
+                            ${serveTags ? `<div class="user-card-serve">${serveTags}</div>` : ''}
+                            ${missingServes}
+                            ${otherServes}
+                        </div>
+                    </div>
+                `;
             });
+
+            if (usersArray.length === 0 && !searchTerm) {
+                html = `
+                    <div class="user-card add-user-card" id="addUserCard">
+                        ➕ 手動新增使用者
+                    </div>
+                    <div style="text-align: center; padding: 40px; color: var(--text-secondary);">沒有找到使用者</div>
+                `;
+            }
 
             userList.innerHTML = html;
 
             // 更新統計
             document.getElementById('totalUsers').textContent = usersArray.length;
-            document.getElementById('newUsers').textContent = newCount;
+            document.getElementById('newUsers').textContent = needsUpdateCount;
+
+            // 綁定新增使用者卡片
+            const addUserCard = document.getElementById('addUserCard');
+            if (addUserCard) {
+                addUserCard.addEventListener('click', openAddUserModal);
+            }
 
             // 綁定卡片點擊事件
-            document.querySelectorAll('.user-card').forEach(card => {
+            document.querySelectorAll('.user-card:not(.add-user-card)').forEach(card => {
                 card.addEventListener('click', () => {
                     const name = card.dataset.name;
                     openEditUserModal(name);
                 });
             });
+        }
+
+        // 開啟新增使用者 Modal
+        function openAddUserModal() {
+            document.getElementById('newUserNameInput').value = '';
+            document.getElementById('addUserModal').classList.remove('hidden');
+            document.getElementById('newUserNameInput').focus();
         }
 
         // 開啟編輯使用者 Modal
@@ -312,47 +538,249 @@
                 document.getElementById(`alarm${i}`).checked = alarmTypes[i] || false;
             }
 
+            // 複製 serve_types 到編輯用的變數
+            currentEditServeTypes = JSON.parse(JSON.stringify(userData?.serve_types || {}));
+
+            // 如果是新使用者，從班表取得服事項目
+            if (!userData && personServeItems[name]) {
+                currentEditServeTypes[targetCollection] = Array.from(personServeItems[name]);
+            }
+
             // 顯示服事項目
-            renderServeTypesDisplay(userData?.serve_types || {});
+            renderServeTypesDisplay();
 
             document.getElementById('editUserModal').classList.remove('hidden');
         }
 
-        // 渲染服事項目顯示
-        function renderServeTypesDisplay(serveTypes) {
+        // 渲染服事項目顯示（只顯示有服事的崇拜）
+        function renderServeTypesDisplay() {
             const container = document.getElementById('serveTypesDisplay');
             let html = '';
 
-            VALID_COLLECTIONS.forEach(collName => {
-                const collDisplayName = SERVE_DISPLAY_NAMES[collName];
-                const items = serveTypes[collName] || [];
-
-                html += `
-          <div style="margin-bottom: 12px;">
-            <div style="font-weight: 500; margin-bottom: 4px;">${collDisplayName}</div>
-            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-              ${items.length > 0
-                        ? items.map(s => `<span class="serve-tag">${s}</span>`).join('')
-                        : '<span style="color: var(--text-light); font-size: 13px;">無</span>'
-                    }
-            </div>
-          </div>
-        `;
+            // 取得有服事的崇拜
+            const collectionsWithServes = VALID_COLLECTIONS.filter(collName => {
+                const items = currentEditServeTypes[collName];
+                return items && items.length > 0;
             });
 
+            // 如果沒有任何服事，顯示目前崇拜的空區塊
+            if (collectionsWithServes.length === 0) {
+                collectionsWithServes.push(targetCollection);
+                currentEditServeTypes[targetCollection] = currentEditServeTypes[targetCollection] || [];
+            }
+
+            collectionsWithServes.forEach(collName => {
+                const collDisplayName = SERVE_DISPLAY_NAMES[collName];
+                const items = currentEditServeTypes[collName] || [];
+                const availableItems = serviceItemsByCollection[collName] || [];
+
+                html += `
+                    <div class="serve-section" data-collection="${collName}">
+                        <div class="serve-section-header">
+                            <span class="serve-section-title">${collDisplayName}</span>
+                        </div>
+                        <div class="serve-items-container">
+                            ${items.map(s => `
+                                <span class="serve-item-tag">
+                                    ${s}
+                                    <button class="serve-item-remove" data-collection="${collName}" data-serve="${s}">×</button>
+                                </span>
+                            `).join('')}
+                            <button class="add-serve-btn" data-collection="${collName}">+ 新增服事</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            // 新增崇拜按鈕（顯示未使用的崇拜）
+            const unusedCollections = VALID_COLLECTIONS.filter(c => !collectionsWithServes.includes(c));
+            if (unusedCollections.length > 0) {
+                html += `
+                    <div style="margin-top: 8px;">
+                        <button class="btn btn-secondary btn-sm" id="addCollectionBtn">
+                            ➕ 新增其他崇拜服事
+                        </button>
+                    </div>
+                `;
+            }
+
             container.innerHTML = html;
+
+            // 綁定刪除服事按鈕
+            container.querySelectorAll('.serve-item-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const collName = btn.dataset.collection;
+                    const serve = btn.dataset.serve;
+                    removeServeItem(collName, serve);
+                });
+            });
+
+            // 綁定新增服事按鈕
+            container.querySelectorAll('.add-serve-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const collName = btn.dataset.collection;
+                    showServeDropdown(btn, collName);
+                });
+            });
+
+            // 綁定新增崇拜按鈕
+            const addCollectionBtn = document.getElementById('addCollectionBtn');
+            if (addCollectionBtn) {
+                addCollectionBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    showCollectionDropdown(addCollectionBtn);
+                });
+            }
+        }
+
+        // 移除服事項目
+        function removeServeItem(collName, serve) {
+            if (!currentEditServeTypes[collName]) return;
+            const index = currentEditServeTypes[collName].indexOf(serve);
+            if (index > -1) {
+                currentEditServeTypes[collName].splice(index, 1);
+            }
+            // 如果該崇拜沒有服事了，移除整個崇拜
+            if (currentEditServeTypes[collName].length === 0) {
+                delete currentEditServeTypes[collName];
+            }
+            renderServeTypesDisplay();
+        }
+
+        // 顯示服事選擇下拉選單
+        function showServeDropdown(btn, collName) {
+            closeAllDropdowns();
+
+            const availableItems = serviceItemsByCollection[collName] || [];
+            const currentItems = currentEditServeTypes[collName] || [];
+
+            if (availableItems.length === 0) {
+                alert('此崇拜沒有服事項目');
+                return;
+            }
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'serve-dropdown';
+            dropdown.id = 'activeDropdown';
+
+            availableItems.forEach(item => {
+                const isSelected = currentItems.includes(item);
+                dropdown.innerHTML += `
+                    <div class="serve-dropdown-item ${isSelected ? 'disabled' : ''}" 
+                         data-serve="${item}" 
+                         data-collection="${collName}"
+                         ${isSelected ? '' : 'data-selectable="true"'}>
+                        ${item} ${isSelected ? '(已加入)' : ''}
+                    </div>
+                `;
+            });
+
+            // 定位
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.position = 'fixed';
+            dropdown.style.left = rect.left + 'px';
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+
+            document.body.appendChild(dropdown);
+
+            // 綁定點擊事件
+            dropdown.querySelectorAll('.serve-dropdown-item[data-selectable="true"]').forEach(item => {
+                item.addEventListener('click', () => {
+                    const serve = item.dataset.serve;
+                    const coll = item.dataset.collection;
+                    addServeItem(coll, serve);
+                    closeAllDropdowns();
+                });
+            });
+
+            // 點擊外部關閉
+            setTimeout(() => {
+                document.addEventListener('click', closeAllDropdowns, { once: true });
+            }, 10);
+        }
+
+        // 顯示崇拜選擇下拉選單
+        function showCollectionDropdown(btn) {
+            closeAllDropdowns();
+
+            const usedCollections = Object.keys(currentEditServeTypes).filter(c =>
+                currentEditServeTypes[c] && currentEditServeTypes[c].length > 0
+            );
+            const unusedCollections = VALID_COLLECTIONS.filter(c => !usedCollections.includes(c));
+
+            if (unusedCollections.length === 0) return;
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'serve-dropdown';
+            dropdown.id = 'activeDropdown';
+
+            unusedCollections.forEach(collName => {
+                dropdown.innerHTML += `
+                    <div class="serve-dropdown-item" data-collection="${collName}">
+                        ${SERVE_DISPLAY_NAMES[collName]}
+                    </div>
+                `;
+            });
+
+            // 定位
+            const rect = btn.getBoundingClientRect();
+            dropdown.style.position = 'fixed';
+            dropdown.style.left = rect.left + 'px';
+            dropdown.style.top = (rect.bottom + 4) + 'px';
+
+            document.body.appendChild(dropdown);
+
+            // 綁定點擊事件 - 使用 insertAdjacentHTML 並在之後綁定事件
+            const items = dropdown.querySelectorAll('.serve-dropdown-item');
+            items.forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const collName = item.dataset.collection;
+                    currentEditServeTypes[collName] = [];
+                    renderServeTypesDisplay();
+                    closeAllDropdowns();
+                });
+            });
+
+            // 點擊外部關閉
+            setTimeout(() => {
+                document.addEventListener('click', closeAllDropdowns, { once: true });
+            }, 10);
+        }
+
+        // 新增服事項目
+        function addServeItem(collName, serve) {
+            if (!currentEditServeTypes[collName]) {
+                currentEditServeTypes[collName] = [];
+            }
+            if (!currentEditServeTypes[collName].includes(serve)) {
+                currentEditServeTypes[collName].push(serve);
+            }
+            renderServeTypesDisplay();
+        }
+
+        // 關閉所有下拉選單
+        function closeAllDropdowns() {
+            const dropdown = document.getElementById('activeDropdown');
+            if (dropdown) {
+                dropdown.remove();
+            }
         }
 
         // 關閉 Modal
         window.closeModal = function (modalId) {
             document.getElementById(modalId).classList.add('hidden');
             currentEditUser = null;
+            currentEditServeTypes = {};
+            closeAllDropdowns();
         };
 
         // 設定事件監聽器
         function setupEventListeners() {
-            // 自動加入所有新使用者
-            document.getElementById('autoAddUsersBtn').addEventListener('click', autoAddNewUsers);
+            // 自動加入使用者 & 更新服事
+            document.getElementById('autoAddUsersBtn').addEventListener('click', autoAddAndUpdateUsers);
 
             // 搜尋
             document.getElementById('searchBox').addEventListener('input', (e) => {
@@ -364,65 +792,129 @@
 
             // 刪除使用者
             document.getElementById('deleteUserBtn').addEventListener('click', deleteUser);
+
+            // 確認新增使用者
+            document.getElementById('confirmAddUserBtn').addEventListener('click', confirmAddUser);
+
+            // Enter 鍵新增使用者
+            document.getElementById('newUserNameInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    confirmAddUser();
+                }
+            });
         }
 
-        // 自動加入所有新使用者
-        async function autoAddNewUsers() {
-            const newUsers = Array.from(schedulePersons).filter(name => !allUsers[name]);
+        // 確認新增使用者
+        async function confirmAddUser() {
+            const name = document.getElementById('newUserNameInput').value.trim();
 
-            if (newUsers.length === 0) {
-                alert('沒有需要加入的新使用者！');
+            if (!name) {
+                alert('請輸入使用者名稱');
                 return;
             }
 
-            if (!confirm(`確定要自動加入 ${newUsers.length} 位新使用者嗎？`)) {
+            if (allUsers[name]) {
+                alert('此使用者已存在');
                 return;
             }
 
             try {
-                // 收集每個新使用者在此崇拜的服事項目
-                const userServeItems = {};
-                newUsers.forEach(name => {
-                    userServeItems[name] = new Set();
-                });
+                const userData = {
+                    alarm_type: [false, false, false, false, false, false],
+                    lineId: '',
+                    serve_types: {}
+                };
 
-                // 從班表中收集服事項目
-                const snapshot = await getDocs(collection(db, targetCollection));
-                snapshot.forEach(docRef => {
-                    if (docRef.id !== '_metadata') {
-                        const data = docRef.data();
-                        serviceItems.forEach(item => {
-                            if (data[item] && Array.isArray(data[item])) {
-                                data[item].forEach(name => {
-                                    if (userServeItems[name]) {
-                                        userServeItems[name].add(item);
-                                    }
-                                });
-                            }
-                        });
+                await setDoc(doc(db, 'users', name), userData);
+                allUsers[name] = userData;
+
+                closeModal('addUserModal');
+                renderUserList(document.getElementById('searchBox').value);
+
+                // 開啟編輯 modal
+                openEditUserModal(name);
+
+            } catch (error) {
+                console.error('新增使用者失敗:', error);
+                alert('新增失敗：' + error.message);
+            }
+        }
+
+        // 自動加入使用者 & 更新服事（只處理2個字的名字）
+        async function autoAddAndUpdateUsers() {
+            // 找出需要處理的使用者（2個字的名字）
+            const usersToProcess = Array.from(schedulePersons).filter(name => {
+                if (name.length !== 2) return false;
+
+                const userData = allUsers[name];
+                if (!userData) return true; // 新使用者
+
+                // 檢查是否有缺少的服事
+                const scheduledServes = personServeItems[name] || new Set();
+                const registeredServes = userData.serve_types?.[targetCollection] || [];
+                for (const serve of scheduledServes) {
+                    if (!registeredServes.includes(serve)) {
+                        return true;
                     }
-                });
+                }
+                return false;
+            });
 
-                // 建立使用者資料
-                for (const name of newUsers) {
-                    const userData = {
-                        alarm_type: [false, false, false, false, false, false],
-                        lineId: '',
-                        serve_types: {
-                            [targetCollection]: Array.from(userServeItems[name])
+            if (usersToProcess.length === 0) {
+                alert('沒有需要處理的使用者！\n（只會處理名字為2個字的使用者）');
+                return;
+            }
+
+            const newUsers = usersToProcess.filter(name => !allUsers[name]);
+            const updateUsers = usersToProcess.filter(name => allUsers[name]);
+
+            let message = `即將處理 ${usersToProcess.length} 位使用者：`;
+            if (newUsers.length > 0) {
+                message += `\n- 新增 ${newUsers.length} 位`;
+            }
+            if (updateUsers.length > 0) {
+                message += `\n- 更新 ${updateUsers.length} 位`;
+            }
+            message += '\n\n確定要執行嗎？';
+
+            if (!confirm(message)) {
+                return;
+            }
+
+            try {
+                for (const name of usersToProcess) {
+                    const scheduledServes = Array.from(personServeItems[name] || new Set());
+                    let userData = allUsers[name];
+
+                    if (!userData) {
+                        // 新使用者
+                        userData = {
+                            alarm_type: [false, false, false, false, false, false],
+                            lineId: '',
+                            serve_types: {
+                                [targetCollection]: scheduledServes
+                            }
+                        };
+                    } else {
+                        // 現有使用者，合併服事
+                        if (!userData.serve_types) {
+                            userData.serve_types = {};
                         }
-                    };
+                        const existingServes = userData.serve_types[targetCollection] || [];
+                        const mergedServes = [...new Set([...existingServes, ...scheduledServes])];
+                        userData.serve_types[targetCollection] = mergedServes;
+                    }
 
                     await setDoc(doc(db, 'users', name), userData);
                     allUsers[name] = userData;
                 }
 
-                alert(`成功加入 ${newUsers.length} 位新使用者！`);
+                alert(`處理完成！\n- 新增 ${newUsers.length} 位\n- 更新 ${updateUsers.length} 位`);
                 renderUserList();
 
             } catch (error) {
-                console.error('自動加入使用者失敗:', error);
-                alert('自動加入使用者失敗：' + error.message);
+                console.error('自動處理使用者失敗:', error);
+                alert('處理失敗：' + error.message);
             }
         }
 
@@ -437,30 +929,18 @@
                     alarmType.push(document.getElementById(`alarm${i}`).checked);
                 }
 
-                // 保留原有的 serve_types，如果是新使用者則從班表取得
-                let serveTypes = allUsers[currentEditUser]?.serve_types || {};
-
-                // 如果是新使用者，從班表取得服事項目
-                if (!allUsers[currentEditUser]) {
-                    const userServeItems = new Set();
-                    const snapshot = await getDocs(collection(db, targetCollection));
-                    snapshot.forEach(docRef => {
-                        if (docRef.id !== '_metadata') {
-                            const data = docRef.data();
-                            serviceItems.forEach(item => {
-                                if (data[item] && data[item].includes(currentEditUser)) {
-                                    userServeItems.add(item);
-                                }
-                            });
-                        }
-                    });
-                    serveTypes[targetCollection] = Array.from(userServeItems);
+                // 清理空的崇拜
+                const cleanedServeTypes = {};
+                for (const [collName, items] of Object.entries(currentEditServeTypes)) {
+                    if (items && items.length > 0) {
+                        cleanedServeTypes[collName] = items;
+                    }
                 }
 
                 const userData = {
                     alarm_type: alarmType,
                     lineId: lineId,
-                    serve_types: serveTypes
+                    serve_types: cleanedServeTypes
                 };
 
                 await setDoc(doc(db, 'users', currentEditUser), userData);
@@ -489,7 +969,6 @@
 
                 closeModal('editUserModal');
                 renderUserList(document.getElementById('searchBox').value);
-                alert('刪除成功！');
 
             } catch (error) {
                 console.error('刪除使用者失敗:', error);
