@@ -1041,3 +1041,155 @@ body {
   cursor: pointer;
   accent-color: var(--primary-color);
 }
+
+/* ===========================
+   帶警示符號的按鈕
+   =========================== */
+.btn-with-badge {
+  position: relative;
+}
+
+.badge-alert {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  background: #dc2626;
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.badge-alert.hidden {
+  display: none;
+}
+
+/* ===========================
+   使用者管理頁面
+   =========================== */
+.user-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+}
+
+.user-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-md);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-normal);
+  cursor: pointer;
+}
+
+.user-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.user-card.new-user {
+  border-color: var(--warning-color);
+  background: #fffbeb;
+}
+
+.user-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+}
+
+.user-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.user-card-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.user-card-badge.new {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.user-card-badge.linked {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.user-card-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.user-card-serve {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--spacing-xs);
+}
+
+.serve-tag {
+  padding: 2px 8px;
+  background: var(--primary-light);
+  color: var(--primary-color);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 提醒設定 checkbox 群組 */
+.alarm-settings {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.alarm-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 14px;
+}
+
+.alarm-checkbox-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary-color);
+}
+
+/* 快速操作區 */
+.quick-actions {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius-lg);
+  margin-bottom: var(--spacing-md);
+}
+
+.stats-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.stats-info strong {
+  color: var(--text-primary);
+}

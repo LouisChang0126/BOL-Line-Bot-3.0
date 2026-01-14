@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用者管理</title>
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        .admin-page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .search-box {
+            padding: 10px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            font-size: 14px;
+            width: 250px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="admin-page">
+        <div class="page-header">
+            <a id="backBtn" href="edit-chart.html" class="btn btn-secondary" style="padding: 6px 12px;">← 返回</a>
+            <h1>👥 <span id="pageTitle">使用者管理</span></h1>
+        </div>
+
+        <!-- 快速操作區 -->
+        <div class="quick-actions">
+            <button class="btn btn-primary" id="autoAddUsersBtn">
+                🔄 自動加入所有新使用者
+            </button>
+            <input type="text" class="search-box" id="searchBox" placeholder="搜尋使用者...">
+            <div class="stats-info">
+                <span>總計 <strong id="totalUsers">0</strong> 位使用者</span>
+                <span>新增 <strong id="newUsers">0</strong> 位</span>
+            </div>
+        </div>
+
+        <!-- 使用者列表 -->
+        <div class="user-list" id="userList">
+            <div style="text-align: center; padding: 40px; color: var(--text-secondary);">載入中...</div>
+        </div>
+    </div>
+
+    <!-- 編輯使用者 Modal -->
+    <div class="modal-overlay hidden" id="editUserModal">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>編輯使用者：<span id="editUserName"></span></h2>
+                <button class="modal-close" onclick="closeModal('editUserModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- LINE ID -->
+                <div class="form-group">
+                    <label>LINE ID</label>
+                    <input type="text" class="form-control" id="lineIdInput" placeholder="輸入 LINE 使用者 ID">
+                </div>
+
+                <!-- 提醒設定 -->
+                <div class="form-group">
+                    <label>提醒設定（週一至週六）</label>
+                    <div class="alarm-settings" id="alarmSettings">
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm0"> 週一
+                        </label>
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm1"> 週二
+                        </label>
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm2"> 週三
+                        </label>
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm3"> 週四
+                        </label>
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm4"> 週五
+                        </label>
+                        <label class="alarm-checkbox-item">
+                            <input type="checkbox" id="alarm5"> 週六
+                        </label>
+                    </div>
+                </div>
+
+                <!-- 服事項目 -->
+                <div class="form-group">
+                    <label>服事項目</label>
+                    <div id="serveTypesDisplay">
+                        <!-- 動態生成 -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button class="btn btn-danger" id="deleteUserBtn">刪除使用者</button>
+                <div style="display: flex; gap: 16px;">
+                    <button class="btn btn-secondary" onclick="closeModal('editUserModal')">取消</button>
+                    <button class="btn btn-primary" id="saveUserBtn">儲存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
+        import { getFirestore, collection, doc, getDocs, getDoc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig } from '../firebase-config.js';
+
+        const SERVE_DISPLAY_NAMES = {
+            'youth-serve': '青年崇拜',
+            'kids-serve': '兒童崇拜',
+            'adult-serve': '成人崇拜'
+        };
+
+        const VALID_COLLECTIONS = ['youth-serve', 'kids-serve', 'adult-serve'];
+
+        // 從 URL 取得 collection
+        const urlParams = new URLSearchParams(window.location.search);
+        const targetCollection = urlParams.get('collection') || 'youth-serve';
+        const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
+
+        document.getElementById('pageTitle').textContent = `${displayName} 使用者管理`;
+        document.title = `${displayName} 使用者管理`;
+        document.getElementById('backBtn').href = `edit-chart.html?collection=${targetCollection}`;
+
+        let db;
+        let allUsers = {}; // { userName: userData }
+        let schedulePersons = new Set(); // 班表中出現的所有人名
+        let serviceItems = []; // 該崇拜的服事項目
+        let currentEditUser = null;
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+
+                // 初始化 App Check
+                const appCheck = initializeAppCheck(app, {
+                    provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
+                    isTokenAutoRefreshEnabled: true
+                });
+
+                db = getFirestore(app);
+
+                // 載入資料
+                await loadServiceItems();
+                await loadSchedulePersons();
+                await loadUsers();
+
+                // 渲染使用者列表
+                renderUserList();
+
+                // 設定事件
+                setupEventListeners();
+
+            } catch (error) {
+                console.error('初始化失敗:', error);
+                document.getElementById('userList').innerHTML =
+                    '<div style="text-align: center; padding: 40px; color: #ef4444;">載入失敗</div>';
+            }
+        }
+
+        // 載入服事項目
+        async function loadServiceItems() {
+            const metadataRef = doc(db, targetCollection, '_metadata');
+            const metadataDoc = await getDoc(metadataRef);
+            if (metadataDoc.exists()) {
+                serviceItems = metadataDoc.data().serviceItems || [];
+            }
+        }
+
+        // 載入班表中的所有人名
+        async function loadSchedulePersons() {
+            const snapshot = await getDocs(collection(db, targetCollection));
+            schedulePersons = new Set();
+
+            snapshot.forEach(docRef => {
+                if (docRef.id !== '_metadata') {
+                    const data = docRef.data();
+                    serviceItems.forEach(item => {
+                        if (data[item] && Array.isArray(data[item])) {
+                            data[item].forEach(name => schedulePersons.add(name));
+                        }
+                    });
+                }
+            });
+        }
+
+        // 載入所有使用者
+        async function loadUsers() {
+            const snapshot = await getDocs(collection(db, 'users'));
+            allUsers = {};
+
+            snapshot.forEach(docRef => {
+                allUsers[docRef.id] = docRef.data();
+            });
+        }
+
+        // 渲染使用者列表
+        function renderUserList(searchTerm = '') {
+            const userList = document.getElementById('userList');
+
+            // 合併：班表中的人 + 已註冊的人
+            const allNames = new Set([...schedulePersons, ...Object.keys(allUsers)]);
+            let usersArray = Array.from(allNames).sort();
+
+            // 搜尋過濾
+            if (searchTerm) {
+                usersArray = usersArray.filter(name =>
+                    name.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+            }
+
+            if (usersArray.length === 0) {
+                userList.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-secondary);">沒有找到使用者</div>';
+                return;
+            }
+
+            let newCount = 0;
+            let html = '';
+
+            usersArray.forEach(name => {
+                const userData = allUsers[name];
+                const isNew = !userData;
+                const isInSchedule = schedulePersons.has(name);
+
+                if (isNew) newCount++;
+
+                // 取得服事項目
+                let serveTags = '';
+                if (userData && userData.serve_types && userData.serve_types[targetCollection]) {
+                    serveTags = userData.serve_types[targetCollection]
+                        .map(s => `<span class="serve-tag">${s}</span>`)
+                        .join('');
+                }
+
+                // 取得其他崇拜資訊
+                let otherServes = '';
+                if (userData && userData.serve_types) {
+                    const others = Object.keys(userData.serve_types)
+                        .filter(c => c !== targetCollection)
+                        .map(c => SERVE_DISPLAY_NAMES[c] || c);
+                    if (others.length > 0) {
+                        otherServes = `<div style="margin-top: 4px; font-size: 11px; color: var(--text-light);">也在：${others.join('、')}</div>`;
+                    }
+                }
+
+                html += `
+          <div class="user-card ${isNew ? 'new-user' : ''}" data-name="${name}">
+            <div class="user-card-header">
+              <span class="user-card-name">${name}</span>
+              ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
+              ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
+            </div>
+            <div class="user-card-body">
+              ${isInSchedule ? '<div>📋 在此崇拜班表中</div>' : '<div style="color: var(--text-light);">不在此崇拜班表中</div>'}
+              ${serveTags ? `<div class="user-card-serve">${serveTags}</div>` : ''}
+              ${otherServes}
+            </div>
+          </div>
+        `;
+            });
+
+            userList.innerHTML = html;
+
+            // 更新統計
+            document.getElementById('totalUsers').textContent = usersArray.length;
+            document.getElementById('newUsers').textContent = newCount;
+
+            // 綁定卡片點擊事件
+            document.querySelectorAll('.user-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    const name = card.dataset.name;
+                    openEditUserModal(name);
+                });
+            });
+        }
+
+        // 開啟編輯使用者 Modal
+        function openEditUserModal(name) {
+            currentEditUser = name;
+            const userData = allUsers[name];
+
+            document.getElementById('editUserName').textContent = name;
+            document.getElementById('lineIdInput').value = userData?.lineId || '';
+
+            // 設定 alarm checkboxes
+            const alarmTypes = userData?.alarm_type || [false, false, false, false, false, false];
+            for (let i = 0; i < 6; i++) {
+                document.getElementById(`alarm${i}`).checked = alarmTypes[i] || false;
+            }
+
+            // 顯示服事項目
+            renderServeTypesDisplay(userData?.serve_types || {});
+
+            document.getElementById('editUserModal').classList.remove('hidden');
+        }
+
+        // 渲染服事項目顯示
+        function renderServeTypesDisplay(serveTypes) {
+            const container = document.getElementById('serveTypesDisplay');
+            let html = '';
+
+            VALID_COLLECTIONS.forEach(collName => {
+                const collDisplayName = SERVE_DISPLAY_NAMES[collName];
+                const items = serveTypes[collName] || [];
+
+                html += `
+          <div style="margin-bottom: 12px;">
+            <div style="font-weight: 500; margin-bottom: 4px;">${collDisplayName}</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+              ${items.length > 0
+                        ? items.map(s => `<span class="serve-tag">${s}</span>`).join('')
+                        : '<span style="color: var(--text-light); font-size: 13px;">無</span>'
+                    }
+            </div>
+          </div>
+        `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 關閉 Modal
+        window.closeModal = function (modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+            currentEditUser = null;
+        };
+
+        // 設定事件監聽器
+        function setupEventListeners() {
+            // 自動加入所有新使用者
+            document.getElementById('autoAddUsersBtn').addEventListener('click', autoAddNewUsers);
+
+            // 搜尋
+            document.getElementById('searchBox').addEventListener('input', (e) => {
+                renderUserList(e.target.value);
+            });
+
+            // 儲存使用者
+            document.getElementById('saveUserBtn').addEventListener('click', saveUser);
+
+            // 刪除使用者
+            document.getElementById('deleteUserBtn').addEventListener('click', deleteUser);
+        }
+
+        // 自動加入所有新使用者
+        async function autoAddNewUsers() {
+            const newUsers = Array.from(schedulePersons).filter(name => !allUsers[name]);
+
+            if (newUsers.length === 0) {
+                alert('沒有需要加入的新使用者！');
+                return;
+            }
+
+            if (!confirm(`確定要自動加入 ${newUsers.length} 位新使用者嗎？`)) {
+                return;
+            }
+
+            try {
+                // 收集每個新使用者在此崇拜的服事項目
+                const userServeItems = {};
+                newUsers.forEach(name => {
+                    userServeItems[name] = new Set();
+                });
+
+                // 從班表中收集服事項目
+                const snapshot = await getDocs(collection(db, targetCollection));
+                snapshot.forEach(docRef => {
+                    if (docRef.id !== '_metadata') {
+                        const data = docRef.data();
+                        serviceItems.forEach(item => {
+                            if (data[item] && Array.isArray(data[item])) {
+                                data[item].forEach(name => {
+                                    if (userServeItems[name]) {
+                                        userServeItems[name].add(item);
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+
+                // 建立使用者資料
+                for (const name of newUsers) {
+                    const userData = {
+                        alarm_type: [false, false, false, false, false, false],
+                        lineId: '',
+                        serve_types: {
+                            [targetCollection]: Array.from(userServeItems[name])
+                        }
+                    };
+
+                    await setDoc(doc(db, 'users', name), userData);
+                    allUsers[name] = userData;
+                }
+
+                alert(`成功加入 ${newUsers.length} 位新使用者！`);
+                renderUserList();
+
+            } catch (error) {
+                console.error('自動加入使用者失敗:', error);
+                alert('自動加入使用者失敗：' + error.message);
+            }
+        }
+
+        // 儲存使用者
+        async function saveUser() {
+            if (!currentEditUser) return;
+
+            try {
+                const lineId = document.getElementById('lineIdInput').value.trim();
+                const alarmType = [];
+                for (let i = 0; i < 6; i++) {
+                    alarmType.push(document.getElementById(`alarm${i}`).checked);
+                }
+
+                // 保留原有的 serve_types，如果是新使用者則從班表取得
+                let serveTypes = allUsers[currentEditUser]?.serve_types || {};
+
+                // 如果是新使用者，從班表取得服事項目
+                if (!allUsers[currentEditUser]) {
+                    const userServeItems = new Set();
+                    const snapshot = await getDocs(collection(db, targetCollection));
+                    snapshot.forEach(docRef => {
+                        if (docRef.id !== '_metadata') {
+                            const data = docRef.data();
+                            serviceItems.forEach(item => {
+                                if (data[item] && data[item].includes(currentEditUser)) {
+                                    userServeItems.add(item);
+                                }
+                            });
+                        }
+                    });
+                    serveTypes[targetCollection] = Array.from(userServeItems);
+                }
+
+                const userData = {
+                    alarm_type: alarmType,
+                    lineId: lineId,
+                    serve_types: serveTypes
+                };
+
+                await setDoc(doc(db, 'users', currentEditUser), userData);
+                allUsers[currentEditUser] = userData;
+
+                closeModal('editUserModal');
+                renderUserList(document.getElementById('searchBox').value);
+
+            } catch (error) {
+                console.error('儲存使用者失敗:', error);
+                alert('儲存失敗：' + error.message);
+            }
+        }
+
+        // 刪除使用者
+        async function deleteUser() {
+            if (!currentEditUser) return;
+
+            if (!confirm(`確定要刪除使用者「${currentEditUser}」嗎？`)) {
+                return;
+            }
+
+            try {
+                await deleteDoc(doc(db, 'users', currentEditUser));
+                delete allUsers[currentEditUser];
+
+                closeModal('editUserModal');
+                renderUserList(document.getElementById('searchBox').value);
+                alert('刪除成功！');
+
+            } catch (error) {
+                console.error('刪除使用者失敗:', error);
+                alert('刪除失敗：' + error.message);
+            }
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

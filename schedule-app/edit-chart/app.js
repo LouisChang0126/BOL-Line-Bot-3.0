@@ -1531,6 +1531,18 @@ function initDisplayConfigEditor() {
             window.location.href = `../chart-difference/difference.html?collection=${collectionName}`;
         });
     }
+
+    // 管理使用者按鈕
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    if (manageUsersBtn) {
+        manageUsersBtn.addEventListener('click', () => {
+            const collectionName = window.COLLECTION_NAME;
+            window.location.href = `edit-user.html?collection=${collectionName}`;
+        });
+    }
+
+    // 檢查是否有未註冊的使用者
+    checkMissingUsers();
 }
 
 // 開啟編輯顯示欄位 Modal
@@ -1865,3 +1877,46 @@ async function loadDisplayConfig() {
     }
 }
 
+// ===========================
+// 使用者管理 - 檢查未註冊使用者
+// ===========================
+async function checkMissingUsers() {
+    try {
+        const { collection, getDocs } = window.firestore;
+        const db = window.db;
+
+        // 取得所有 users collection 中的使用者名稱
+        const usersSnapshot = await getDocs(collection(db, 'users'));
+        const registeredUsers = new Set();
+        usersSnapshot.forEach(doc => {
+            registeredUsers.add(doc.id);
+        });
+
+        // 檢查班表中的人名是否都有註冊
+        let hasMissingUsers = false;
+        for (const name of allPersonNames) {
+            if (!registeredUsers.has(name)) {
+                hasMissingUsers = true;
+                break;
+            }
+        }
+
+        // 更新警示符號
+        updateUserAlertBadge(hasMissingUsers);
+
+    } catch (error) {
+        console.error('檢查未註冊使用者失敗:', error);
+    }
+}
+
+// 更新使用者警示符號
+function updateUserAlertBadge(show) {
+    const badge = document.getElementById('userAlertBadge');
+    if (badge) {
+        if (show) {
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+}
