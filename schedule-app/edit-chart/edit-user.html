@@ -560,7 +560,7 @@
             // 取得有服事的崇拜
             const collectionsWithServes = VALID_COLLECTIONS.filter(collName => {
                 const items = currentEditServeTypes[collName];
-                return items && items.length > 0;
+                return items && items.length >= 0;
             });
 
             // 如果沒有任何服事，顯示目前崇拜的空區塊
@@ -705,9 +705,8 @@
         function showCollectionDropdown(btn) {
             closeAllDropdowns();
 
-            const usedCollections = Object.keys(currentEditServeTypes).filter(c =>
-                currentEditServeTypes[c] && currentEditServeTypes[c].length > 0
-            );
+            // 已使用的崇拜：只要 key 存在就算已使用（包含空陣列）
+            const usedCollections = Object.keys(currentEditServeTypes);
             const unusedCollections = VALID_COLLECTIONS.filter(c => !usedCollections.includes(c));
 
             if (unusedCollections.length === 0) return;
