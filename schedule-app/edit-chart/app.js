@@ -1522,6 +1522,15 @@ function initDisplayConfigEditor() {
     if (saveBtn) {
         saveBtn.addEventListener('click', saveDisplayConfig);
     }
+
+    // 編輯記錄按鈕
+    const viewLogsBtn = document.getElementById('viewLogsBtn');
+    if (viewLogsBtn) {
+        viewLogsBtn.addEventListener('click', () => {
+            const collectionName = window.COLLECTION_NAME;
+            window.location.href = `../chart-difference/difference.html?collection=${collectionName}`;
+        });
+    }
 }
 
 // 開啟編輯顯示欄位 Modal
