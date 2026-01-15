@@ -4,13 +4,13 @@
 
 ## ✨ 功能特色
 
-### 🎯 二種使用者角色
+### 🎯 三種使用者介面
 
-| 角色 | 路徑 | 功能 |
+| 介面 | 路徑 | 功能 |
 |------|------|------|
-| 📖 **一般會友** | `schedule-app/` | 只能查看班表，無法編輯 |
-| ✏️ **管理員** | `edit-chart/` | 可編輯班表，支援撤銷/重做 |
-| 🔧 **管理員** | `chart-difference/` | 查看編輯記錄，一鍵還原 |
+| 📖 **班表查看** | `schedule-app/` | 只能查看班表，支援使用者 highlight |
+| ✏️ **班表編輯** | `edit-chart/` | 編輯班表、管理使用者，支援撤銷/重做 |
+| 🔧 **編輯記錄** | `chart-difference/` | 查看編輯記錄，一鍵還原 |
 
 ### 📅 日期管理
 - ✏️ 編輯任一日期，其他日期自動調整（保持7天間隔）
@@ -22,12 +22,32 @@
 - ✏️ 編輯服事項目名稱（點擊標題即可編輯）
 - 🗑️ 在編輯對話框中移除服事項目
 - 🔀 拖拉排序服事項目（拖拉表頭）
+- 📊 編輯顯示欄位（分組管理、隱藏項目）
 
 ### 👥 人員管理
 - 點擊格子編輯服事人員
 - 顯示在該服事有經驗的人員優先
 - 只顯示2個字的人名（節省空間）
 - 人員以彩色積木（chip）方式顯示（30種顏色）
+
+### 👤 使用者管理（新功能）
+- 📜 **編輯記錄**：查看班表編輯歷史並可一鍵還原
+- 👥 **管理使用者**：統一管理所有服事人員資料
+  - 🔄 自動加入使用者 & 更新服事（只處理2個字的名字）
+  - ⏰ 提醒設定（週一至週六）
+  - 🔗 LINE ID 綁定
+  - 📋 跨崇拜服事項目管理
+- ⚠️ **即時警示**：當班表有未註冊或需更新的使用者時顯示提醒
+
+### ⛪ 崇拜管理（新功能）
+- ➕ **新增崇拜**：管理員可新增最多 5 場崇拜
+- ✏️ **編輯名稱**：可更改崇拜名稱和 Emoji
+- 🗑️ **刪除崇拜**：需輸入 Collection ID 確認，防止誤刪
+- 🎨 **10種 Emoji**：⛪ 🎸 🧒 👥 🎵 📖 🙏 ✝️ 🕊️ 💒
+
+### 🔍 班表查看功能
+- 🔦 **使用者 Highlight**：網址加上 `?user=名字` 可高亮顯示該使用者的服事格
+- 📅 **顯示前5週**：可選擇顯示已過期的班表資料
 
 ### 🔄 撤銷/重做功能
 - ⬅️ Ctrl+Z 撤銷（最多20步）
@@ -37,7 +57,7 @@
 ### 📝 編輯記錄系統
 - 自動記錄每次編輯的原始狀態和變更差異
 - 儲存在 `edit-chart-log` collection
-- 高階管理員可查看並一鍵還原
+- 管理員可查看並一鍵還原
 
 ### 🎯 進階功能
 - 🖱️ **拖拉操作**：直接拖拉人員積木到其他格子
@@ -65,8 +85,8 @@
 
 ```
 schedule-app/
-├── index.html           # 班表選擇頁面 唯讀版本（給一般會友）
-├── view.html            # 班表查看頁面
+├── index.html           # 班表選擇頁面（唯讀版本）
+├── view.html            # 班表查看頁面（支援 ?user= highlight）
 ├── styles.css           # Airbnb 風格樣式
 ├── firebase-config.js   # Firebase 配置
 ├── README.md            # 說明文件
@@ -74,6 +94,7 @@ schedule-app/
 ├── edit-chart/          # 編輯班表（給管理員）
 │   ├── index.html       # 班表選擇頁面
 │   ├── edit-chart.html  # 班表編輯頁面
+│   ├── edit-user.html   # 使用者管理頁面
 │   └── app.js           # 核心應用程式邏輯
 │
 └── chart-difference/    # 編輯記錄（給管理員）
@@ -83,7 +104,20 @@ schedule-app/
 
 ## 📊 Firestore 資料結構
 
-### 班表 Collection（youth-serve、kids-serve、adult-serve）
+### 系統設定 Collection（_config）
+
+```javascript
+// Document ID: "serve-list"
+{
+  serves: [
+    { id: "youth-serve", name: "青年崇拜", emoji: "🎸" },
+    { id: "kids-serve", name: "兒童崇拜", emoji: "🧒" },
+    { id: "adult-serve", name: "成人崇拜", emoji: "⛪" }
+  ]
+}
+```
+
+### 班表 Collection（動態建立，如 youth-serve）
 
 ```javascript
 // Document ID: "2026.01.04"（日期）
@@ -95,7 +129,36 @@ schedule-app/
 
 // Document ID: "_metadata"
 {
-  serviceItems: ["主領", "音控", "字幕", ...]
+  serviceItems: ["主領", "音控", "字幕", ...],
+  displayConfig: {
+    groups: [...],
+    hidden: [...]
+  }
+}
+```
+
+### 使用者 Collection（users）
+
+```javascript
+// Document ID: "小明"（使用者名稱，限定2個字）
+{
+  alarm_type: [false, false, false, false, false, false], // 週一至週六提醒
+  lineId: "",                                              // LINE 使用者 ID
+  serve_types: {
+    "youth-serve": ["主領", "音控"],                        // 各場崇拜的服事項目
+    "kids-serve": ["司會"]
+  }
+}
+```
+
+### 過期班表 Collection（Expired-{collection}）
+
+```javascript
+// 例如: Expired-youth-serve
+// Document ID: "2025.12.28"（過期日期）
+{
+  主領: ["劉婕"],
+  音控: ["家睿"]
 }
 ```
 
@@ -125,10 +188,16 @@ schedule-app/
 A: 請使用右鍵選單選擇起始格子，再點擊「從此格貼上」。
 
 ### Q: 如何還原誤刪的資料？
-A: 高階管理員可在 `chart-difference/` 頁面查看編輯記錄並一鍵還原。
+A: 管理員可在 `chart-difference/` 頁面查看編輯記錄並一鍵還原。
 
 ### Q: 撤銷功能有限制嗎？
 A: 最多記錄20步操作，超過會覆蓋最舊的記錄。
+
+### Q: 為什麼有些人名不會出現在使用者管理中？
+A: 系統只處理名字為2個字的使用者，超過2個字的名字會被忽略。
+
+### Q: 如何查看特定使用者的服事？
+A: 在班表查看頁面的網址加上 `?user=名字`，例如 `view.html?collection=youth-serve&user=小美`
 
 ---
 

@@ -205,33 +205,50 @@
     const urlParams = new URLSearchParams(window.location.search);
     const collectionName = urlParams.get('collection') || '';
 
-    // 有效的 collection 列表
-    const VALID_COLLECTIONS = ['youth-serve', 'kids-serve', 'adult-serve'];
-
-    // Collection 名稱對照表
-    const COLLECTION_DISPLAY_NAMES = {
-      'youth-serve': '青年崇拜班表',
-      'kids-serve': '兒童崇拜班表',
-      'adult-serve': '成人崇拜班表'
-    };
-
-    // 驗證 collection 是否有效
-    if (!VALID_COLLECTIONS.includes(collectionName)) {
+    // 顯示錯誤頁面
+    function showError(title, message) {
       document.querySelector('.app-container').innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
           <h1 style="color: #ef4444; font-size: 48px; margin-bottom: 16px;">⚠️</h1>
-          <h2 style="color: #ef4444; margin-bottom: 8px;">Error: Dataset not found</h2>
-          <p style="color: #64748b;">無效的班表名稱: ${collectionName || '(未指定)'}</p>
+          <h2 style="color: #ef4444; margin-bottom: 8px;">${title}</h2>
+          <p style="color: #64748b;">${message}</p>
           <a href="index.html" class="btn btn-primary" style="margin-top: 24px;">返回選擇頁面</a>
         </div>
       `;
-      throw new Error('Invalid collection');
     }
 
-    // 更新頁面標題
-    const displayName = COLLECTION_DISPLAY_NAMES[collectionName];
-    document.getElementById('collectionTitle').textContent = displayName;
-    document.title = `${displayName} - 教會服事班表系統`;
+    // 載入崇拜列表並驗證
+    async function loadAndValidateCollection(db) {
+      const { doc, getDoc } = window.firestore;
+      const serveListRef = doc(db, '_config', 'serve-list');
+      const serveListDoc = await getDoc(serveListRef);
+
+      if (!serveListDoc.exists()) {
+        showError('尚未設定', '請先到管理頁面新增崇拜');
+        return null;
+      }
+
+      const serveList = serveListDoc.data().serves || [];
+      if (serveList.length === 0) {
+        showError('尚未設定', '請先到管理頁面新增崇拜');
+        return null;
+      }
+
+      // 檢查 collection 是否有效
+      const serve = serveList.find(s => s.id === collectionName);
+      if (!serve) {
+        showError('找不到班表', `無效的班表名稱: ${collectionName || '(未指定)'}`);
+        return null;
+      }
+
+      return serve;
+    }
+
+    // 更新頁面標題（在驗證成功後呼叫）
+    function updatePageTitle(serve) {
+      document.getElementById('collectionTitle').textContent = serve.name + '班表';
+      document.title = `${serve.name}班表 - 教會服事班表系統`;
+    }
 
     // 記錄進入頁面的時間
     const sessionStartTime = new Date();
@@ -251,44 +268,55 @@
       collectionName: collectionName
     });
 
-    // 初始化 Firebase
-    try {
-      const app = initializeApp(firebaseConfig);
-      console.log('✅ Firebase App 初始化成功');
+    // 初始化 Firebase（使用 async IIFE）
+    (async function initFirebase() {
+      try {
+        const app = initializeApp(firebaseConfig);
+        console.log('✅ Firebase App 初始化成功');
 
-      // 初始化 App Check
-      const appCheck = initializeAppCheck(app, {
-        provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
-        isTokenAutoRefreshEnabled: true
-      });
+        // 初始化 App Check
+        const appCheck = initializeAppCheck(app, {
+          provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
+          isTokenAutoRefreshEnabled: true
+        });
 
-      const db = getFirestore(app);
-      console.log('✅ Firestore 連接成功');
+        const db = getFirestore(app);
+        console.log('✅ Firestore 連接成功');
 
-      // 將全域變數掛載到 window
-      window.db = db;
-      window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy };
-      window.COLLECTION_NAME = collectionName;
+        // 將全域變數掛載到 window
+        window.db = db;
+        window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy };
+        window.COLLECTION_NAME = collectionName;
 
-      console.log('✅ Firebase 全域變數已設定');
+        console.log('✅ Firebase 全域變數已設定');
 
-      // 載入主要應用程式（單一檔案 app.js）
-      import('./app.js').then(() => {
-        console.log('✅ app.js 已載入');
-      }).catch(error => {
-        console.error('❌ 載入應用程式失敗:', error);
-        document.getElementById('statusText').textContent = '載入失敗，請檢查 Firebase 配置';
-      });
-    } catch (error) {
-      console.error('❌ Firebase 初始化失敗:', error);
-      console.error('錯誤詳情:', {
-        name: error.name,
-        message: error.message,
-        code: error.code
-      });
-      document.getElementById('statusText').textContent = 'Firebase 初始化失敗';
-      alert(`Firebase 初始化失敗：${error.message}\n\n請檢查 firebase-config.js 中的配置是否正確。`);
-    }
+        // 驗證 collection 是否有效
+        const serve = await loadAndValidateCollection(db);
+        if (!serve) {
+          return; // 驗證失敗，showError 已顯示錯誤訊息
+        }
+
+        // 更新頁面標題
+        updatePageTitle(serve);
+
+        // 載入主要應用程式（單一檔案 app.js）
+        import('./app.js').then(() => {
+          console.log('✅ app.js 已載入');
+        }).catch(error => {
+          console.error('❌ 載入應用程式失敗:', error);
+          document.getElementById('statusText').textContent = '載入失敗，請檢查 Firebase 配置';
+        });
+      } catch (error) {
+        console.error('❌ Firebase 初始化失敗:', error);
+        console.error('錯誤詳情:', {
+          name: error.name,
+          message: error.message,
+          code: error.code
+        });
+        document.getElementById('statusText').textContent = 'Firebase 初始化失敗';
+        alert(`Firebase 初始化失敗：${error.message}\n\n請檢查 firebase-config.js 中的配置是否正確。`);
+      }
+    })();
   </script>
 </body>
 

@@ -38,7 +38,7 @@
             flex-wrap: wrap;
             gap: 24px;
             justify-content: center;
-            max-width: 900px;
+            max-width: 1100px;
         }
 
         .collection-card {
@@ -85,6 +85,12 @@
             display: inline-block;
             margin-top: 8px;
         }
+
+        .loading-message {
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
     </style>
 </head>
 
@@ -96,26 +102,74 @@
         </div>
 
         <div class="collection-cards" id="collectionCards">
-            <div class="collection-card" onclick="window.location.href='view.html?collection=youth-serve'">
-                <div class="icon">🎸</div>
-                <div class="name">青年崇拜</div>
-                <div class="description">青年主日服事班表</div>
-                <div class="readonly-badge">唯讀</div>
-            </div>
-            <div class="collection-card" onclick="window.location.href='view.html?collection=kids-serve'">
-                <div class="icon">🧒</div>
-                <div class="name">兒童崇拜</div>
-                <div class="description">兒童崇拜服事班表</div>
-                <div class="readonly-badge">唯讀</div>
-            </div>
-            <div class="collection-card" onclick="window.location.href='view.html?collection=adult-serve'">
-                <div class="icon">⛪</div>
-                <div class="name">成人崇拜</div>
-                <div class="description">成人主日服事班表</div>
-                <div class="readonly-badge">唯讀</div>
-            </div>
+            <div class="loading-message">載入中...</div>
         </div>
     </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
+        import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig } from './firebase-config.js';
+
+        let serveList = [];
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+
+                // 初始化 App Check
+                const appCheck = initializeAppCheck(app, {
+                    provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
+                    isTokenAutoRefreshEnabled: true
+                });
+
+                const db = getFirestore(app);
+
+                // 載入 serve-list（如果不存在則顯示空狀態）
+                const serveListRef = doc(db, '_config', 'serve-list');
+                const serveListDoc = await getDoc(serveListRef);
+
+                if (serveListDoc.exists()) {
+                    serveList = serveListDoc.data().serves || [];
+                } else {
+                    serveList = [];
+                }
+
+                renderCollectionCards();
+
+            } catch (error) {
+                console.error('初始化失敗:', error);
+                document.getElementById('collectionCards').innerHTML =
+                    '<div class="loading-message">載入失敗，請檢查網路連線</div>';
+            }
+        }
+
+        function renderCollectionCards() {
+            const container = document.getElementById('collectionCards');
+
+            if (serveList.length === 0) {
+                container.innerHTML = '<div class="loading-message">尚無可用的班表</div>';
+                return;
+            }
+
+            let html = '';
+            serveList.forEach(serve => {
+                html += `
+                    <div class="collection-card" onclick="window.location.href='view.html?collection=${serve.id}'">
+                        <div class="icon">${serve.emoji}</div>
+                        <div class="name">${serve.name}</div>
+                        <div class="description">${serve.id}</div>
+                        <div class="readonly-badge">唯讀</div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        init();
+    </script>
 </body>
 
 </html>

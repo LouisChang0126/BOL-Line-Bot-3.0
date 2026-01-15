@@ -68,33 +68,17 @@
         const urlParams = new URLSearchParams(window.location.search);
         const collectionName = urlParams.get('collection') || '';
 
-        // 有效的 collection 列表
-        const VALID_COLLECTIONS = ['youth-serve', 'kids-serve', 'adult-serve'];
-
-        // Collection 名稱對照表
-        const COLLECTION_DISPLAY_NAMES = {
-            'youth-serve': '青年崇拜班表',
-            'kids-serve': '兒童崇拜班表',
-            'adult-serve': '成人崇拜班表'
-        };
-
-        // 驗證 collection 是否有效
-        if (!VALID_COLLECTIONS.includes(collectionName)) {
+        // 顯示錯誤頁面
+        function showError(title, message) {
             document.querySelector('.app-container').innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
                     <h1 style="color: #ef4444; font-size: 48px; margin-bottom: 16px;">⚠️</h1>
-                    <h2 style="color: #ef4444; margin-bottom: 8px;">Error: Dataset not found</h2>
-                    <p style="color: #64748b;">無效的班表名稱: ${collectionName || '(未指定)'}</p>
+                    <h2 style="color: #ef4444; margin-bottom: 8px;">${title}</h2>
+                    <p style="color: #64748b;">${message}</p>
                     <a href="index.html" class="btn btn-primary" style="margin-top: 24px;">返回選擇頁面</a>
                 </div>
             `;
-            throw new Error('Invalid collection');
         }
-
-        // 更新頁面標題
-        const displayName = COLLECTION_DISPLAY_NAMES[collectionName];
-        document.getElementById('collectionTitle').textContent = displayName;
-        document.title = `${displayName} - 查看`;
 
         // 顏色陣列
         const PERSON_CHIP_COLORS = [
@@ -128,6 +112,16 @@
 
                 db = getFirestore(app);
 
+                // 驗證 collection 是否有效
+                const serve = await loadAndValidateCollection(db);
+                if (!serve) {
+                    return; // 驗證失敗，showError 已顯示錯誤訊息
+                }
+
+                // 更新頁面標題
+                document.getElementById('collectionTitle').textContent = serve.name + '班表';
+                document.title = `${serve.name}班表 - 查看`;
+
                 // 載入資料
                 await loadData(db);
 
@@ -146,6 +140,32 @@
             } catch (error) {
                 console.error('初始化失敗:', error);
             }
+        }
+
+        // 載入崇拜列表並驗證
+        async function loadAndValidateCollection(db) {
+            const serveListRef = doc(db, '_config', 'serve-list');
+            const serveListDoc = await getDoc(serveListRef);
+
+            if (!serveListDoc.exists()) {
+                showError('尚未設定', '請先到管理頁面新增崇拜');
+                return null;
+            }
+
+            const serveList = serveListDoc.data().serves || [];
+            if (serveList.length === 0) {
+                showError('尚未設定', '請先到管理頁面新增崇拜');
+                return null;
+            }
+
+            // 檢查 collection 是否有效
+            const serve = serveList.find(s => s.id === collectionName);
+            if (!serve) {
+                showError('找不到班表', `無效的班表名稱: ${collectionName || '(未指定)'}`);
+                return null;
+            }
+
+            return serve;
         }
 
         async function loadData(db) {

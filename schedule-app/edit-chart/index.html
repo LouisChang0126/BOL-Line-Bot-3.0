@@ -38,7 +38,7 @@
             flex-wrap: wrap;
             gap: 24px;
             justify-content: center;
-            max-width: 900px;
+            max-width: 1100px;
         }
 
         .collection-card {
@@ -51,6 +51,7 @@
             transition: all 0.25s ease;
             box-shadow: var(--shadow-md);
             min-width: 200px;
+            position: relative;
         }
 
         .collection-card:hover {
@@ -76,10 +77,119 @@
             color: var(--text-secondary);
         }
 
+        /* 新增崇拜卡片 */
+        .collection-card.add-card {
+            border: 2px dashed var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .collection-card.add-card:hover {
+            border-color: var(--primary-color);
+        }
+
+        .collection-card.add-card .icon {
+            color: var(--text-secondary);
+        }
+
+        /* 編輯/刪除按鈕 */
+        .card-actions {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 4px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .collection-card:hover .card-actions {
+            opacity: 1;
+        }
+
+        .card-action-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 50%;
+            background: var(--bg-secondary);
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .card-action-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .card-action-btn.delete:hover {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
         .loading-message {
             text-align: center;
             color: var(--text-secondary);
             font-size: 16px;
+        }
+
+        /* Emoji 選擇器 */
+        .emoji-picker {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 16px;
+        }
+
+        .emoji-option {
+            width: 48px;
+            height: 48px;
+            font-size: 28px;
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .emoji-option:hover {
+            border-color: var(--primary-color);
+            transform: scale(1.1);
+        }
+
+        .emoji-option.selected {
+            border-color: var(--primary-color);
+            background: var(--primary-light);
+        }
+
+        /* 警告 Modal */
+        .warning-modal .modal {
+            max-width: 500px;
+        }
+
+        .warning-text {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            color: #991b1b;
+        }
+
+        .confirm-input {
+            margin-top: 16px;
+        }
+
+        .confirm-input label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
         }
     </style>
 </head>
@@ -96,18 +206,74 @@
         </div>
     </div>
 
+    <!-- 新增/編輯崇拜 Modal -->
+    <div class="modal-overlay hidden" id="serveModal">
+        <div class="modal" style="max-width: 450px;">
+            <div class="modal-header">
+                <h2 id="serveModalTitle">新增崇拜</h2>
+                <button class="modal-close" onclick="closeModal('serveModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>選擇 Emoji</label>
+                    <div class="emoji-picker" id="emojiPicker">
+                        <!-- 動態生成 -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>崇拜名稱</label>
+                    <input type="text" class="form-control" id="serveNameInput" placeholder="例如：青年崇拜" maxlength="20">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('serveModal')">取消</button>
+                <button class="btn btn-primary" id="saveServeBtn">儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刪除確認 Modal -->
+    <div class="modal-overlay hidden warning-modal" id="deleteModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>⚠️ 刪除崇拜</h2>
+                <button class="modal-close" onclick="closeModal('deleteModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="warning-text">
+                    <strong>警告：此操作不可復原！</strong><br><br>
+                    刪除後，該崇拜的所有班表資料、過期資料、編輯記錄都將永久刪除。
+                </div>
+                <p>您即將刪除：<strong id="deleteServeName"></strong></p>
+                <div class="confirm-input">
+                    <label>請輸入崇拜名稱以確認刪除：</label>
+                    <input type="text" class="form-control" id="deleteConfirmInput" placeholder="">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('deleteModal')">取消</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn" disabled>確認刪除</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
-        import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, writeBatch } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { firebaseConfig } from '../firebase-config.js';
 
-        // 定義可用的 serve collections
-        const SERVE_COLLECTIONS = [
-            { id: 'youth-serve', name: '青年崇拜', icon: '🎸', description: '青年主日服事班表' },
-            { id: 'kids-serve', name: '兒童崇拜', icon: '🧒', description: '兒童崇拜服事班表' },
-            { id: 'adult-serve', name: '成人崇拜', icon: '⛪', description: '成人主日服事班表' }
-        ];
+        // 10個適合的 Emoji
+        const AVAILABLE_EMOJIS = ['⛪', '🎸', '🧒', '👥', '🎵', '📖', '🙏', '✝️', '🕊️', '💒'];
+
+        const MAX_SERVES = 5;
+
+        let db;
+        let serveList = []; // { id, name, emoji }
+        let editingServeId = null; // 編輯中的崇拜 ID
+        let selectedEmoji = AVAILABLE_EMOJIS[0];
+        let deleteTargetId = null;
+        let deleteTargetName = null; // 用於刪除確認
 
         async function init() {
             try {
@@ -119,20 +285,17 @@
                     isTokenAutoRefreshEnabled: true
                 });
 
-                const db = getFirestore(app);
+                db = getFirestore(app);
 
-                // 確保 _config/serve-list 存在
-                const serveListRef = doc(db, '_config', 'serve-list');
-                const serveListDoc = await getDoc(serveListRef);
+                // 載入 serve-list（如果不存在則使用預設值，但不主動建立）
+                await loadServeList();
 
-                if (!serveListDoc.exists()) {
-                    // 創建預設的 serve-list
-                    await setDoc(serveListRef, {
-                        collections: SERVE_COLLECTIONS.map(c => c.id)
-                    });
-                }
-
+                // 渲染卡片
                 renderCollectionCards();
+
+                // 設定事件
+                setupEventListeners();
+
             } catch (error) {
                 console.error('初始化失敗:', error);
                 document.getElementById('collectionCards').innerHTML =
@@ -140,21 +303,261 @@
             }
         }
 
+        async function loadServeList() {
+            const serveListRef = doc(db, '_config', 'serve-list');
+            const serveListDoc = await getDoc(serveListRef);
+
+            if (serveListDoc.exists()) {
+                serveList = serveListDoc.data().serves || [];
+            } else {
+                // _config 不存在，允許新增第一個崇拜
+                serveList = [];
+            }
+        }
+
+        async function saveServeList() {
+            const serveListRef = doc(db, '_config', 'serve-list');
+            await setDoc(serveListRef, { serves: serveList });
+        }
+
         function renderCollectionCards() {
             const container = document.getElementById('collectionCards');
-
             let html = '';
-            SERVE_COLLECTIONS.forEach(collection => {
+
+            // 現有崇拜卡片
+            serveList.forEach(serve => {
                 html += `
-          <div class="collection-card" onclick="window.location.href='edit-chart.html?collection=${collection.id}'">
-            <div class="icon">${collection.icon}</div>
-            <div class="name">${collection.name}</div>
-            <div class="description">${collection.description}</div>
-          </div>
-        `;
+                    <div class="collection-card" data-id="${serve.id}">
+                        <div class="card-actions">
+                            <button class="card-action-btn edit" data-id="${serve.id}" title="編輯">✏️</button>
+                            <button class="card-action-btn delete" data-id="${serve.id}" title="刪除">🗑️</button>
+                        </div>
+                        <div class="icon">${serve.emoji}</div>
+                        <div class="name">${serve.name}</div>
+                        <div class="description">${serve.id}</div>
+                    </div>
+                `;
             });
 
+            // 新增崇拜卡片（最多5場）
+            if (serveList.length < MAX_SERVES) {
+                html += `
+                    <div class="collection-card add-card" id="addServeCard">
+                        <div class="icon">➕</div>
+                        <div class="name">新增崇拜</div>
+                        <div class="description">最多 ${MAX_SERVES} 場</div>
+                    </div>
+                `;
+            }
+
             container.innerHTML = html;
+
+            // 綁定卡片點擊事件（進入班表）
+            container.querySelectorAll('.collection-card:not(.add-card)').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    // 如果點擊的是編輯/刪除按鈕，不跳轉
+                    if (e.target.closest('.card-action-btn')) return;
+                    const id = card.dataset.id;
+                    window.location.href = `edit-chart.html?collection=${id}`;
+                });
+            });
+
+            // 綁定新增卡片
+            const addCard = document.getElementById('addServeCard');
+            if (addCard) {
+                addCard.addEventListener('click', openAddServeModal);
+            }
+
+            // 綁定編輯按鈕
+            container.querySelectorAll('.card-action-btn.edit').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.dataset.id;
+                    openEditServeModal(id);
+                });
+            });
+
+            // 綁定刪除按鈕
+            container.querySelectorAll('.card-action-btn.delete').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const id = btn.dataset.id;
+                    openDeleteModal(id);
+                });
+            });
+        }
+
+        function renderEmojiPicker() {
+            const picker = document.getElementById('emojiPicker');
+            picker.innerHTML = AVAILABLE_EMOJIS.map(emoji => `
+                <button class="emoji-option ${emoji === selectedEmoji ? 'selected' : ''}" data-emoji="${emoji}">
+                    ${emoji}
+                </button>
+            `).join('');
+
+            // 綁定點擊事件
+            picker.querySelectorAll('.emoji-option').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    selectedEmoji = btn.dataset.emoji;
+                    picker.querySelectorAll('.emoji-option').forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                });
+            });
+        }
+
+        function openAddServeModal() {
+            editingServeId = null;
+            selectedEmoji = AVAILABLE_EMOJIS[0];
+
+            document.getElementById('serveModalTitle').textContent = '新增崇拜';
+            document.getElementById('serveNameInput').value = '';
+
+            renderEmojiPicker();
+            document.getElementById('serveModal').classList.remove('hidden');
+        }
+
+        function openEditServeModal(id) {
+            const serve = serveList.find(s => s.id === id);
+            if (!serve) return;
+
+            editingServeId = id;
+            selectedEmoji = serve.emoji;
+
+            document.getElementById('serveModalTitle').textContent = '編輯崇拜';
+            document.getElementById('serveNameInput').value = serve.name;
+
+            renderEmojiPicker();
+            document.getElementById('serveModal').classList.remove('hidden');
+        }
+
+        function openDeleteModal(id) {
+            const serve = serveList.find(s => s.id === id);
+            if (!serve) return;
+
+            deleteTargetId = id;
+            deleteTargetName = serve.name;
+            document.getElementById('deleteServeName').textContent = `${serve.emoji} ${serve.name}`;
+            document.getElementById('deleteConfirmInput').value = '';
+            document.getElementById('deleteConfirmInput').placeholder = serve.name;
+            document.getElementById('confirmDeleteBtn').disabled = true;
+
+            document.getElementById('deleteModal').classList.remove('hidden');
+        }
+
+        window.closeModal = function (modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+            editingServeId = null;
+            deleteTargetId = null;
+            deleteTargetName = null;
+        };
+
+        function setupEventListeners() {
+            // 儲存崇拜
+            document.getElementById('saveServeBtn').addEventListener('click', saveServe);
+
+            // 刪除確認輸入（比對名稱）
+            document.getElementById('deleteConfirmInput').addEventListener('input', (e) => {
+                const confirmBtn = document.getElementById('confirmDeleteBtn');
+                confirmBtn.disabled = e.target.value !== deleteTargetName;
+            });
+
+            // 確認刪除
+            document.getElementById('confirmDeleteBtn').addEventListener('click', deleteServe);
+
+            // Enter 鍵儲存
+            document.getElementById('serveNameInput').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') saveServe();
+            });
+        }
+
+        async function saveServe() {
+            const name = document.getElementById('serveNameInput').value.trim();
+
+            if (!name) {
+                alert('請輸入崇拜名稱');
+                return;
+            }
+
+            if (!editingServeId) {
+                // 新增模式 - 使用名稱作為 ID
+                const id = name;
+
+                // 檢查是否重複
+                if (serveList.some(s => s.id === id)) {
+                    alert('此崇拜名稱已存在');
+                    return;
+                }
+
+                // 新增
+                serveList.push({ id, name, emoji: selectedEmoji });
+
+                // 建立 _metadata
+                try {
+                    const metadataRef = doc(db, id, '_metadata');
+                    await setDoc(metadataRef, { serviceItems: [] });
+                } catch (error) {
+                    console.error('建立 _metadata 失敗:', error);
+                }
+
+            } else {
+                // 編輯模式 - 只能改 emoji，不能改名稱（名稱=ID）
+                const serve = serveList.find(s => s.id === editingServeId);
+                if (serve) {
+                    serve.emoji = selectedEmoji;
+                }
+            }
+
+            await saveServeList();
+            closeModal('serveModal');
+            renderCollectionCards();
+        }
+
+        async function deleteServe() {
+            if (!deleteTargetId) return;
+
+            const confirmInput = document.getElementById('deleteConfirmInput').value;
+            if (confirmInput !== deleteTargetId) {
+                alert('輸入的 Collection ID 不正確');
+                return;
+            }
+
+            try {
+                // 刪除主 collection 的所有 documents
+                const mainCollectionRef = collection(db, deleteTargetId);
+                const mainDocs = await getDocs(mainCollectionRef);
+                const batch1 = writeBatch(db);
+                mainDocs.forEach(docRef => {
+                    batch1.delete(docRef.ref);
+                });
+                await batch1.commit();
+
+                // 刪除 Expired collection
+                try {
+                    const expiredCollectionRef = collection(db, `Expired-${deleteTargetId}`);
+                    const expiredDocs = await getDocs(expiredCollectionRef);
+                    if (!expiredDocs.empty) {
+                        const batch2 = writeBatch(db);
+                        expiredDocs.forEach(docRef => {
+                            batch2.delete(docRef.ref);
+                        });
+                        await batch2.commit();
+                    }
+                } catch (e) {
+                    console.log('Expired collection 不存在或刪除失敗');
+                }
+
+                // 從 serveList 移除
+                serveList = serveList.filter(s => s.id !== deleteTargetId);
+                await saveServeList();
+
+                closeModal('deleteModal');
+                renderCollectionCards();
+                alert('已成功刪除崇拜');
+
+            } catch (error) {
+                console.error('刪除崇拜失敗:', error);
+                alert('刪除失敗：' + error.message);
+            }
         }
 
         init();

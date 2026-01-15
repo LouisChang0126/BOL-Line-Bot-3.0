@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="../styles.css">
     <style>
         .admin-page {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 32px;
         }
@@ -268,22 +268,14 @@
         import { getFirestore, collection, doc, getDocs, getDoc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { firebaseConfig } from '../firebase-config.js';
 
-        const SERVE_DISPLAY_NAMES = {
-            'youth-serve': '青年崇拜',
-            'kids-serve': '兒童崇拜',
-            'adult-serve': '成人崇拜'
-        };
-
-        const VALID_COLLECTIONS = ['youth-serve', 'kids-serve', 'adult-serve'];
+        // 動態載入的崇拜列表
+        let serveList = [];
+        let SERVE_DISPLAY_NAMES = {};
+        let VALID_COLLECTIONS = [];
 
         // 從 URL 取得 collection
         const urlParams = new URLSearchParams(window.location.search);
-        const targetCollection = urlParams.get('collection') || 'youth-serve';
-        const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
-
-        document.getElementById('pageTitle').textContent = `${displayName} 使用者管理`;
-        document.title = `${displayName} 使用者管理`;
-        document.getElementById('backBtn').href = `edit-chart.html?collection=${targetCollection}`;
+        const targetCollection = urlParams.get('collection');
 
         let db;
         let allUsers = {}; // { userName: userData }
@@ -292,6 +284,17 @@
         let serviceItemsByCollection = {}; // 各崇拜的服事項目 { collectionName: [] }
         let currentEditUser = null;
         let currentEditServeTypes = {}; // 編輯中的 serve_types
+
+        function showError(message) {
+            document.querySelector('.admin-page').innerHTML = `
+                <div style="text-align: center; padding: 60px;">
+                    <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                    <h2 style="color: #dc2626; margin-bottom: 8px;">錯誤</h2>
+                    <p style="color: var(--text-secondary); margin-bottom: 24px;">${message}</p>
+                    <a href="index.html" class="btn btn-primary">返回首頁</a>
+                </div>
+            `;
+        }
 
         async function init() {
             try {
@@ -304,6 +307,27 @@
                 });
 
                 db = getFirestore(app);
+
+                // 載入崇拜列表
+                const configValid = await loadServeList();
+                if (!configValid) return;
+
+                // 檢查 collection 參數
+                if (!targetCollection) {
+                    showError('缺少 collection 參數');
+                    return;
+                }
+
+                if (!VALID_COLLECTIONS.includes(targetCollection)) {
+                    showError(`找不到崇拜「${targetCollection}」`);
+                    return;
+                }
+
+                // 設定頁面標題
+                const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
+                document.getElementById('pageTitle').textContent = `${displayName} 使用者管理`;
+                document.title = `${displayName} 使用者管理`;
+                document.getElementById('backBtn').href = `edit-chart.html?collection=${targetCollection}`;
 
                 // 載入資料
                 await loadAllServiceItems();
@@ -321,6 +345,33 @@
                 document.getElementById('userList').innerHTML =
                     '<div style="text-align: center; padding: 40px; color: #ef4444;">載入失敗</div>';
             }
+        }
+
+        // 載入崇拜列表
+        async function loadServeList() {
+            const serveListRef = doc(db, '_config', 'serve-list');
+            const serveListDoc = await getDoc(serveListRef);
+
+            if (!serveListDoc.exists()) {
+                showError('尚未設定任何崇拜，請先到管理頁面新增');
+                return false;
+            }
+
+            serveList = serveListDoc.data().serves || [];
+
+            if (serveList.length === 0) {
+                showError('尚未設定任何崇拜，請先到管理頁面新增');
+                return false;
+            }
+
+            // 建立對照表
+            VALID_COLLECTIONS = serveList.map(s => s.id);
+            SERVE_DISPLAY_NAMES = {};
+            serveList.forEach(s => {
+                SERVE_DISPLAY_NAMES[s.id] = s.name;
+            });
+
+            return true;
         }
 
         // 載入所有崇拜的服事項目
