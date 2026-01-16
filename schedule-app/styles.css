@@ -201,6 +201,34 @@ body {
   border-radius: 50%;
 }
 
+/* 按鈕組合樣式 - 讓兩顆按鈕看起來像切半 */
+.btn-group {
+  display: inline-flex;
+}
+
+.btn-group .btn {
+  border-radius: 0;
+}
+
+.btn-group .btn-group-left {
+  border-radius: var(--border-radius) 0 0 var(--border-radius);
+  border-right-width: 0;
+}
+
+.btn-group .btn-group-right {
+  border-radius: 0 var(--border-radius) var(--border-radius) 0;
+}
+
+.btn-group .btn-group-left:hover,
+.btn-group .btn-group-left:focus {
+  border-right-width: 0;
+}
+
+/* 減少間隔的控制區域 */
+.control-actions.compact {
+  gap: var(--spacing-sm);
+}
+
 /* ===========================
    表格系統
    =========================== */
@@ -211,6 +239,19 @@ body {
   overflow: hidden;
   width: 100%;
   max-width: 100%;
+}
+
+/* 表格內操作按鈕行 */
+.table-action-row td {
+  background: var(--bg-secondary) !important;
+  border-bottom: none !important;
+  padding: var(--spacing-md) !important;
+}
+
+.table-action-buttons {
+  display: flex;
+  gap: var(--spacing-md);
+  justify-content: center;
 }
 
 .table-scroll {

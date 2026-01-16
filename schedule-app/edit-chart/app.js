@@ -264,12 +264,12 @@ function updateShowPastButton() {
         // 始終顯示按鈕，因為延遲載入
         btn.style.display = 'inline-flex';
         if (pastDataLoaded && pastData.length > 0) {
-            btn.textContent = showingPast ? '📅 隱藏歷史資料' : `📅 顯示歷史資料 (${pastData.length}筆)`;
+            btn.textContent = showingPast ? '📅 隱藏歷史' : `📅 顯示歷史 (${pastData.length}筆)`;
         } else if (pastDataLoaded && pastData.length === 0) {
-            btn.textContent = '📅 無歷史資料';
+            btn.textContent = '📅 無歷史';
             btn.disabled = true;
         } else {
-            btn.textContent = '📅 顯示歷史資料';
+            btn.textContent = '📅 顯示歷史';
         }
     }
 }
@@ -557,7 +557,32 @@ function renderTableBody() {
         html += '</tr>';
     });
 
+    // 在表格最後添加操作按鈕行
+    const colSpan = serviceItems.length + 1; // 日期欄 + 服事項目欄
+    html += `<tr class="table-action-row">
+        <td colspan="${colSpan}">
+            <div class="table-action-buttons">
+                <button class="btn btn-primary" id="addRowBtn">
+                    ➕ 新增一週
+                </button>
+                <button class="btn btn-danger" id="deleteLastRowBtn">
+                    ➖ 刪除最後一週
+                </button>
+            </div>
+        </td>
+    </tr>`;
+
     tbody.innerHTML = html;
+
+    // 設定表格內操作按鈕事件
+    const addRowBtn = document.getElementById('addRowBtn');
+    const deleteLastRowBtn = document.getElementById('deleteLastRowBtn');
+    if (addRowBtn) {
+        addRowBtn.addEventListener('click', addNewRow);
+    }
+    if (deleteLastRowBtn) {
+        deleteLastRowBtn.addEventListener('click', deleteLastRow);
+    }
 
     // 設定服事欄位點擊事件（只對未來資料）
     document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
@@ -1304,11 +1329,10 @@ window.closeModal = function (modalId) {
 };
 
 // ===========================
-// 事件監聽器設定
+// 事件監聯器設定
 // ===========================
 function setupEventListeners() {
-    document.getElementById('addRowBtn').addEventListener('click', addNewRow);
-    document.getElementById('deleteLastRowBtn').addEventListener('click', deleteLastRow);
+    // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定
     document.getElementById('addServiceBtn').addEventListener('click', addServiceItem);
 
     // 按 ESC 關閉模態框

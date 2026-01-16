@@ -17,24 +17,20 @@
         <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
       </div>
 
-      <div class="control-actions">
+      <div class="control-actions compact">
         <button class="btn btn-secondary" id="showPastBtn" style="display: none;" onclick="togglePastData()">
-          📅 顯示歷史資料
+          📅 顯示歷史
         </button>
-        <button class="btn btn-secondary" id="undoBtn" title="上一步 (Ctrl+Z)" disabled>
-          ⬅️ 上一步
-        </button>
-        <button class="btn btn-secondary" id="redoBtn" title="下一步 (Ctrl+Y)" disabled>
-          ➡️ 下一步
-        </button>
-        <button class="btn btn-primary" id="addRowBtn">
-          ➕ 新增一週
-        </button>
-        <button class="btn btn-danger" id="deleteLastRowBtn">
-          ➖ 刪除最後一週
-        </button>
+        <div class="btn-group">
+          <button class="btn btn-secondary btn-group-left" id="undoBtn" title="上一步 (Ctrl+Z)" disabled>
+            ⬅️ 上一步
+          </button>
+          <button class="btn btn-secondary btn-group-right" id="redoBtn" title="下一步 (Ctrl+Y)" disabled>
+            下一步 ➡️
+          </button>
+        </div>
         <button class="btn btn-secondary" id="addServiceBtn">
-          ✨ 新增服事項目
+          ✨ 新增服事
         </button>
         <button class="btn btn-secondary" id="editDisplayConfigBtn">
           📊 編輯顯示欄位
