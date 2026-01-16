@@ -3,11 +3,11 @@
 // ===========================
 let scheduleData = []; // 所有班表資料（今天以後）
 let pastData = []; // 過去的資料（今天之前，最多26筆）
+let pastDataLoaded = false; // 歷史資料是否已載入
 let showingPast = false; // 是否顯示過去資料
 let serviceItems = []; // 服事項目列表
 let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格
-let currentEditingDateIndex = null; // 目前編輯的日期索引
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
 let displayConfig = null; // 服事項目分組顯示設定
 
@@ -148,7 +148,7 @@ async function loadData() {
     updateStatus('載入資料中...');
 
     try {
-        const { collection, getDocs, query, orderBy, doc, getDoc } = window.firestore;
+        const { collection, getDocs, query, orderBy, doc, getDoc, where, limit } = window.firestore;
         const db = window.db;
         const COLLECTION_NAME = window.COLLECTION_NAME;
 
@@ -162,21 +162,23 @@ async function loadData() {
             await saveMetadata();
         }
 
-        // 取得當前週日
-        const currentSunday = getCurrentSunday();
+        // 取得當前週日字串
+        const currentSundayStr = formatDateString(getCurrentSunday());
 
-        // 載入所有班表資料
-        const q = query(collection(db, COLLECTION_NAME));
+        // 使用 Firestore query 只載入當前週日以後的資料
+        const q = query(
+            collection(db, COLLECTION_NAME),
+            where('__name__', '>=', currentSundayStr),
+            orderBy('__name__'),
+            limit(MAX_FUTURE_ROWS)
+        );
         const querySnapshot = await getDocs(q);
 
         scheduleData = [];
-        pastData = [];
-
         querySnapshot.forEach((docRef) => {
             if (docRef.id !== '_metadata') {
                 const data = docRef.data();
-                const docDate = parseDateString(docRef.id);
-                const rowData = { date: docRef.id, ...data };
+                scheduleData.push({ date: docRef.id, ...data });
 
                 // 收集所有人名
                 serviceItems.forEach(item => {
@@ -184,32 +186,8 @@ async function loadData() {
                         data[item].forEach(name => allPersonNames.add(name));
                     }
                 });
-
-                // 分類到未來或過去
-                if (docDate >= currentSunday) {
-                    scheduleData.push(rowData);
-                } else {
-                    pastData.push(rowData);
-                }
             }
         });
-
-        // 未來資料按日期排序（舊到新）
-        scheduleData.sort((a, b) => {
-            const dateA = parseDateString(a.date);
-            const dateB = parseDateString(b.date);
-            return dateA - dateB;
-        });
-
-        // 過去資料按日期排序（新到舊），取最多 MAX_PAST_ROWS 筆
-        pastData.sort((a, b) => {
-            const dateA = parseDateString(a.date);
-            const dateB = parseDateString(b.date);
-            return dateB - dateA;
-        });
-        pastData = pastData.slice(0, MAX_PAST_ROWS);
-        // 反轉回舊到新
-        pastData.reverse();
 
         // 如果沒有未來資料，建立初始資料
         if (scheduleData.length === 0) {
@@ -235,21 +213,73 @@ async function loadData() {
     }
 }
 
+// 載入歷史資料（延遲載入，第一次點擊時才調用）
+async function loadPastData() {
+    if (pastDataLoaded) return; // 已載入則跳過
+    pastDataLoaded = true;
+
+    updateStatus('載入歷史資料中...');
+
+    try {
+        const { collection, getDocs, query, orderBy, where } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const currentSundayStr = formatDateString(getCurrentSunday());
+
+        // 使用 Firestore query 載入當前週日之前的資料
+        // 注意：不使用 desc 排序以避免需要索引
+        const q = query(
+            collection(db, COLLECTION_NAME),
+            where('__name__', '<', currentSundayStr),
+            orderBy('__name__')
+        );
+        const snapshot = await getDocs(q);
+
+        let allPastData = [];
+        snapshot.forEach((docRef) => {
+            if (docRef.id !== '_metadata') {
+                const data = docRef.data();
+                allPastData.push({ date: docRef.id, ...data });
+            }
+        });
+
+        // 在客戶端排序（新到舊）並取最後 N 筆
+        allPastData.sort((a, b) => b.date.localeCompare(a.date));
+        pastData = allPastData.slice(0, MAX_PAST_ROWS);
+        // 反轉回舊到新的順序
+        pastData.reverse();
+
+        updateStatus('就緒');
+    } catch (error) {
+        console.error('載入歷史資料失敗:', error);
+        pastData = [];
+        updateStatus('就緒');
+    }
+}
+
 // 更新顯示歷史資料按鈕狀態
 function updateShowPastButton() {
     const btn = document.getElementById('showPastBtn');
     if (btn) {
-        if (pastData.length > 0) {
-            btn.style.display = 'inline-flex';
+        // 始終顯示按鈕，因為延遲載入
+        btn.style.display = 'inline-flex';
+        if (pastDataLoaded && pastData.length > 0) {
             btn.textContent = showingPast ? '📅 隱藏歷史資料' : `📅 顯示歷史資料 (${pastData.length}筆)`;
+        } else if (pastDataLoaded && pastData.length === 0) {
+            btn.textContent = '📅 無歷史資料';
+            btn.disabled = true;
         } else {
-            btn.style.display = 'none';
+            btn.textContent = '📅 顯示歷史資料';
         }
     }
 }
 
 // 切換顯示歷史資料
-function togglePastData() {
+async function togglePastData() {
+    if (!showingPast && !pastDataLoaded) {
+        // 第一次點擊時載入歷史資料
+        await loadPastData();
+    }
     showingPast = !showingPast;
     updateShowPastButton();
     renderTable();
@@ -529,16 +559,6 @@ function renderTableBody() {
 
     tbody.innerHTML = html;
 
-    /* TODO: 編輯日期功能暫時註解
-    // 設定日期編輯事件
-    document.querySelectorAll('.date-cell-editable').forEach(cell => {
-        cell.addEventListener('click', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            openEditDateModal(index);
-        });
-    });
-    */
-
     // 設定服事欄位點擊事件（只對未來資料）
     document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
         cell.addEventListener('click', (e) => {
@@ -560,83 +580,6 @@ function renderTableBody() {
 // ===========================
 // 日期管理
 // ===========================
-function openEditDateModal(index) {
-    currentEditingDateIndex = index;
-    const currentDate = scheduleData[index].date;
-
-    document.getElementById('dateInput').value = currentDate;
-    document.getElementById('editDateModal').classList.remove('hidden');
-}
-
-document.getElementById('saveDateBtn').addEventListener('click', async () => {
-    const newDateStr = document.getElementById('dateInput').value.trim();
-
-    // 驗證日期格式
-    if (!newDateStr.match(/^\d{4}\.\d{1,2}\.\d{1,2}$/)) {
-        alert('日期格式錯誤，請使用 yyyy.mm.dd 格式（例如：2026.01.04）');
-        return;
-    }
-
-    const newDate = parseDateString(newDateStr);
-    const dayOfWeek = newDate.getDay();
-
-    if (dayOfWeek !== 0) {
-        const confirm = window.confirm('此日期不是星期日，確定要使用嗎？');
-        if (!confirm) return;
-    }
-
-    updateStatus('更新日期中...');
-
-    try {
-        const index = currentEditingDateIndex;
-        const oldDateStr = scheduleData[index].date;
-
-        // 計算日期差異
-        const oldDate = parseDateString(oldDateStr);
-        const dayDiff = Math.round((newDate - oldDate) / (1000 * 60 * 60 * 24));
-
-        // 更新所有日期
-        const updates = [];
-        for (let i = 0; i < scheduleData.length; i++) {
-            const oldDate = parseDateString(scheduleData[i].date);
-            const newDate = new Date(oldDate);
-            newDate.setDate(newDate.getDate() + dayDiff);
-            const newDateStr = formatDateString(newDate);
-
-            // 取得資料
-            const data = { ...scheduleData[i] };
-            delete data.date;
-
-            // 刪除舊資料
-            updates.push(deleteSchedule(scheduleData[i].date));
-
-            // 更新本地資料
-            scheduleData[i].date = newDateStr;
-
-            // 儲存新資料
-            updates.push(saveSchedule(newDateStr, data));
-        }
-
-        await Promise.all(updates);
-
-        // 重新排序
-        scheduleData.sort((a, b) => {
-            const dateA = parseDateString(a.date);
-            const dateB = parseDateString(b.date);
-            return dateA - dateB;
-        });
-
-        renderTable();
-        closeModal('editDateModal');
-        updateStatus('日期已更新');
-
-    } catch (error) {
-        console.error('更新日期失敗:', error);
-        alert('更新日期失敗');
-        updateStatus('就緒');
-    }
-});
-
 async function addNewRow() {
     if (scheduleData.length === 0) {
         alert('請先建立初始資料');

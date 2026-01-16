@@ -73,27 +73,6 @@
     </div>
   </div>
 
-  <!-- 編輯日期對話框 -->
-  <div class="modal-overlay hidden" id="editDateModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>編輯日期</h2>
-        <button class="modal-close" onclick="closeModal('editDateModal')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>請輸入新的日期（格式：yyyy.mm.dd）</label>
-          <input type="text" class="form-control" id="dateInput" placeholder="2026.01.04">
-          <p class="text-muted mt-sm">注意：修改此日期後，其他日期會自動調整（保持7天間隔）</p>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('editDateModal')">取消</button>
-        <button class="btn btn-primary" id="saveDateBtn">儲存</button>
-      </div>
-    </div>
-  </div>
-
   <!-- 編輯服事項目對話框 -->
   <div class="modal-overlay hidden" id="editServiceModal">
     <div class="modal">
@@ -199,7 +178,7 @@
     // 引入 Firebase
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
-    import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+    import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     // 引入配置
     import { firebaseConfig, COLLECTION_NAME } from '../firebase-config.js';
@@ -288,7 +267,7 @@
 
         // 將全域變數掛載到 window
         window.db = db;
-        window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy };
+        window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit };
         window.COLLECTION_NAME = collectionName;
 
         console.log('✅ Firebase 全域變數已設定');
