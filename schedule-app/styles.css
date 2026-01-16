@@ -98,7 +98,7 @@ body {
 
 .header-section {
   background: var(--bg-primary);
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-md);
   margin-bottom: var(--spacing-md);
@@ -798,7 +798,7 @@ body {
   .header-section {
     align-items: center;
     gap: var(--spacing-sm);
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: var(--spacing-xs) var(--spacing-md);
   }
 
   .control-actions {

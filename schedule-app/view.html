@@ -91,14 +91,35 @@
         ];
 
         let scheduleData = [];
-        let expiredData = []; // 過期資料
+        let pastData = []; // 過去的資料（現在日期前5週）
         let serviceItems = [];
         let personColorMap = new Map();
         let allPersonNames = new Set();
         let displayConfig = null;
         let visibleGroups = {}; // 記錄各群組的顯示狀態
-        let showExpired = false; // 是否顯示過期資料
+        let showPast = false; // 是否顯示過去資料
         let db = null; // Firebase db 參考
+        const MAX_DISPLAY_ROWS = 26; // 最多顯示筆數
+
+        // 取得當前週日日期（UTC+8 時區，週日為基準）
+        function getCurrentSunday() {
+            // 取得 UTC+8 時間
+            const now = new Date();
+            const utc8Offset = 8 * 60 * 60 * 1000;
+            const utc8Now = new Date(now.getTime() + utc8Offset + now.getTimezoneOffset() * 60000);
+
+            const dayOfWeek = utc8Now.getDay();
+            const sunday = new Date(utc8Now);
+            sunday.setDate(utc8Now.getDate() - dayOfWeek + 7);
+            sunday.setHours(0, 0, 0, 0);
+            return sunday;
+        }
+
+        // 將日期字串解析為 Date 物件
+        function parseDateString(dateStr) {
+            const parts = dateStr.split('.');
+            return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        }
 
         async function init() {
             try {
@@ -122,11 +143,11 @@
                 document.getElementById('collectionTitle').textContent = serve.name + '班表';
                 document.title = `${serve.name}班表 - 查看`;
 
-                // 載入資料
+                // 載入資料（只載入未來的資料）
                 await loadData(db);
 
-                // 載入過期資料
-                await loadExpiredData(db);
+                // 載入過去資料（前5週）
+                await loadPastData(db);
 
                 // 建立顏色映射
                 buildColorMap();
@@ -176,50 +197,68 @@
                 serviceItems = metadataDoc.data().serviceItems || [];
             }
 
+            // 取得當前週日
+            const currentSunday = getCurrentSunday();
+
             // 載入班表資料
             const snapshot = await getDocs(collection(db, collectionName));
             scheduleData = [];
 
-            snapshot.forEach(doc => {
-                if (doc.id !== '_metadata') {
-                    const data = doc.data();
-                    scheduleData.push({ date: doc.id, ...data });
+            snapshot.forEach(docRef => {
+                if (docRef.id !== '_metadata') {
+                    const data = docRef.data();
+                    const docDate = parseDateString(docRef.id);
 
-                    // 收集人名
-                    serviceItems.forEach(service => {
-                        if (data[service]) {
-                            data[service].forEach(name => allPersonNames.add(name));
-                        }
-                    });
+                    // 只載入當前週日以後的資料
+                    if (docDate >= currentSunday) {
+                        scheduleData.push({ date: docRef.id, ...data });
+
+                        // 收集人名
+                        serviceItems.forEach(service => {
+                            if (data[service]) {
+                                data[service].forEach(name => allPersonNames.add(name));
+                            }
+                        });
+                    }
                 }
             });
 
             // 按日期排序
             scheduleData.sort((a, b) => a.date.localeCompare(b.date));
+
+            // 限制最多顯示 MAX_DISPLAY_ROWS 筆
+            if (scheduleData.length > MAX_DISPLAY_ROWS) {
+                scheduleData = scheduleData.slice(0, MAX_DISPLAY_ROWS);
+            }
         }
 
-        // 載入過期資料（最後5筆）
-        async function loadExpiredData(db) {
-            const expiredCollectionName = `Expired-${collectionName}`;
+        // 載入過去資料（當前週日前5週，從主 collection 抽取）
+        async function loadPastData(db) {
             try {
-                const snapshot = await getDocs(collection(db, expiredCollectionName));
-                expiredData = [];
+                const currentSunday = getCurrentSunday();
+                const snapshot = await getDocs(collection(db, collectionName));
+                pastData = [];
 
                 snapshot.forEach(docRef => {
                     if (docRef.id !== '_metadata') {
                         const data = docRef.data();
-                        expiredData.push({ date: docRef.id, ...data });
+                        const docDate = parseDateString(docRef.id);
+
+                        // 只載入當前週日之前的資料
+                        if (docDate < currentSunday) {
+                            pastData.push({ date: docRef.id, ...data });
+                        }
                     }
                 });
 
                 // 按日期排序（新到舊），取最後5筆
-                expiredData.sort((a, b) => b.date.localeCompare(a.date));
-                expiredData = expiredData.slice(0, 5);
+                pastData.sort((a, b) => b.date.localeCompare(a.date));
+                pastData = pastData.slice(0, 5);
                 // 反轉回舊到新的順序（顯示時先顯示舊的）
-                expiredData.reverse();
+                pastData.reverse();
             } catch (error) {
-                console.log('無過期資料或載入失敗:', error);
-                expiredData = [];
+                console.log('無過去資料或載入失敗:', error);
+                pastData = [];
             }
         }
 
@@ -286,13 +325,13 @@
                 }
             }
 
-            // 如果有過期資料，新增「顯示前5週」選項
-            if (expiredData.length > 0) {
+            // 如果有過去資料，新增「顯示前5週」選項
+            if (pastData.length > 0) {
                 hasContent = true;
                 const separator = html ? 'style="margin-left: 16px; border-left: 1px solid #ddd; padding-left: 16px;"' : '';
                 html += `
                     <label class="group-filter-item" ${separator}>
-                        <input type="checkbox" id="showExpiredCheckbox" onchange="window.handleShowExpiredChange(this)">
+                        <input type="checkbox" id="showPastCheckbox" onchange="window.handleShowPastChange(this)">
                         顯示前5週
                     </label>
                 `;
@@ -306,9 +345,9 @@
             }
         }
 
-        // 處理顯示過期資料變更
-        window.handleShowExpiredChange = function (checkbox) {
-            showExpired = checkbox.checked;
+        // 處理顯示過去資料變更
+        window.handleShowPastChange = function (checkbox) {
+            showPast = checkbox.checked;
             renderTable();
         };
 
@@ -369,16 +408,16 @@
 
             // 組合要顯示的資料
             let dataToShow = [];
-            if (showExpired && expiredData.length > 0) {
-                dataToShow = [...expiredData, ...scheduleData];
+            if (showPast && pastData.length > 0) {
+                dataToShow = [...pastData, ...scheduleData];
             } else {
                 dataToShow = scheduleData;
             }
 
             dataToShow.forEach((row, index) => {
-                // 過期資料添加淡化樣式
-                const isExpired = showExpired && index < expiredData.length;
-                const rowStyle = isExpired ? 'opacity: 0.6; background: #f8fafc;' : '';
+                // 過去資料添加淡化樣式
+                const isPast = showPast && index < pastData.length;
+                const rowStyle = isPast ? 'opacity: 0.6; background: #f8fafc;' : '';
 
                 html += `<tr style="${rowStyle}">`;
                 html += `<td><div class="date-cell">${row.date}</div></td>`;

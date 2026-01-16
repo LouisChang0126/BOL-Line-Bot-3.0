@@ -1,13 +1,19 @@
 // ===========================
 // 全域變數
 // ===========================
-let scheduleData = []; // 所有班表資料
+let scheduleData = []; // 所有班表資料（今天以後）
+let pastData = []; // 過去的資料（今天之前，最多26筆）
+let showingPast = false; // 是否顯示過去資料
 let serviceItems = []; // 服事項目列表
 let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格
 let currentEditingDateIndex = null; // 目前編輯的日期索引
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
 let displayConfig = null; // 服事項目分組顯示設定
+
+// 最大顯示/新增限制
+const MAX_FUTURE_ROWS = 52; // 未來資料最多52筆
+const MAX_PAST_ROWS = 26; // 歷史資料最多26筆
 
 // ===========================
 // 編輯記錄系統
@@ -22,6 +28,22 @@ let editDifference = {}; // 記錄編輯差異
 const MAX_HISTORY_SIZE = 20;
 let historyStack = []; // 歷史記錄堆疊
 let historyIndex = -1; // 目前在歷史中的位置
+
+// ===========================
+// 日期工具函數
+// ===========================
+// 取得當前週日日期（UTC+8 時區，週日為基準）
+function getCurrentSunday() {
+    const now = new Date();
+    const utc8Offset = 8 * 60 * 60 * 1000;
+    const utc8Now = new Date(now.getTime() + utc8Offset + now.getTimezoneOffset() * 60000);
+
+    const dayOfWeek = utc8Now.getDay();
+    const sunday = new Date(utc8Now);
+    sunday.setDate(utc8Now.getDate() - dayOfWeek + 7);
+    sunday.setHours(0, 0, 0, 0);
+    return sunday;
+}
 
 // ===========================
 // 30 種固定顏色供人名積木使用
@@ -140,18 +162,21 @@ async function loadData() {
             await saveMetadata();
         }
 
+        // 取得當前週日
+        const currentSunday = getCurrentSunday();
+
         // 載入所有班表資料
         const q = query(collection(db, COLLECTION_NAME));
         const querySnapshot = await getDocs(q);
 
         scheduleData = [];
-        querySnapshot.forEach((doc) => {
-            if (doc.id !== '_metadata') {
-                const data = doc.data();
-                scheduleData.push({
-                    date: doc.id,
-                    ...data
-                });
+        pastData = [];
+
+        querySnapshot.forEach((docRef) => {
+            if (docRef.id !== '_metadata') {
+                const data = docRef.data();
+                const docDate = parseDateString(docRef.id);
+                const rowData = { date: docRef.id, ...data };
 
                 // 收集所有人名
                 serviceItems.forEach(item => {
@@ -159,24 +184,43 @@ async function loadData() {
                         data[item].forEach(name => allPersonNames.add(name));
                     }
                 });
+
+                // 分類到未來或過去
+                if (docDate >= currentSunday) {
+                    scheduleData.push(rowData);
+                } else {
+                    pastData.push(rowData);
+                }
             }
         });
 
-        // 按日期排序
+        // 未來資料按日期排序（舊到新）
         scheduleData.sort((a, b) => {
             const dateA = parseDateString(a.date);
             const dateB = parseDateString(b.date);
             return dateA - dateB;
         });
 
-        // 如果沒有資料，建立初始資料
+        // 過去資料按日期排序（新到舊），取最多 MAX_PAST_ROWS 筆
+        pastData.sort((a, b) => {
+            const dateA = parseDateString(a.date);
+            const dateB = parseDateString(b.date);
+            return dateB - dateA;
+        });
+        pastData = pastData.slice(0, MAX_PAST_ROWS);
+        // 反轉回舊到新
+        pastData.reverse();
+
+        // 如果沒有未來資料，建立初始資料
         if (scheduleData.length === 0) {
             await createInitialData();
             console.log('已建立初始資料');
-        }
-        else {
+        } else {
             console.log('已載入班表資料');
         }
+
+        // 更新顯示歷史資料按鈕狀態
+        updateShowPastButton();
 
         // 重建人名顏色映射
         rebuildPersonColorMap();
@@ -189,6 +233,26 @@ async function loadData() {
         updateStatus('載入失敗');
         alert('載入資料失敗，請檢查 Firebase 配置與網路連線。');
     }
+}
+
+// 更新顯示歷史資料按鈕狀態
+function updateShowPastButton() {
+    const btn = document.getElementById('showPastBtn');
+    if (btn) {
+        if (pastData.length > 0) {
+            btn.style.display = 'inline-flex';
+            btn.textContent = showingPast ? '📅 隱藏歷史資料' : `📅 顯示歷史資料 (${pastData.length}筆)`;
+        } else {
+            btn.style.display = 'none';
+        }
+    }
+}
+
+// 切換顯示歷史資料
+function togglePastData() {
+    showingPast = !showingPast;
+    updateShowPastButton();
+    renderTable();
 }
 
 // 建立初始資料（從2026.1.4開始的4週）
@@ -373,47 +437,91 @@ function setupServiceHeaderDragAndDrop() {
 function renderTableBody() {
     const tbody = document.getElementById('tableBody');
 
-    let html = '';
-    scheduleData.forEach((row, rowIndex) => {
-        html += '<tr>';
+    // 決定要顯示的資料
+    let dataToRender = [];
+    if (showingPast && pastData.length > 0) {
+        dataToRender = [...pastData, ...scheduleData];
+    } else {
+        dataToRender = scheduleData;
+    }
 
-        // 日期欄位
-        html += `<td>
-      <div class="date-cell date-cell-editable" data-index="${rowIndex}">
-        ${row.date}
-      </div>
-    </td>`;
+    let html = '';
+    dataToRender.forEach((row, rowIndex) => {
+        // 過去資料添加淡化樣式
+        const isPast = showingPast && rowIndex < pastData.length;
+        const rowClass = isPast ? 'style="opacity: 0.6; background: #f8fafc;"' : '';
+
+        html += `<tr ${rowClass}>`;
+
+        // 日期欄位（過去資料不可編輯）
+        if (isPast) {
+            html += `<td>
+              <div class="date-cell" style="cursor: default;">
+                ${row.date}
+              </div>
+            </td>`;
+        } else {
+            // 未來資料也暫時禁用編輯日期功能
+            html += `<td>
+              <div class="date-cell" style="cursor: default;">
+                ${row.date}
+              </div>
+            </td>`;
+            /* TODO: 編輯日期功能暫時註解
+            html += `<td>
+              <div class="date-cell date-cell-editable" data-index="${rowIndex}">
+                ${row.date}
+              </div>
+            </td>`;
+            */
+        }
 
         // 服事項目欄位
         serviceItems.forEach(item => {
             const persons = row[item] || [];
             const isEmpty = persons.length === 0;
 
-            html += `<td class="service-cell ${isEmpty ? 'empty' : ''}" 
-                   data-date="${row.date}" 
-                   data-service="${item}"
-                   data-droppable="true">`;
-
-            if (isEmpty) {
-                html += '<div class="add-person-placeholder">＋</div>';
+            // 過去資料不可編輯
+            if (isPast) {
+                html += `<td class="service-cell ${isEmpty ? 'empty' : ''}" style="cursor: default;">`;
+                if (!isEmpty) {
+                    html += '<div class="person-chips">';
+                    persons.forEach((person, personIndex) => {
+                        const chipColor = getPersonColor(person);
+                        html += `<div class="person-chip" style="background: ${chipColor}; cursor: default;">
+                             ${person}
+                           </div>`;
+                    });
+                    html += '</div>';
+                }
+                html += '</td>';
             } else {
-                html += '<div class="person-chips">';
-                persons.forEach((person, personIndex) => {
-                    const chipColor = getPersonColor(person);
-                    html += `<div class="person-chip" 
-                        draggable="true"
-                        data-date="${row.date}"
-                        data-service="${item}"
-                        data-person="${person}"
-                        data-index="${personIndex}"
-                        style="background: ${chipColor};">
-                     ${person}
-                   </div>`;
-                });
-                html += '</div>';
-            }
+                html += `<td class="service-cell ${isEmpty ? 'empty' : ''}" 
+                       data-date="${row.date}" 
+                       data-service="${item}"
+                       data-droppable="true">`;
 
-            html += '</td>';
+                if (isEmpty) {
+                    html += '<div class="add-person-placeholder">＋</div>';
+                } else {
+                    html += '<div class="person-chips">';
+                    persons.forEach((person, personIndex) => {
+                        const chipColor = getPersonColor(person);
+                        html += `<div class="person-chip" 
+                            draggable="true"
+                            data-date="${row.date}"
+                            data-service="${item}"
+                            data-person="${person}"
+                            data-index="${personIndex}"
+                            style="background: ${chipColor};">
+                         ${person}
+                       </div>`;
+                    });
+                    html += '</div>';
+                }
+
+                html += '</td>';
+            }
         });
 
         html += '</tr>';
@@ -421,16 +529,18 @@ function renderTableBody() {
 
     tbody.innerHTML = html;
 
+    /* TODO: 編輯日期功能暫時註解
     // 設定日期編輯事件
-    document.querySelectorAll('.date-cell').forEach(cell => {
+    document.querySelectorAll('.date-cell-editable').forEach(cell => {
         cell.addEventListener('click', (e) => {
             const index = parseInt(e.target.dataset.index);
             openEditDateModal(index);
         });
     });
+    */
 
-    // 設定服事欄位點擊事件
-    document.querySelectorAll('.service-cell').forEach(cell => {
+    // 設定服事欄位點擊事件（只對未來資料）
+    document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
         cell.addEventListener('click', (e) => {
             if (!e.target.closest('.person-chip')) {
                 const date = cell.dataset.date;
@@ -530,6 +640,12 @@ document.getElementById('saveDateBtn').addEventListener('click', async () => {
 async function addNewRow() {
     if (scheduleData.length === 0) {
         alert('請先建立初始資料');
+        return;
+    }
+
+    // 檢查是否已達到最大筆數限制
+    if (scheduleData.length >= MAX_FUTURE_ROWS) {
+        alert(`已達到最大筆數限制（${MAX_FUTURE_ROWS}週），無法新增更多資料。`);
         return;
     }
 
@@ -1238,6 +1354,7 @@ window.saveMetadata = typeof saveMetadata !== 'undefined' ? saveMetadata : undef
 window.createInitialData = typeof createInitialData !== 'undefined' ? createInitialData : undefined;
 window.parseDateString = typeof parseDateString !== 'undefined' ? parseDateString : undefined;
 window.renderTable = typeof renderTable !== 'undefined' ? renderTable : undefined;
+window.togglePastData = togglePastData;
 
 window.closeModal = function (modalId) {
     document.getElementById(modalId).classList.add('hidden');
