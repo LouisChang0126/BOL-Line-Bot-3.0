@@ -351,10 +351,10 @@ body {
   transition: all var(--transition-fast);
 }
 
-.date-cell:hover {
+/* .date-cell:hover {
   background: var(--primary-light);
   color: var(--primary-color);
-}
+} */
 
 .date-cell-editable::after {
   content: '✏️';

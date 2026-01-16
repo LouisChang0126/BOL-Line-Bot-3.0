@@ -285,9 +285,14 @@ async function togglePastData() {
     renderTable();
 }
 
-// 建立初始資料（從2026.1.4開始的4週）
+// 建立初始資料（從下個週日開始的 4 週）
 async function createInitialData() {
-    const startDate = new Date(2026, 0, 4); // 2026年1月4日（週六）
+    // 取得下個週日日期（使用 getCurrentSunday，它已經計算下個週日）
+    const startDate = getCurrentSunday();
+
+    // 設定預設服事項目
+    serviceItems = ['範例服事'];
+    await saveMetadata();
 
     for (let i = 0; i < 4; i++) {
         const date = new Date(startDate);
