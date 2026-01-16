@@ -157,6 +157,33 @@
             color: var(--text-light);
             cursor: not-allowed;
         }
+
+        /* 複製邀請碼按鈕 - badge 樣式 */
+        .copy-invite-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 12px;
+            font-size: 11px;
+            color: #92400e;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+
+        .copy-invite-btn:hover {
+            background: #fde68a;
+            border-color: #f59e0b;
+        }
+
+        .copy-invite-btn.copied {
+            background: #d1fae5;
+            border-color: #34d399;
+            color: #065f46;
+        }
     </style>
 </head>
 
@@ -171,6 +198,9 @@
         <div class="quick-actions">
             <button class="btn btn-primary" id="autoAddUsersBtn">
                 🔄 自動加入使用者 & 更新服事
+            </button>
+            <button class="btn btn-secondary" id="exportExcelBtn">
+                📥 匯出邀請碼 Excel
             </button>
             <input type="text" class="search-box" id="searchBox" placeholder="搜尋使用者...">
             <div class="stats-info">
@@ -284,6 +314,17 @@
         let serviceItemsByCollection = {}; // 各崇拜的服事項目 { collectionName: [] }
         let currentEditUser = null;
         let currentEditServeTypes = {}; // 編輯中的 serve_types
+        let currentEditLoginToken = ''; // 編輯中的 login_token
+
+        // 生成 16 位隨機 login_token
+        function generateLoginToken() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let token = '';
+            for (let i = 0; i < 16; i++) {
+                token += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return token;
+        }
 
         function showError(message) {
             document.querySelector('.admin-page').innerHTML = `
@@ -543,6 +584,7 @@
                             ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
                             ${!isNew && needsUpdate ? '<span class="user-card-badge new">需更新</span>' : ''}
                             ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
+                            ${userData && !userData.lineId && userData.login_token ? `<button class="copy-invite-btn" data-token="${userData.login_token}" data-name="${name}" onclick="event.stopPropagation(); copyInviteLink(this)">📋 複製邀請碼</button>` : ''}
                         </div>
                         <div class="user-card-body">
                             ${isInSchedule ? '<div>📋 在此崇拜班表中</div>' : '<div style="color: var(--text-light);">不在此崇拜班表中</div>'}
@@ -598,6 +640,7 @@
 
             document.getElementById('editUserName').textContent = name;
             document.getElementById('lineIdInput').value = userData?.lineId || '';
+            currentEditLoginToken = userData?.login_token || '';
 
             // 設定 alarm checkboxes
             const alarmTypes = userData?.alarm_type || [false, false, false, false, false, false];
@@ -848,6 +891,9 @@
             // 自動加入使用者 & 更新服事
             document.getElementById('autoAddUsersBtn').addEventListener('click', autoAddAndUpdateUsers);
 
+            // 匯出 Excel
+            document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
+
             // 搜尋
             document.getElementById('searchBox').addEventListener('input', (e) => {
                 renderUserList(e.target.value);
@@ -870,6 +916,70 @@
             });
         }
 
+        // 複製邀請連結
+        window.copyInviteLink = async function (btn) {
+            const token = btn.dataset.token;
+            const name = btn.dataset.name;
+            const baseUrl = window.location.origin;
+            const inviteLink = `${baseUrl}/schedule-app/login.html?token=${token}`;
+
+            try {
+                await navigator.clipboard.writeText(inviteLink);
+                btn.textContent = '✅ 已複製！';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.innerHTML = '📋 複製邀請碼';
+                    btn.classList.remove('copied');
+                }, 2000);
+            } catch (err) {
+                // 備用方案
+                const textarea = document.createElement('textarea');
+                textarea.value = inviteLink;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                btn.textContent = '✅ 已複製！';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.innerHTML = '📋 複製邀請碼';
+                    btn.classList.remove('copied');
+                }, 2000);
+            }
+        };
+
+        // 匯出 Excel
+        function exportToExcel() {
+            const users = Object.entries(allUsers);
+            if (users.length === 0) {
+                alert('沒有使用者資料可以匯出');
+                return;
+            }
+
+            // 建立 CSV 內容（Excel 可以直接開啟）
+            let csvContent = '\uFEFF'; // BOM for UTF-8
+            csvContent += '使用者名稱,邀請碼,已綁定LINE\n';
+
+            users.forEach(([name, data]) => {
+                const token = data.login_token || '';
+                const hasLine = data.lineId ? '是' : '否';
+                // 處理可能包含逗號的欄位
+                csvContent += `"${name}","${token}","${hasLine}"\n`;
+            });
+
+            // 建立下載連結
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `使用者邀請碼_${new Date().toISOString().slice(0, 10)}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
         // 確認新增使用者
         async function confirmAddUser() {
             const name = document.getElementById('newUserNameInput').value.trim();
@@ -888,6 +998,7 @@
                 const userData = {
                     alarm_type: [false, false, false, false, false, false],
                     lineId: '',
+                    login_token: generateLoginToken(),
                     serve_types: {}
                 };
 
@@ -957,6 +1068,7 @@
                         userData = {
                             alarm_type: [false, false, false, false, false, false],
                             lineId: '',
+                            login_token: generateLoginToken(),
                             serve_types: {
                                 [targetCollection]: scheduledServes
                             }
@@ -1006,6 +1118,7 @@
                 const userData = {
                     alarm_type: alarmType,
                     lineId: lineId,
+                    login_token: currentEditLoginToken || generateLoginToken(),
                     serve_types: cleanedServeTypes
                 };
 
