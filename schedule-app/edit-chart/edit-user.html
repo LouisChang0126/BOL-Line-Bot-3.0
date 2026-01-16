@@ -313,25 +313,28 @@
                 if (!configValid) return;
 
                 // 檢查 collection 參數
-                if (!targetCollection) {
-                    showError('缺少 collection 參數');
-                    return;
-                }
-
-                if (!VALID_COLLECTIONS.includes(targetCollection)) {
+                if (targetCollection && !VALID_COLLECTIONS.includes(targetCollection)) {
                     showError(`找不到崇拜「${targetCollection}」`);
                     return;
                 }
 
                 // 設定頁面標題
-                const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
-                document.getElementById('pageTitle').textContent = `${displayName} 使用者管理`;
-                document.title = `${displayName} 使用者管理`;
-                document.getElementById('backBtn').href = `edit-chart.html?collection=${targetCollection}`;
+                if (targetCollection) {
+                    const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
+                    document.getElementById('pageTitle').textContent = `${displayName} 使用者管理`;
+                    document.title = `${displayName} 使用者管理`;
+                    document.getElementById('backBtn').href = `edit-chart.html?collection=${targetCollection}`;
+                } else {
+                    document.getElementById('pageTitle').textContent = '所有使用者管理';
+                    document.title = '所有使用者管理';
+                    document.getElementById('backBtn').href = 'index.html';
+                }
 
                 // 載入資料
                 await loadAllServiceItems();
-                await loadSchedulePersons();
+                if (targetCollection) {
+                    await loadSchedulePersons();
+                }
                 await loadUsers();
 
                 // 渲染使用者列表
@@ -452,7 +455,7 @@
 
             // 合併：班表中的人 + 已註冊的人
             const allNames = new Set([...schedulePersons, ...Object.keys(allUsers)]);
-            let usersArray = Array.from(allNames).sort();
+            let usersArray = Array.from(allNames);
 
             // 過濾：只顯示 2 個字的名字 或 已註冊的使用者
             usersArray = usersArray.filter(name => {
@@ -460,6 +463,19 @@
                 if (allUsers[name]) return true;
                 // 未註冊的只顯示 2 個字的
                 return name.length === 2;
+            });
+
+            // 排序：如果有 targetCollection，將「在此崇拜班表中」的人排在前面
+            usersArray.sort((a, b) => {
+                const aInSchedule = schedulePersons.has(a);
+                const bInSchedule = schedulePersons.has(b);
+                if (targetCollection) {
+                    // 優先排序：在班表中的排前面
+                    if (aInSchedule && !bInSchedule) return -1;
+                    if (!aInSchedule && bInSchedule) return 1;
+                }
+                // 次要排序：按名稱排序
+                return a.localeCompare(b, 'zh-TW');
             });
 
             // 搜尋過濾
