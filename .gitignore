@@ -1,3 +1,5 @@
-bol-line-bot-3-firebase-adminsdk-*.json
 .vscode
 .firebase
+__pycache__
+chatBotConfig.py
+serviceAccount.json
