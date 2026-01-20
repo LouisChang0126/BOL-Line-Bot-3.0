@@ -75,6 +75,7 @@ def get_user_by_line_id(line_id):
 def sign_in_with_token(login_token, line_id):
     """
     使用邀請碼登入
+    支援用戶換 LINE 帳號的情況，可以覆蓋舊的 LINE ID
     
     Args:
         login_token: 16位隨機邀請碼
@@ -83,22 +84,25 @@ def sign_in_with_token(login_token, line_id):
     Returns:
         str or None: 登入成功返回使用者名稱，失敗返回 None
     """
-    # 查詢是否有符合的邀請碼且尚未綁定 LINE ID
-    query = db.collection("users").where("login_token", "==", login_token).limit(1)
-    docs = query.get()
+    # 查詢是否有符合的邀請碼
+    docs = db.collection("users").where("login_token", "==", login_token).limit(1).get()
     
     if len(docs) > 0 and docs[0].exists:
+        user_name = docs[0].id
         user_data = docs[0].to_dict()
-        # 確認尚未綁定 LINE ID
-        if user_data.get('lineId', '') == '':
-            user_name = docs[0].id
-            update_data = {
-                "lineId": line_id,
-                "alarm_type": [True, False, False, False, False, False],  # 預設週一提醒
-                # "login_token": firestore.DELETE_FIELD  # 登入後不刪除邀請碼
-            }
-            db.collection("users").document(user_name).update(update_data)
-            return user_name
+        old_line_id = user_data.get('lineId', '')
+        
+        # 更新 LINE ID（允許覆蓋舊的，支援用戶換帳號）
+        update_data = {
+            "lineId": line_id,
+        }
+        
+        # 只有首次登入才設定預設提醒
+        if old_line_id == '':
+            update_data["alarm_type"] = [True, False, False, False, False, False]  # 預設週一提醒
+        
+        db.collection("users").document(user_name).update(update_data)
+        return user_name
     return None
 
 
@@ -901,7 +905,7 @@ def get_full_schedule_link(line_id):
 # =====================================================
 
 welcomeMessage = TextSendMessage(text='歡迎加入教會服事系統')
-loginMessage = TextSendMessage(text='請輸入管理員給你的16位邀請碼登入\n格式範例：ABC123DEF456GHIJ')
+loginMessage = TextSendMessage(text='請輸入管理員給你的16位邀請碼登入\n格式範例：Abc123DEF456GHiJ')
 introMessage = TextSendMessage(text='介紹影片：\nhttps://youtu.be/xrBvmTZbiEY')
 errorMessage = TextSendMessage(text='哦，這超出我的能力範圍......')
 
