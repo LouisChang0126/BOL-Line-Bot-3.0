@@ -28,7 +28,7 @@ from datetime import datetime, timedelta
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-cred = credentials.Certificate('../serviceAccount.json')
+cred = credentials.Certificate('serviceAccount.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -169,6 +169,56 @@ def get_user_serve_collections(user_data):
     return user_data.get('serve_types', {})
 
 
+def get_collection_schedule(collection_id):
+    """
+    取得崇拜 collection 中今天及之後的所有日期資料
+    
+    Args:
+        collection_id: 崇拜的 collection ID
+        
+    Returns:
+        dict: { 日期: { 服事項目: [人員列表], ... }, ... }
+    """
+    schedule = {}
+    today = datetime.now().strftime("%Y.%m.%d")
+    
+    # 使用 document ID 篩選今天及之後的文件（最多半年份）
+    docs = db.collection(collection_id) \
+        .where("__name__", ">=", today) \
+        .order_by("__name__") \
+        .limit(26).get()
+    
+    for doc in docs:
+        # 跳過 _metadata 文件
+        if doc.id == '_metadata':
+            continue
+        
+        schedule[doc.id] = doc.to_dict()
+    
+    return schedule
+
+
+def get_user_serve_dates_from_schedule(user_name, schedule, serve_type):
+    """
+    從班表資料中篩選使用者在指定服事項目的所有日期
+    
+    Args:
+        user_name: 使用者名稱
+        schedule: get_collection_schedule 回傳的班表資料
+        serve_type: 服事種類
+        
+    Returns:
+        list: 日期列表 (格式: YYYY.MM.DD)，已排序
+    """
+    dates = []
+    for date, doc_data in schedule.items():
+        persons = doc_data.get(serve_type, [])
+        if user_name in persons:
+            dates.append(date)
+    
+    return sorted(dates)
+
+
 # =====================================================
 # 調班/代班功能
 # =====================================================
@@ -196,12 +246,13 @@ def can_shift(line_id, mode):
     # 收集所有有服事的崇拜和服事項目
     all_serves = []
     for collection_id, serve_list in serve_types.items():
+        # 每個崇拜只查詢一次 Firestore
+        schedule = get_collection_schedule(collection_id)
+        
         for serve_type in serve_list:
-            # 檢查是否有未來的服事日期
-            dates = user_data.get(collection_id, {}).get(serve_type, [])
-            today = datetime.now().strftime("%Y.%m.%d")
-            future_dates = [d for d in dates if d >= today]
-            if future_dates:
+            # 從現有的 schedule 中篩選服事日期
+            dates = get_user_serve_dates_from_schedule(user_name, schedule, serve_type)
+            if dates:
                 all_serves.append({
                     'collection': collection_id,
                     'serve_type': serve_type,
@@ -290,12 +341,11 @@ def select_shift_date(line_id, mode, collection_id, serve_type):
     if not user_data:
         return TextSendMessage(text="找不到使用者資料")
     
-    # 取得該服事的日期列表
-    dates = user_data.get(collection_id, {}).get(serve_type, [])
-    today = datetime.now().strftime("%Y.%m.%d")
-    future_dates = sorted([d for d in dates if d >= today])
+    # 從崇拜 collection 取得該服事的日期列表
+    schedule = get_collection_schedule(collection_id)
+    dates = get_user_serve_dates_from_schedule(user_name, schedule, serve_type)
     
-    if not future_dates:
+    if not dates:
         return TextSendMessage(text=f"目前沒有未來的 {serve_type} 服事日期")
     
     mode_text = '選擇你要代班的服事日期' if mode == 'G' else '選擇你要調班的服事日期'
@@ -738,10 +788,18 @@ def remind_same_week_serve(user_name, date, exclude_collection=None):
     
     serve_types = user_data.get('serve_types', {})
     for collection_id, serves in serve_types.items():
+        # 直接取得該日期的文件
+        doc = db.collection(collection_id).document(date).get()
+        if not doc.exists:
+            continue
+        
+        doc_data = doc.to_dict()
         collection_name = get_serve_name_by_id(collection_id)
+        
         for serve in serves:
-            dates = user_data.get(collection_id, {}).get(serve, [])
-            if date in dates:
+            # 檢查使用者是否在該日期有此服事
+            persons = doc_data.get(serve, [])
+            if user_name in persons:
                 remind_list.append(f"{collection_name} - {serve}")
     
     if remind_list:

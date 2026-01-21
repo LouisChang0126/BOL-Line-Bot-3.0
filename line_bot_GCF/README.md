@@ -49,7 +49,7 @@ channel_access_token = "YOUR_CHANNEL_ACCESS_TOKEN"
 
 ### 2. 設定 Firebase 服務帳戶
 
-將 `serviceAccount.json` 放在上層目錄。
+將 `serviceAccount.json` 放在目錄。
 
 ### 3. 部署到 Google Cloud Function
 
