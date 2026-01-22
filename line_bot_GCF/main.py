@@ -431,7 +431,7 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
             persons_list = doc_data.get(serve_type, [])
             
             # 檢查申請人是否不在這天的服事中
-            if requester_name not in persons_list:
+            if requester_name not in persons_list and len(persons_list) > 0:
                 date_str = doc.id.replace('.', '/')
                 persons_display = '/'.join(persons_list)  # 顯示用
                 # 多人用 B#，單人用 B&
@@ -803,7 +803,7 @@ def remind_same_week_serve(user_name, date, exclude_collection=None):
     
     if remind_list:
         text = "提醒你換班後那週還有：\n"
-        text += "、".join([f'「{s}」' for s in remind_list])
+        text += "、\n".join([f'「{s}」' for s in remind_list])
         text += "\n的服事喔，請衡量是否可以同時進行"
         return text
     return None
