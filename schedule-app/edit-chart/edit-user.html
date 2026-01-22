@@ -920,11 +920,9 @@
         window.copyInviteLink = async function (btn) {
             const token = btn.dataset.token;
             const name = btn.dataset.name;
-            const baseUrl = window.location.origin;
-            const inviteLink = `${baseUrl}/schedule-app/login.html?token=${token}`;
 
             try {
-                await navigator.clipboard.writeText(inviteLink);
+                await navigator.clipboard.writeText(token);
                 btn.textContent = '✅ 已複製！';
                 btn.classList.add('copied');
                 setTimeout(() => {
@@ -934,7 +932,7 @@
             } catch (err) {
                 // 備用方案
                 const textarea = document.createElement('textarea');
-                textarea.value = inviteLink;
+                textarea.value = token;
                 document.body.appendChild(textarea);
                 textarea.select();
                 document.execCommand('copy');

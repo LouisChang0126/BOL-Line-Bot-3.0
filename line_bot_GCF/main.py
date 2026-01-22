@@ -184,8 +184,7 @@ def get_collection_schedule(collection_id):
     
     # 使用 document ID 篩選今天及之後的文件（最多半年份）
     docs = db.collection(collection_id) \
-        .where("__name__", ">=", today) \
-        .order_by("__name__") \
+        .where("__name__", ">=", db.collection(collection_id).document(today)) \
         .limit(26).get()
     
     for doc in docs:
@@ -354,7 +353,7 @@ def select_shift_date(line_id, mode, collection_id, serve_type):
     columns = []
     actions = []
     
-    for date in future_dates:
+    for date in dates:
         actions.append(PostbackTemplateAction(
             label=date.replace('.', '/'),
             text=f"{date.replace('.', '/')} {serve_type}",
