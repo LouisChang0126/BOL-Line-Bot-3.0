@@ -883,23 +883,107 @@ def change_reminder_day(command, line_id):
 # 班表查詢功能
 # =====================================================
 
-def get_week_schedule_text(collection_id=None):
+def get_week_schedule_text(line_id, collection_id=None):
     """
     取得當週班表文字
+    若用戶有多個崇拜的服事，則顯示選擇選單
     
     Args:
-        collection_id: 崇拜 collection ID，若為 None 則取得第一個崇拜
+        line_id: LINE 使用者 ID
+        collection_id: 崇拜 collection ID，若為 None 則自動判斷
         
     Returns:
         LINE message 物件
     """
-    # 如果沒有指定，取得第一個崇拜
-    if not collection_id:
+    # 如果指定了 collection_id，直接顯示該崇拜的班表
+    if collection_id:
+        return build_schedule_message(collection_id)
+    
+    # 取得使用者資料，判斷參與幾個崇拜
+    user_name, user_data = get_user_by_line_id(line_id)
+    if not user_data:
+        # 未登入的用戶，顯示第一個崇拜
         serves = get_serve_list()
         if not serves:
             return TextSendMessage(text="找不到任何崇拜資料")
-        collection_id = serves[0].get('id')
+        return build_schedule_message(serves[0].get('id'))
     
+    # 取得使用者參與的崇拜
+    serve_types = get_user_serve_collections(user_data)
+    user_collections = list(serve_types.keys()) if serve_types else []
+    
+    if len(user_collections) == 0:
+        # 用戶沒有任何服事，顯示第一個崇拜
+        serves = get_serve_list()
+        if not serves:
+            return TextSendMessage(text="找不到任何崇拜資料")
+        return build_schedule_message(serves[0].get('id'))
+    
+    elif len(user_collections) == 1:
+        # 只有一個崇拜，直接顯示
+        return build_schedule_message(user_collections[0])
+    
+    else:
+        # 多個崇拜，顯示選擇選單
+        return build_schedule_selection_menu(user_collections)
+
+
+def build_schedule_selection_menu(collection_ids):
+    """
+    建立選擇崇拜的 Carousel 選單
+    
+    Args:
+        collection_ids: 崇拜 collection ID 列表
+        
+    Returns:
+        LINE TemplateSendMessage 物件
+    """
+    columns = []
+    actions = []
+    
+    for collection_id in collection_ids:
+        serve_name = get_serve_name_by_id(collection_id)
+        actions.append(PostbackTemplateAction(
+            label=serve_name[:12],  # LINE 限制 12 字元
+            text=f"查看 {serve_name} 班表",
+            data=f"W&{collection_id}"
+        ))
+        
+        # 每 3 個 action 建立一個 column
+        if len(actions) == 3:
+            columns.append(CarouselColumn(
+                title='選擇崇拜',
+                text='請選擇要查看哪場崇拜的班表',
+                actions=actions
+            ))
+            actions = []
+    
+    # 處理剩餘的 actions
+    if actions:
+        while len(actions) < 3:
+            actions.append(PostbackTemplateAction(label=' ', text=' ', data=' '))
+        columns.append(CarouselColumn(
+            title='選擇崇拜',
+            text='請選擇要查看哪場崇拜的班表',
+            actions=actions
+        ))
+    
+    return TemplateSendMessage(
+        alt_text='選擇要查看的崇拜班表',
+        template=CarouselTemplate(columns=columns)
+    )
+
+
+def build_schedule_message(collection_id):
+    """
+    建立單一崇拜的班表訊息
+    
+    Args:
+        collection_id: 崇拜 collection ID
+        
+    Returns:
+        LINE TextSendMessage 物件
+    """
     # 取得服事項目順序
     service_items = get_service_items(collection_id)
     if not service_items:
@@ -1023,7 +1107,7 @@ def handle_message(event):
             replyMessages = get_full_schedule_link(line_id)
         
         elif command in ['班表', '本週班表', '當週班表', '當周班表', '本周班表']:
-            replyMessages = get_week_schedule_text()
+            replyMessages = get_week_schedule_text(line_id)
         
         elif command in ['換班', '調班']:
             replyMessages = can_shift(line_id, 'S')
@@ -1124,6 +1208,11 @@ def handle_postback(event):
     elif prefix == 'C*':
         # 更換服事提醒模式
         replyMessages = change_reminder_day(command, line_id)
+    
+    elif prefix == 'W&':
+        # 查看指定崇拜的班表
+        # data: {collection_id}
+        replyMessages = build_schedule_message(data)
     
     else:
         return  # 不認識的指令不處理
