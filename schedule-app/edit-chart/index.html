@@ -590,6 +590,29 @@
                     console.log('Expired collection 不存在或刪除失敗');
                 }
 
+                // 清理 users collection 中的 serve_types
+                try {
+                    const usersRef = collection(db, 'users');
+                    const usersDocs = await getDocs(usersRef);
+
+                    for (const userDoc of usersDocs.docs) {
+                        const userData = userDoc.data();
+                        if (userData.serve_types && userData.serve_types[deleteTargetId]) {
+                            // 移除該崇拜的 serve_types
+                            const updatedServeTypes = { ...userData.serve_types };
+                            delete updatedServeTypes[deleteTargetId];
+
+                            await setDoc(doc(db, 'users', userDoc.id), {
+                                ...userData,
+                                serve_types: updatedServeTypes
+                            });
+                        }
+                    }
+                    console.log('已清理 users collection 中的 serve_types');
+                } catch (e) {
+                    console.error('清理 users serve_types 失敗:', e);
+                }
+
                 // 從 serveList 移除
                 serveList = serveList.filter(s => s.id !== deleteTargetId);
                 await saveServeList();
