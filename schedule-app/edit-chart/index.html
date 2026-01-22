@@ -362,7 +362,6 @@
                         </div>
                         <div class="icon">${serve.emoji}</div>
                         <div class="name">${serve.name}</div>
-                        <div class="description">${serve.id}</div>
                     </div>
                 `;
             });
@@ -498,9 +497,16 @@
             });
         }
 
-        // 將名稱轉換為有效的 Collection ID（"/" 轉換為 "-"）
-        function nameToId(name) {
-            return name.replace(/\//g, '-');
+        // 取得可用的崇拜 ID（_service_1 到 _service_5）
+        function getAvailableServiceId() {
+            const usedIds = serveList.map(s => s.id);
+            for (let i = 1; i <= 5; i++) {
+                const id = `_service_${i}`;
+                if (!usedIds.includes(id)) {
+                    return id;
+                }
+            }
+            return null; // 全部用完
         }
 
         async function saveServe() {
@@ -511,15 +517,17 @@
                 return;
             }
 
-            // 轉換名稱為 ID（將 "/" 轉換為 "-"）
-            const id = nameToId(name);
+            // 檢查名稱是否重複（排除自己）
+            if (serveList.some(s => s.name === name && s.id !== editingServeId)) {
+                alert('此崇拜名稱已存在');
+                return;
+            }
 
             if (!editingServeId) {
                 // 新增模式
-
-                // 檢查是否重複
-                if (serveList.some(s => s.id === id)) {
-                    alert('此崇拜名稱已存在');
+                const id = getAvailableServiceId();
+                if (!id) {
+                    alert('已達到最大崇拜數量限制');
                     return;
                 }
 
@@ -535,80 +543,12 @@
                 }
 
             } else {
-                // 編輯模式
+                // 編輯模式：只改 name 和 emoji，不改 id
                 const serve = serveList.find(s => s.id === editingServeId);
                 if (!serve) return;
 
-                const oldId = editingServeId;
-                const newId = id;
-
-                // 更新 emoji
+                serve.name = name;
                 serve.emoji = selectedEmoji;
-
-                // 如果名稱改變，需要複製整個 collection
-                if (oldId !== newId) {
-                    // 檢查新名稱是否已存在
-                    if (serveList.some(s => s.id === newId && s.id !== oldId)) {
-                        alert('此崇拜名稱已存在');
-                        return;
-                    }
-
-                    try {
-                        // 複製主 collection 的所有 documents
-                        const oldCollectionRef = collection(db, oldId);
-                        const oldDocs = await getDocs(oldCollectionRef);
-
-                        for (const docSnapshot of oldDocs.docs) {
-                            const newDocRef = doc(db, newId, docSnapshot.id);
-                            await setDoc(newDocRef, docSnapshot.data());
-                        }
-
-                        // 複製 Expired collection（如果存在）
-                        try {
-                            const oldExpiredRef = collection(db, `Expired-${oldId}`);
-                            const oldExpiredDocs = await getDocs(oldExpiredRef);
-                            if (!oldExpiredDocs.empty) {
-                                for (const docSnapshot of oldExpiredDocs.docs) {
-                                    const newDocRef = doc(db, `Expired-${newId}`, docSnapshot.id);
-                                    await setDoc(newDocRef, docSnapshot.data());
-                                }
-                            }
-                        } catch (e) {
-                            console.log('Expired collection 不存在或複製失敗');
-                        }
-
-                        // 刪除舊 collection
-                        const batch1 = writeBatch(db);
-                        oldDocs.forEach(docSnapshot => {
-                            batch1.delete(docSnapshot.ref);
-                        });
-                        await batch1.commit();
-
-                        // 刪除舊 Expired collection
-                        try {
-                            const oldExpiredRef = collection(db, `Expired-${oldId}`);
-                            const oldExpiredDocs = await getDocs(oldExpiredRef);
-                            if (!oldExpiredDocs.empty) {
-                                const batch2 = writeBatch(db);
-                                oldExpiredDocs.forEach(docSnapshot => {
-                                    batch2.delete(docSnapshot.ref);
-                                });
-                                await batch2.commit();
-                            }
-                        } catch (e) {
-                            console.log('Expired collection 刪除失敗');
-                        }
-
-                        // 更新 serve 的 id 和 name
-                        serve.id = newId;
-                        serve.name = name;
-
-                    } catch (error) {
-                        console.error('複製 collection 失敗:', error);
-                        alert('改名失敗：' + error.message);
-                        return;
-                    }
-                }
             }
 
             await saveServeList();
