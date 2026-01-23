@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>教會服事班表 - 查看</title>
+    <title>教會服事班表</title>
     <link rel="stylesheet" href="styles.css">
     <style>
         /* 唯讀樣式 */
@@ -159,7 +159,7 @@
 
                 // 更新頁面標題
                 document.getElementById('collectionTitle').textContent = serve.name + '班表';
-                document.title = `${serve.name}班表 - 查看`;
+                document.title = `${serve.name}班表`;
 
                 // 載入資料（只載入未來的資料）
                 await loadData(db);

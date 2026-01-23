@@ -32,6 +32,9 @@
         <button class="btn btn-secondary" id="addServiceBtn">
           ✨ 新增服事
         </button>
+        <button class="btn btn-secondary" id="addInfoColumnBtn">
+          📝 新增資訊欄位
+        </button>
         <button class="btn btn-secondary" id="editDisplayConfigBtn">
           📊 編輯顯示欄位
         </button>
@@ -80,6 +83,10 @@
         <div class="form-group">
           <label>服事項目名稱</label>
           <input type="text" class="form-control" id="serviceNameInput" placeholder="請輸入服事項目名稱">
+        </div>
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="isInfoColumnCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+          <label for="isInfoColumnCheckbox" style="margin: 0; cursor: pointer;">這是資訊欄位（不包含人名）</label>
         </div>
       </div>
       <div class="modal-footer" style="justify-content: space-between;">

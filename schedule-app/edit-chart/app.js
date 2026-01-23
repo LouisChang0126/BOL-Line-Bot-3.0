@@ -6,6 +6,7 @@ let pastData = []; // 過去的資料（今天之前，最多26筆）
 let pastDataLoaded = false; // 歷史資料是否已載入
 let showingPast = false; // 是否顯示過去資料
 let serviceItems = []; // 服事項目列表
+let nonUserColumns = []; // 資訊欄位列表（不包含人名的欄位）
 let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格
 let currentEditingServiceName = null; // 目前編輯的服事項目名稱
@@ -156,9 +157,11 @@ async function loadData() {
         const metadataDoc = await getDoc(doc(db, COLLECTION_NAME, '_metadata'));
         if (metadataDoc.exists()) {
             serviceItems = metadataDoc.data().serviceItems || [];
+            nonUserColumns = metadataDoc.data().nonUserColumns || [];
         } else {
             // 如果沒有 metadata，使用預設值
             serviceItems = ['主領', '副主領', '助唱', '司琴', '鼓手', '貝斯', '吉他', '彩排', '提醒人', '音控', '字幕', '司會', '奉獻', '招待', '先知性'];
+            nonUserColumns = [];
             await saveMetadata();
         }
 
@@ -322,7 +325,8 @@ async function saveMetadata() {
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
     const metadata = {
-        serviceItems: serviceItems
+        serviceItems: serviceItems,
+        nonUserColumns: nonUserColumns
     };
 
     // 如果有 displayConfig，也儲存
@@ -735,45 +739,36 @@ async function addServiceItem() {
     }
 }
 
-function openEditServiceModal(serviceName) {
-    currentEditingServiceName = serviceName;
-    document.getElementById('serviceNameInput').value = serviceName;
-    document.getElementById('editServiceModal').classList.remove('hidden');
-}
+// 新增資訊欄位（預設為 nonUserColumn）
+async function addInfoColumn() {
+    const name = prompt('請輸入新的資訊欄位名稱：');
+    if (!name || name.trim() === '') return;
 
-document.getElementById('saveServiceBtn').addEventListener('click', async () => {
-    const newName = document.getElementById('serviceNameInput').value.trim();
+    const trimmedName = name.trim();
 
-    if (!newName) {
-        alert('請輸入服事項目名稱');
+    if (serviceItems.includes(trimmedName)) {
+        alert('此欄位名稱已存在');
         return;
     }
 
-    if (newName === currentEditingServiceName) {
-        closeModal('editServiceModal');
-        return;
-    }
-
-    if (serviceItems.includes(newName)) {
-        alert('此服事項目名稱已存在');
-        return;
-    }
-
-    updateStatus('更新服事項目中...');
+    updateStatus('新增資訊欄位中...');
 
     try {
-        const oldName = currentEditingServiceName;
+        serviceItems.push(trimmedName);
+        nonUserColumns.push(trimmedName); // 預設加入 nonUserColumns
 
-        // 更新服事項目列表
-        const index = serviceItems.indexOf(oldName);
-        serviceItems[index] = newName;
+        // 將新欄位加入 displayConfig 的「未分組」群組
+        if (displayConfig && displayConfig.groups) {
+            const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
+            if (ungrouped) {
+                ungrouped.items.push(trimmedName);
+            }
+        }
 
-        // 更新所有資料
+        // 為所有現有資料新增此欄位
         const updates = [];
         scheduleData.forEach(row => {
-            row[newName] = row[oldName] || [];
-            delete row[oldName];
-
+            row[trimmedName] = [];
             const data = { ...row };
             delete data.date;
             updates.push(saveSchedule(row.date, data));
@@ -783,6 +778,91 @@ document.getElementById('saveServiceBtn').addEventListener('click', async () => 
         updates.push(saveMetadata());
 
         await Promise.all(updates);
+
+        renderTable();
+        updateStatus('資訊欄位已新增');
+
+    } catch (error) {
+        console.error('新增資訊欄位失敗:', error);
+        alert('新增資訊欄位失敗');
+        serviceItems.pop();
+        nonUserColumns.pop();
+        updateStatus('就緒');
+    }
+}
+
+function openEditServiceModal(serviceName) {
+    currentEditingServiceName = serviceName;
+    document.getElementById('serviceNameInput').value = serviceName;
+    // 設定 checkbox 狀態
+    const isInfoColumn = nonUserColumns.includes(serviceName);
+    document.getElementById('isInfoColumnCheckbox').checked = isInfoColumn;
+    document.getElementById('editServiceModal').classList.remove('hidden');
+}
+
+document.getElementById('saveServiceBtn').addEventListener('click', async () => {
+    const newName = document.getElementById('serviceNameInput').value.trim();
+    const isInfoColumn = document.getElementById('isInfoColumnCheckbox').checked;
+
+    if (!newName) {
+        alert('請輸入服事項目名稱');
+        return;
+    }
+
+    const nameChanged = newName !== currentEditingServiceName;
+
+    if (nameChanged && serviceItems.includes(newName)) {
+        alert('此服事項目名稱已存在');
+        return;
+    }
+
+    updateStatus('更新服事項目中...');
+
+    try {
+        const oldName = currentEditingServiceName;
+
+        // 更新 nonUserColumns
+        const wasInfoColumn = nonUserColumns.includes(oldName);
+        if (isInfoColumn && !wasInfoColumn) {
+            // 新增到 nonUserColumns
+            nonUserColumns.push(nameChanged ? newName : oldName);
+        } else if (!isInfoColumn && wasInfoColumn) {
+            // 從 nonUserColumns 移除
+            const idx = nonUserColumns.indexOf(oldName);
+            if (idx > -1) nonUserColumns.splice(idx, 1);
+        } else if (nameChanged && wasInfoColumn) {
+            // 名稱改變，更新 nonUserColumns 中的名稱
+            const idx = nonUserColumns.indexOf(oldName);
+            if (idx > -1) nonUserColumns[idx] = newName;
+        }
+
+        if (nameChanged) {
+            // 更新服事項目列表
+            const index = serviceItems.indexOf(oldName);
+            serviceItems[index] = newName;
+
+            // 更新所有資料
+            const updates = [];
+            scheduleData.forEach(row => {
+                row[newName] = row[oldName] || [];
+                delete row[oldName];
+
+                const data = { ...row };
+                delete data.date;
+                updates.push(saveSchedule(row.date, data));
+            });
+
+            // 儲存 metadata
+            updates.push(saveMetadata());
+
+            await Promise.all(updates);
+        } else {
+            // 只有 checkbox 變更，只需儲存 metadata
+            await saveMetadata();
+
+            // 刷新管理使用者按鈕警示
+            checkMissingUsers();
+        }
 
         renderTable();
         closeModal('editServiceModal');
@@ -1621,6 +1701,18 @@ function initDisplayConfigEditor() {
         saveBtn.addEventListener('click', saveDisplayConfig);
     }
 
+    // 新增服事按鈕
+    const addServiceBtn = document.getElementById('addServiceBtn');
+    if (addServiceBtn) {
+        addServiceBtn.addEventListener('click', addServiceItem);
+    }
+
+    // 新增資訊欄位按鈕
+    const addInfoColumnBtn = document.getElementById('addInfoColumnBtn');
+    if (addInfoColumnBtn) {
+        addInfoColumnBtn.addEventListener('click', addInfoColumn);
+    }
+
     // 編輯記錄按鈕
     const viewLogsBtn = document.getElementById('viewLogsBtn');
     if (viewLogsBtn) {
@@ -1991,10 +2083,13 @@ async function checkMissingUsers() {
             registeredUsers[docRef.id] = docRef.data();
         });
 
-        // 收集班表中每個人的服事項目
+        // 取得非資訊欄位的服事項目（排除 nonUserColumns）
+        const userServiceItems = serviceItems.filter(item => !nonUserColumns.includes(item));
+
+        // 收集班表中每個人的服事項目（只統計非資訊欄位）
         const personServeItems = {};
         scheduleData.forEach(row => {
-            serviceItems.forEach(item => {
+            userServiceItems.forEach(item => {
                 if (row[item] && Array.isArray(row[item])) {
                     row[item].forEach(name => {
                         if (!personServeItems[name]) {
@@ -2006,12 +2101,9 @@ async function checkMissingUsers() {
             });
         });
 
-        // 檢查是否有問題（只檢查 2 個字的名字）
+        // 檢查是否有問題
         let hasIssues = false;
         for (const name of Object.keys(personServeItems)) {
-            // 忽略名字不是 2 個字的使用者
-            if (name.length !== 2) continue;
-
             const userData = registeredUsers[name];
 
             // 1. 使用者未註冊

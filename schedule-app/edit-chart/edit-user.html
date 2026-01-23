@@ -224,7 +224,7 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>使用者名稱（2個字）</label>
+                    <label>使用者名稱</label>
                     <input type="text" class="form-control" id="newUserNameInput" placeholder="請輸入使用者名稱" maxlength="10">
                 </div>
             </div>
@@ -419,6 +419,7 @@
         }
 
         // 載入所有崇拜的服事項目
+        let nonUserColumnsByCollection = {}; // 各崇拜的資訊欄位
         async function loadAllServiceItems() {
             for (const collName of VALID_COLLECTIONS) {
                 try {
@@ -426,18 +427,25 @@
                     const metadataDoc = await getDoc(metadataRef);
                     if (metadataDoc.exists()) {
                         serviceItemsByCollection[collName] = metadataDoc.data().serviceItems || [];
+                        nonUserColumnsByCollection[collName] = metadataDoc.data().nonUserColumns || [];
                     } else {
                         serviceItemsByCollection[collName] = [];
+                        nonUserColumnsByCollection[collName] = [];
                     }
                 } catch (e) {
                     serviceItemsByCollection[collName] = [];
+                    nonUserColumnsByCollection[collName] = [];
                 }
             }
         }
 
         // 載入班表中的所有人名和服事項目
         async function loadSchedulePersons() {
-            const serviceItems = serviceItemsByCollection[targetCollection] || [];
+            const allServiceItems = serviceItemsByCollection[targetCollection] || [];
+            const nonUserCols = nonUserColumnsByCollection[targetCollection] || [];
+            // 只統計非資訊欄位
+            const userServiceItems = allServiceItems.filter(item => !nonUserCols.includes(item));
+
             const snapshot = await getDocs(collection(db, targetCollection));
             schedulePersons = new Set();
             personServeItems = {};
@@ -445,7 +453,7 @@
             snapshot.forEach(docRef => {
                 if (docRef.id !== '_metadata') {
                     const data = docRef.data();
-                    serviceItems.forEach(item => {
+                    userServiceItems.forEach(item => {
                         if (data[item] && Array.isArray(data[item])) {
                             data[item].forEach(name => {
                                 schedulePersons.add(name);
@@ -470,11 +478,8 @@
             });
         }
 
-        // 檢查使用者是否需要更新（名稱為2個字且班表有未記錄的服事）
+        // 檢查使用者是否需要更新（班表有未記錄的服事）
         function checkNeedsUpdate(name) {
-            // 只處理 2 個字的名字
-            if (name.length !== 2) return false;
-
             const userData = allUsers[name];
             if (!userData) return true; // 新使用者，需要加入
 
@@ -498,13 +503,6 @@
             const allNames = new Set([...schedulePersons, ...Object.keys(allUsers)]);
             let usersArray = Array.from(allNames);
 
-            // 過濾：只顯示 2 個字的名字 或 已註冊的使用者
-            usersArray = usersArray.filter(name => {
-                // 已註冊的都顯示
-                if (allUsers[name]) return true;
-                // 未註冊的只顯示 2 個字的
-                return name.length === 2;
-            });
 
             // 排序：如果有 targetCollection，將「在此崇拜班表中」的人排在前面
             usersArray.sort((a, b) => {
@@ -574,8 +572,7 @@
                     }
                 }
 
-                // 只有2個字的名字才顯示 new-user 高亮
-                const shouldHighlight = name.length === 2 && (isNew || needsUpdate);
+                const shouldHighlight = (isNew || needsUpdate);
 
                 html += `
                     <div class="user-card ${shouldHighlight ? 'new-user' : ''}" data-name="${name}">
@@ -1015,12 +1012,10 @@
             }
         }
 
-        // 自動加入使用者 & 更新服事（只處理2個字的名字）
+        // 自動加入使用者 & 更新服事
         async function autoAddAndUpdateUsers() {
-            // 找出需要處理的使用者（2個字的名字）
+            // 找出需要處理的使用者
             const usersToProcess = Array.from(schedulePersons).filter(name => {
-                if (name.length !== 2) return false;
-
                 const userData = allUsers[name];
                 if (!userData) return true; // 新使用者
 
@@ -1036,7 +1031,7 @@
             });
 
             if (usersToProcess.length === 0) {
-                alert('沒有需要處理的使用者！\n（只會處理名字為2個字的使用者）');
+                alert('沒有需要處理的使用者！');
                 return;
             }
 
