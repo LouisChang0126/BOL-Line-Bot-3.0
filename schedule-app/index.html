@@ -91,13 +91,33 @@
             color: var(--text-secondary);
             font-size: 16px;
         }
+
+        .error-page {
+            text-align: center;
+            padding: 60px;
+        }
+
+        .error-page .error-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .error-page h2 {
+            color: #dc2626;
+            margin-bottom: 8px;
+        }
+
+        .error-page p {
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
     </style>
 </head>
 
 <body>
-    <div class="selection-page">
+    <div class="selection-page" id="mainPage">
         <div class="selection-title">
-            <h1>📖 教會服事班表</h1>
+            <h1>📖 <span id="userName"></span> 的服事班表</h1>
             <p>請選擇要查看的班表</p>
         </div>
 
@@ -112,10 +132,32 @@
         import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { firebaseConfig } from './firebase-config.js';
 
+        // 從 URL 取得 user 參數
+        const urlParams = new URLSearchParams(window.location.search);
+        const userName = urlParams.get('user');
+
         let serveList = [];
+        let userServeTypes = {}; // 使用者有服事的崇拜
+
+        // 顯示錯誤頁面
+        function showError(title, message) {
+            document.getElementById('mainPage').innerHTML = `
+                <div class="error-page">
+                    <div class="error-icon">⚠️</div>
+                    <h2>${title}</h2>
+                    <p>${message}</p>
+                </div>
+            `;
+        }
 
         async function init() {
             try {
+                // 檢查是否有 user 參數
+                if (!userName) {
+                    showError('缺少使用者', '請提供使用者名稱（網址需包含 ?user=名稱）');
+                    return;
+                }
+
                 const app = initializeApp(firebaseConfig);
 
                 // 初始化 App Check
@@ -126,15 +168,52 @@
 
                 const db = getFirestore(app);
 
-                // 載入 serve-list（如果不存在則顯示空狀態）
+                // 檢查使用者是否存在
+                const userRef = doc(db, 'users', userName);
+                const userDoc = await getDoc(userRef);
+
+                if (!userDoc.exists()) {
+                    showError('找不到使用者', `使用者「${userName}」不存在`);
+                    return;
+                }
+
+                // 取得使用者的 serve_types
+                const userData = userDoc.data();
+                userServeTypes = userData.serve_types || {};
+
+                // 取得使用者有服事的崇拜 ID 列表
+                const userServeIds = Object.keys(userServeTypes).filter(
+                    key => Array.isArray(userServeTypes[key]) && userServeTypes[key].length > 0
+                );
+
+                if (userServeIds.length === 0) {
+                    showError('尚無服事', `使用者「${userName}」目前沒有任何服事項目`);
+                    return;
+                }
+
+                // 載入 serve-list
                 const serveListRef = doc(db, '_config', 'serve-list');
                 const serveListDoc = await getDoc(serveListRef);
 
                 if (serveListDoc.exists()) {
-                    serveList = serveListDoc.data().serves || [];
+                    const allServes = serveListDoc.data().serves || [];
+                    // 只顯示使用者有服事的崇拜
+                    serveList = allServes.filter(serve => userServeIds.includes(serve.id));
                 } else {
                     serveList = [];
                 }
+
+                // 如果使用者只有一個崇拜，直接跳轉到該崇拜頁面
+                if (serveList.length === 1) {
+                    const serve = serveList[0];
+                    const viewUrl = `view.html?service=${encodeURIComponent(serve.name)}&user=${encodeURIComponent(userName)}`;
+                    window.location.href = viewUrl;
+                    return;
+                }
+
+                // 更新頁面標題
+                document.getElementById('userName').textContent = userName;
+                document.title = `${userName} 的服事班表`;
 
                 renderCollectionCards();
 
@@ -155,8 +234,10 @@
 
             let html = '';
             serveList.forEach(serve => {
+                // 傳遞 service（崇拜名稱）和 user 參數到 view.html
+                const viewUrl = `view.html?service=${encodeURIComponent(serve.name)}&user=${encodeURIComponent(userName)}`;
                 html += `
-                    <div class="collection-card" onclick="window.location.href='view.html?collection=${serve.id}'">
+                    <div class="collection-card" onclick="window.location.href='${viewUrl}'">
                         <div class="icon">${serve.emoji}</div>
                         <div class="name">${serve.name}</div>
                     </div>
