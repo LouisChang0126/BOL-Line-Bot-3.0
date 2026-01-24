@@ -251,27 +251,26 @@
                 const currentSundayStr = formatDateString(getCurrentSunday());
 
                 // 使用 Firestore query 載入當前週日之前的資料
-                // 注意：不使用 desc 排序以避免需要索引
+                // 計算 MAX_PAST_ROWS 週前的日期
+                const minPastDate = new Date(getCurrentSunday());
+                minPastDate.setDate(minPastDate.getDate() - (MAX_PAST_ROWS * 7));
+                const minPastDateStr = formatDateString(minPastDate);
+
                 const q = query(
                     collection(db, collectionName),
+                    where('__name__', '>=', minPastDateStr),
                     where('__name__', '<', currentSundayStr),
                     orderBy('__name__')
                 );
                 const snapshot = await getDocs(q);
-                let allPastData = [];
 
+                pastData = [];
                 snapshot.forEach(docRef => {
                     if (docRef.id !== '_metadata') {
                         const data = docRef.data();
-                        allPastData.push({ date: docRef.id, ...data });
+                        pastData.push({ date: docRef.id, ...data });
                     }
                 });
-
-                // 在客戶端排序（新到舊）並取最後 N 筆
-                allPastData.sort((a, b) => b.date.localeCompare(a.date));
-                pastData = allPastData.slice(0, MAX_PAST_ROWS);
-                // 反轉回舊到新的順序（顯示時先顯示舊的）
-                pastData.reverse();
             } catch (error) {
                 console.log('無過去資料或載入失敗:', error);
                 pastData = [];

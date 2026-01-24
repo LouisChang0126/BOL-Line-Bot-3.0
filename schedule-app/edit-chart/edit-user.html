@@ -380,6 +380,35 @@
             return token;
         }
 
+        // 取得當前週日日期（UTC+8 時區，週日為基準）
+        // 如果今天是週日，返回今天；否則返回下一個週日
+        function getCurrentSunday() {
+            const now = new Date();
+            const utc8Offset = 8 * 60 * 60 * 1000;
+            const utc8Now = new Date(now.getTime() + utc8Offset + now.getTimezoneOffset() * 60000);
+
+            const dayOfWeek = utc8Now.getDay();
+            const sunday = new Date(utc8Now);
+
+            if (dayOfWeek === 0) {
+                // 今天是週日，返回今天
+                sunday.setHours(0, 0, 0, 0);
+            } else {
+                // 今天不是週日，返回下一個週日
+                sunday.setDate(utc8Now.getDate() + (7 - dayOfWeek));
+                sunday.setHours(0, 0, 0, 0);
+            }
+            return sunday;
+        }
+
+        // 格式化日期為字串 (YYYY.MM.DD)
+        function formatDateString(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}.${month}.${day}`;
+        }
+
         function showError(message) {
             document.querySelector('.admin-page').innerHTML = `
                 <div style="text-align: center; padding: 60px;">
@@ -493,19 +522,23 @@
             }
         }
 
-        // 載入班表中的所有人名和服事項目
+        // 載入班表中的所有人名和服事項目（只載入今天含以後的資料）
         async function loadSchedulePersons() {
             const allServiceItems = serviceItemsByCollection[targetCollection] || [];
             const nonUserCols = nonUserColumnsByCollection[targetCollection] || [];
             // 只統計非資訊欄位
             const userServiceItems = allServiceItems.filter(item => !nonUserCols.includes(item));
 
+            // 取得當前週日字串（用於過濾）
+            const currentSundayStr = formatDateString(getCurrentSunday());
+
             const snapshot = await getDocs(collection(db, targetCollection));
             schedulePersons = new Set();
             personServeItems = {};
 
             snapshot.forEach(docRef => {
-                if (docRef.id !== '_metadata') {
+                // 只處理今天（含）以後的班表
+                if (docRef.id !== '_metadata' && docRef.id >= currentSundayStr) {
                     const data = docRef.data();
                     userServiceItems.forEach(item => {
                         if (data[item] && Array.isArray(data[item])) {

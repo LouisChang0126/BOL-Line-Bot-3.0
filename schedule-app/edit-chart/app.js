@@ -34,6 +34,7 @@ let historyIndex = -1; // 目前在歷史中的位置
 // 日期工具函數
 // ===========================
 // 取得當前週日日期（UTC+8 時區，週日為基準）
+// 如果今天是週日，返回今天；否則返回下一個週日
 function getCurrentSunday() {
     const now = new Date();
     const utc8Offset = 8 * 60 * 60 * 1000;
@@ -41,8 +42,15 @@ function getCurrentSunday() {
 
     const dayOfWeek = utc8Now.getDay();
     const sunday = new Date(utc8Now);
-    sunday.setDate(utc8Now.getDate() - dayOfWeek + 7);
-    sunday.setHours(0, 0, 0, 0);
+
+    if (dayOfWeek === 0) {
+        // 今天是週日，返回今天
+        sunday.setHours(0, 0, 0, 0);
+    } else {
+        // 今天不是週日，返回下一個週日
+        sunday.setDate(utc8Now.getDate() + (7 - dayOfWeek));
+        sunday.setHours(0, 0, 0, 0);
+    }
     return sunday;
 }
 
@@ -231,24 +239,26 @@ async function loadPastData() {
 
         // 使用 Firestore query 載入當前週日之前的資料
         // 注意：不使用 desc 排序以避免需要索引
+        // 計算 MAX_PAST_ROWS 週前的日期
+        const minPastDate = new Date(getCurrentSunday());
+        minPastDate.setDate(minPastDate.getDate() - (MAX_PAST_ROWS * 7));
+        const minPastDateStr = formatDateString(minPastDate);
+
         const q = query(
             collection(db, COLLECTION_NAME),
+            where('__name__', '>=', minPastDateStr),
             where('__name__', '<', currentSundayStr),
             orderBy('__name__')
         );
         const snapshot = await getDocs(q);
 
-        let allPastData = [];
+        pastData = [];
         snapshot.forEach((docRef) => {
             if (docRef.id !== '_metadata') {
                 const data = docRef.data();
-                allPastData.push({ date: docRef.id, ...data });
+                pastData.push({ date: docRef.id, ...data });
             }
         });
-
-        // 在客戶端排序（新到舊）並取最後 N 筆
-        allPastData.sort((a, b) => b.date.localeCompare(a.date));
-        pastData = allPastData.slice(0, MAX_PAST_ROWS);
         // 反轉回舊到新的順序
         pastData.reverse();
 
