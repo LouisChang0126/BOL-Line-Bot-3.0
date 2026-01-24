@@ -234,13 +234,13 @@
             const logList = document.getElementById('logList');
 
             try {
-                const snapshot = await getDocs(collection(db, 'edit-chart-log'));
+                const snapshot = await getDocs(collection(db, '_edit_chart_log'));
 
                 allLogs = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
                     // 只顯示該 collection 的記錄
-                    if (data['serve-name'] === targetCollection) {
+                    if (data['serve-id'] === targetCollection) {
                         allLogs.push({ id: doc.id, ...data });
                     }
                 });
@@ -368,7 +368,7 @@
 
             try {
                 // 取得記錄
-                const logRef = doc(db, 'edit-chart-log', logId);
+                const logRef = doc(db, '_edit_chart_log', logId);
                 const logDoc = await getDoc(logRef);
 
                 if (!logDoc.exists()) {
@@ -377,7 +377,7 @@
                 }
 
                 const logData = logDoc.data();
-                const serveName = logData['serve-name'];
+                const serveName = logData['serve-id'];
                 const originChart = logData['origin-chart'];
 
                 if (!originChart) {

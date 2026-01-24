@@ -976,10 +976,8 @@ function renderPersonDropdown() {
 
     // 過濾條件：
     // 1. 不在目前服事的人
-    // 2. 只顯示2個字的人
     const availableNames = Array.from(allPersonNames)
-        .filter(name => !currentPersons.includes(name))
-        .filter(name => name.length === 2);
+        .filter(name => !currentPersons.includes(name));
 
     // 排序：在該服事項目出現過的人排前面，其餘按字母排序
     availableNames.sort((a, b) => {
@@ -1505,10 +1503,10 @@ async function saveEditLog() {
 
     try {
         const { doc, setDoc } = window.firestore;
-        const logRef = doc(window.db, 'edit-chart-log', sessionTime);
+        const logRef = doc(window.db, '_edit_chart_log', sessionTime);
 
         await setDoc(logRef, {
-            'serve-name': window.COLLECTION_NAME,
+            'serve-id': window.COLLECTION_NAME,
             'origin-chart': originalChart,
             'difference': editDifference,
             'last-edited-time': lastEditedTime

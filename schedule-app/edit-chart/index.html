@@ -575,21 +575,6 @@
                 });
                 await batch1.commit();
 
-                // 刪除 Expired collection
-                try {
-                    const expiredCollectionRef = collection(db, `Expired-${deleteTargetId}`);
-                    const expiredDocs = await getDocs(expiredCollectionRef);
-                    if (!expiredDocs.empty) {
-                        const batch2 = writeBatch(db);
-                        expiredDocs.forEach(docRef => {
-                            batch2.delete(docRef.ref);
-                        });
-                        await batch2.commit();
-                    }
-                } catch (e) {
-                    console.log('Expired collection 不存在或刪除失敗');
-                }
-
                 // 清理 users collection 中的 serve_types
                 try {
                     const usersRef = collection(db, 'users');
@@ -611,6 +596,29 @@
                     console.log('已清理 users collection 中的 serve_types');
                 } catch (e) {
                     console.error('清理 users serve_types 失敗:', e);
+                }
+
+                // 清理 _edit_chart_log 中該崇拜的編輯記錄
+                try {
+                    const logRef = collection(db, '_edit_chart_log');
+                    const logDocs = await getDocs(logRef);
+
+                    const logBatch = writeBatch(db);
+                    let logCount = 0;
+                    logDocs.forEach(logDoc => {
+                        const logData = logDoc.data();
+                        if (logData['serve-id'] === deleteTargetId) {
+                            logBatch.delete(logDoc.ref);
+                            logCount++;
+                        }
+                    });
+
+                    if (logCount > 0) {
+                        await logBatch.commit();
+                        console.log(`已刪除 ${logCount} 筆 _edit_chart_log 記錄`);
+                    }
+                } catch (e) {
+                    console.error('清理 _edit_chart_log 失敗:', e);
                 }
 
                 // 從 serveList 移除

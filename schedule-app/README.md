@@ -59,7 +59,7 @@
 
 ### 📝 編輯記錄系統
 - 自動記錄每次編輯的原始狀態和變更差異
-- 儲存在 `edit-chart-log` collection
+- 儲存在 `_edit_chart_log` collection
 - 管理員可查看並一鍵還原
 
 ### 🎯 進階功能
@@ -166,12 +166,12 @@ schedule-app/
 }
 ```
 
-### 編輯記錄 Collection（edit-chart-log）
+### 編輯記錄 Collection（_edit_chart_log）
 
 ```javascript
 // Document ID: "2026.01.07.19.22"（進入時間）
 {
-  "serve-name": "youth-serve",
+  "serve-id": "youth-serve",
   "origin-chart": { ... },      // 編輯前的完整班表
   "difference": { ... },        // 變更內容
   "last-edited-time": "2026.01.07.21.45"
