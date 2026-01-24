@@ -4,7 +4,7 @@ LINE Bot 服事系統 - Google Cloud Function
 支援多場崇拜 (multiple service collections)
 """
 
-from chatBotConfig import channel_secret, channel_access_token
+from chatBotConfig import channel_secret, channel_access_token, line_bot_id
 from linebot import WebhookHandler, LineBotApi
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import (
@@ -72,6 +72,42 @@ def get_user_by_line_id(line_id):
     return None, None
 
 
+def log_usage(user_name, action_type):
+    """
+    記錄使用者的使用量統計
+    
+    Args:
+        user_name: 使用者名稱
+        action_type: 操作類型 (如 "全部班表", "當週班表", "換班" 等)
+    """
+    if not user_name:
+        return
+    
+    try:
+        # 取得當前年月
+        month_key = datetime.now().strftime("%Y.%m")
+        
+        # 使用 Firestore 的原子操作增加計數
+        user_ref = db.collection("users").document(user_name)
+        user_doc = user_ref.get()
+        
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            usage_count = user_data.get('usage_count', {})
+            
+            if month_key not in usage_count:
+                usage_count[month_key] = {}
+            
+            if action_type not in usage_count[month_key]:
+                usage_count[month_key][action_type] = 0
+            
+            usage_count[month_key][action_type] += 1
+            
+            user_ref.update({'usage_count': usage_count})
+    except Exception as e:
+        print(f"log_usage error: {e}")
+
+
 def sign_in_with_token(login_token, line_id):
     """
     使用邀請碼登入
@@ -92,9 +128,10 @@ def sign_in_with_token(login_token, line_id):
         user_data = docs[0].to_dict()
         old_line_id = user_data.get('lineId', '')
         
-        # 更新 LINE ID（允許覆蓋舊的，支援用戶換帳號）
+        # 更新 LINE ID 和 Line Bot ID
         update_data = {
             "lineId": line_id,
+            "line_bot_id": line_bot_id,  # 更新為目前登入的 bot
         }
         
         # 只有首次登入才設定預設提醒
@@ -580,6 +617,9 @@ def send_shift_request(data_parts, mode):
         )
     )
     
+    # 記錄收到調班/代班請求
+    log_usage(respondent, '調班/代班請求')
+    
     if remind_msg:
         line_bot_api.push_message(receiver_id, [send_message, TextSendMessage(text=remind_msg)])
     else:
@@ -747,6 +787,8 @@ def notify_requester_success(data):
             notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n「已成功調班」"
         
         if requester_id:
+            # 記錄調班/代班成功通知
+            log_usage(data['申請人'], '調班/代班成功通知')
             line_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
 
 
@@ -1103,22 +1145,30 @@ def handle_message(event):
     
     if is_signed_in(line_id):
         # 已登入使用者
+        user_name, _ = get_user_by_line_id(line_id)
+        
         if command in ['總班表', '全部班表']:
+            log_usage(user_name, '全部班表')
             replyMessages = get_full_schedule_link(line_id)
         
         elif command in ['班表', '本週班表', '當週班表', '當周班表', '本周班表']:
+            log_usage(user_name, '當週班表')
             replyMessages = get_week_schedule_text(line_id)
         
         elif command in ['換班', '調班']:
+            log_usage(user_name, '換班')
             replyMessages = can_shift(line_id, 'S')
         
         elif command in ['代班']:
+            log_usage(user_name, '代班')
             replyMessages = can_shift(line_id, 'G')
         
         elif command in ['設定提醒', '提醒設定', '設定']:
+            log_usage(user_name, '設定提醒')
             replyMessages = alarmMessage()
         
         elif command in ['目錄', 'Menu', 'menu', '主選單', '選單']:
+            log_usage(user_name, '目錄')
             replyMessages = menuMessage()
         
         else:

@@ -184,6 +184,48 @@
             border-color: #34d399;
             color: #065f46;
         }
+
+        /* Line Bot ID 選擇器 */
+        .line-bot-selector {
+            display: flex;
+            gap: 0;
+        }
+
+        .line-bot-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            background: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .line-bot-btn:first-child {
+            border-radius: 8px 0 0 8px;
+        }
+
+        .line-bot-btn:last-child {
+            border-radius: 0 8px 8px 0;
+        }
+
+        .line-bot-btn:not(:first-child) {
+            border-left: none;
+        }
+
+        .line-bot-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .line-bot-btn.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .line-bot-btn.active+.line-bot-btn {
+            border-left-color: var(--primary-color);
+        }
     </style>
 </head>
 
@@ -247,6 +289,18 @@
                 <div class="form-group">
                     <label>LINE ID</label>
                     <input type="text" class="form-control" id="lineIdInput" placeholder="輸入 LINE 使用者 ID">
+                </div>
+
+                <!-- Line Bot ID 選擇器 -->
+                <div class="form-group">
+                    <label>Line Bot ID（使用哪台機器人）</label>
+                    <div class="line-bot-selector" id="lineBotSelector">
+                        <button type="button" class="line-bot-btn" data-value="0">無</button>
+                        <button type="button" class="line-bot-btn" data-value="1">1</button>
+                        <button type="button" class="line-bot-btn" data-value="2">2</button>
+                        <button type="button" class="line-bot-btn" data-value="3">3</button>
+                        <button type="button" class="line-bot-btn" data-value="4">4</button>
+                    </div>
                 </div>
 
                 <!-- 提醒設定 -->
@@ -645,6 +699,12 @@
                 document.getElementById(`alarm${i}`).checked = alarmTypes[i] || false;
             }
 
+            // 設定 Line Bot ID 選擇器
+            const lineBotId = userData?.line_bot_id ?? 0;
+            document.querySelectorAll('.line-bot-btn').forEach(btn => {
+                btn.classList.toggle('active', parseInt(btn.dataset.value) === lineBotId);
+            });
+
             // 複製 serve_types 到編輯用的變數
             currentEditServeTypes = JSON.parse(JSON.stringify(userData?.serve_types || {}));
 
@@ -911,6 +971,14 @@
                     confirmAddUser();
                 }
             });
+
+            // Line Bot ID 選擇器
+            document.querySelectorAll('.line-bot-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.line-bot-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                });
+            });
         }
 
         // 複製邀請連結
@@ -994,7 +1062,9 @@
                     alarm_type: [false, false, false, false, false, false],
                     lineId: '',
                     login_token: generateLoginToken(),
-                    serve_types: {}
+                    serve_types: {},
+                    line_bot_id: 0,
+                    usage_count: {}
                 };
 
                 await setDoc(doc(db, 'users', name), userData);
@@ -1100,6 +1170,10 @@
                     alarmType.push(document.getElementById(`alarm${i}`).checked);
                 }
 
+                // 取得選中的 Line Bot ID
+                const activeBtn = document.querySelector('.line-bot-btn.active');
+                const lineBotId = activeBtn ? parseInt(activeBtn.dataset.value) : 0;
+
                 // 清理空的崇拜
                 const cleanedServeTypes = {};
                 for (const [collName, items] of Object.entries(currentEditServeTypes)) {
@@ -1108,11 +1182,15 @@
                     }
                 }
 
+                // 保留原有的 usage_count
+                const existingUserData = allUsers[currentEditUser] || {};
                 const userData = {
                     alarm_type: alarmType,
                     lineId: lineId,
                     login_token: currentEditLoginToken || generateLoginToken(),
-                    serve_types: cleanedServeTypes
+                    serve_types: cleanedServeTypes,
+                    line_bot_id: lineBotId,
+                    usage_count: existingUserData.usage_count || {}
                 };
 
                 await setDoc(doc(db, 'users', currentEditUser), userData);
