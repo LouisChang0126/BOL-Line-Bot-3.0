@@ -7,7 +7,7 @@
 ### 🔐 邀請碼登入
 - 使用 16 位英數字邀請碼登入
 - 管理員在 schedule-app 建立使用者後產生邀請碼
-- 登入後自動綁定 LINE ID
+- 登入後自動綁定 LINE ID 與 `line_bot_id`
 
 ### 🔄 調班/代班功能
 - **調班**：與其他同工交換服事日期
@@ -15,6 +15,7 @@
 - 支援多場崇拜選擇
 - 自動顯示崇拜名稱 (如 🎸 青年崇拜)
 - 雙方確認機制，保障權益
+- **支援跨 LINE Bot 調班通知**（不同 Bot 的用戶可互相調班）
 
 ### ⏰ 服事提醒
 - 可設定週一至週六提醒
@@ -30,34 +31,102 @@
 
 ```
 line_bot_GCF/
-├── main.py           # 主程式，LINE Bot Webhook 處理
-├── chatBotConfig.py  # LINE Bot 設定（channel_secret, channel_access_token）
-├── week_alarm.py     # Flex Message 模板（alarm, menu）
-└── README.md         # 說明文件
+├── main.py              # 主程式，LINE Bot Webhook 處理
+├── chatBotConfig.py     # LINE Bot 設定（多台 Bot 憑證）
+├── week_alarm.py        # Flex Message 模板（alarm, menu）
+├── serviceAccount.json  # Firebase 服務帳戶金鑰
+└── README.md            # 說明文件
 ```
 
-## 🔧 環境設定
+## 🔧 多台 LINE Bot 設定
 
-### 1. 設定 LINE Bot 憑證
+本系統支援同時連接 **1-4 台 LINE Bot**，每台 Bot 部署獨立的 GCF。
 
-建立 `chatBotConfig.py`：
+### `line_bot_id` 規則
+
+| line_bot_id | 意義 | 陣列索引 |
+|-------------|------|---------|
+| 0 | 未連線任何 LINE Bot | N/A |
+| 1 | 第一台 LINE Bot | 0 |
+| 2 | 第二台 LINE Bot | 1 |
+| 3 | 第三台 LINE Bot | 2 |
+| ... | ... | ... |
+
+### 設定 `chatBotConfig.py`
 
 ```python
-channel_secret = "YOUR_CHANNEL_SECRET"
-channel_access_token = "YOUR_CHANNEL_ACCESS_TOKEN"
+# =====================================================
+# 多台 LINE Bot 設定
+# =====================================================
+# line_bot_id: 對應此 GCF 部署的 LINE Bot 編號
+# 規則：
+#   - line_bot_id = 0: 未連線任何 LINE Bot
+#   - line_bot_id = 1: 第一台 LINE Bot (陣列索引 0)
+#   - line_bot_id = 2: 第二台 LINE Bot (陣列索引 1)
+#   - 以此類推...
+# =====================================================
+
+line_bot_id = 1  # 請根據部署的 LINE Bot 修改此值
+
+# LINE Bot Channel Secret (依順序排列: 第一台, 第二台, ...)
+channel_secret = [
+    'YOUR_BOT1_CHANNEL_SECRET',  # Bot 1 (line_bot_id=1)
+    'YOUR_BOT2_CHANNEL_SECRET'   # Bot 2 (line_bot_id=2)
+]
+
+# LINE Bot Channel Access Token (依順序排列: 第一台, 第二台, ...)
+channel_access_token = [
+    'YOUR_BOT1_ACCESS_TOKEN',  # Bot 1
+    'YOUR_BOT2_ACCESS_TOKEN'   # Bot 2
+]
 ```
 
-### 2. 設定 Firebase 服務帳戶
+### 部署多台 GCF
 
-將 `serviceAccount.json` 放在目錄。
-
-### 3. 部署到 Google Cloud Function
-
+**GCF #1（第一台 Bot）**：
 ```bash
-gcloud functions deploy lineWebhook \
+# 修改 chatBotConfig.py: line_bot_id = 1
+gcloud functions deploy lineWebhook-bot1 \
   --runtime python39 \
   --trigger-http \
   --allow-unauthenticated
+```
+
+**GCF #2（第二台 Bot）**：
+```bash
+# 修改 chatBotConfig.py: line_bot_id = 2
+gcloud functions deploy lineWebhook-bot2 \
+  --runtime python39 \
+  --trigger-http \
+  --allow-unauthenticated
+```
+
+### 跨 Bot 調班運作原理
+
+當 Bot 1 的用戶 A 向 Bot 2 的用戶 B 發送調班請求時：
+1. 用戶 A 在 Bot 1 發起調班請求
+2. 系統查詢用戶 B 的 `line_bot_id`（值為 2）
+3. 系統使用 Bot 2 的 `channel_access_token` 發送 push message 給用戶 B
+4. 用戶 B 透過 Bot 2 回應確認/拒絕
+5. 系統使用 Bot 1 的 token 通知用戶 A 結果
+
+## 🔧 其他環境設定
+
+### 設定 Firebase 服務帳戶
+
+將 `serviceAccount.json` 放在目錄中。
+
+### 本地測試
+
+```bash
+# 安裝依賴
+pip install flask line-bot-sdk firebase-admin
+
+# 執行本地伺服器
+python local_run.py
+
+# 使用 ngrok 建立外部連接（另一個終端機）
+ngrok http 5000
 ```
 
 ## 📊 Firestore 資料結構
@@ -69,14 +138,12 @@ gcloud functions deploy lineWebhook \
 {
   alarm_type: [true, false, false, false, false, false],  // 週一至週六提醒
   lineId: "Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",            // LINE 使用者 ID
-  login_token: "ABC123DEF456GHIJ",                        // 16位邀請碼（登入後保留）
+  line_bot_id: 1,                                         // 用戶使用的 LINE Bot 編號 (1, 2, ...)
+  login_token: "ABC123DEF456GHIJ",                        // 16位邀請碼
+  usage_count: { "2026.01": { "當週班表": 5, "調班": 2 } }, // 使用統計
   serve_types: {
     "youth-serve": ["主領", "音控"],                       // 各場崇拜的服事項目
     "kids-serve": ["司會"]
-  },
-  "youth-serve": {                                        // 該崇拜的服事日期
-    "主領": ["2026.01.05", "2026.02.02"],
-    "音控": ["2026.01.12"]
   }
 }
 ```
@@ -150,7 +217,7 @@ ABC123DEF456GHIJ
 2. 選擇要調換的日期
 3. 選擇對象（調班：選日期+人、代班：選人）
 4. 確認申請
-5. 對方收到通知
+5. 對方收到通知（跨 Bot 時使用對方的 Bot 發送）
 6. 對方確認/拒絕
 7. 雙方收到結果通知
 ```
@@ -172,6 +239,15 @@ ABC123DEF456GHIJ
 | `E&` | 被申請人拒絕 |
 | `F&` | 執行調班 |
 | `C*` | 更改提醒設定 |
+| `W&` | 查看指定崇拜班表 |
+
+### 核心函數說明
+
+| 函數名 | 用途 |
+|--------|------|
+| `get_line_bot_api_for_user(user_name)` | 根據用戶的 `line_bot_id` 取得正確的 LineBotApi，用於跨 Bot 發送訊息 |
+| `sign_in_with_token(login_token, line_id)` | 使用邀請碼登入，同時更新 `line_bot_id` |
+| `send_shift_request(data_parts, mode)` | 發送調班/代班請求，使用對方的 Bot 發送通知 |
 
 ---
 

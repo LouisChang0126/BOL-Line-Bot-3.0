@@ -32,9 +32,15 @@ cred = credentials.Certificate('serviceAccount.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# LINE Bot API 初始化
-handler = WebhookHandler(channel_secret)
-line_bot_api = LineBotApi(channel_access_token)
+# LINE Bot API 初始化 - 支援多台 LINE Bot
+# line_bot_id 規則: 0=未連線, 1=第一台(索引 0), 2=第二台(索引 1), ...
+handlers = [WebhookHandler(secret) for secret in channel_secret]
+line_bot_apis = [LineBotApi(token) for token in channel_access_token]
+
+# 預設的 handler (根據目前部署的 GCF 對應的 line_bot_id)
+# line_bot_id - 1 = 陣列索引
+handler = handlers[line_bot_id - 1] if line_bot_id >= 1 else handlers[0]
+line_bot_api = line_bot_apis[line_bot_id - 1] if line_bot_id >= 1 else line_bot_apis[0]
 
 
 # =====================================================
@@ -70,6 +76,37 @@ def get_user_by_line_id(line_id):
     if len(docs) > 0 and docs[0].exists:
         return docs[0].id, docs[0].to_dict()
     return None, None
+
+
+def get_line_bot_api_for_user(user_name):
+    """
+    根據用戶的 line_bot_id 取得正確的 LineBotApi
+    用於跨 Bot 發送 push message（調班/代班通知）
+    
+    Args:
+        user_name: 使用者名稱
+        
+    Returns:
+        LineBotApi: 正確的 LINE Bot API 實例，如果用戶未連線則返回 None
+    """
+    if not user_name:
+        return None  # 沒有指定用戶
+    
+    user_doc = db.collection("users").document(user_name).get()
+    if user_doc.exists:
+        user_data = user_doc.to_dict()
+        bot_id = user_data.get('line_bot_id', 0)
+        
+        # line_bot_id = 0 表示未連線任何 Bot
+        if bot_id == 0:
+            return None
+        
+        # line_bot_id - 1 = 陣列索引
+        array_index = bot_id - 1
+        if 0 <= array_index < len(line_bot_apis):
+            return line_bot_apis[array_index]
+    
+    return None  # 用戶不存在或未連線
 
 
 def log_usage(user_name, action_type):
@@ -620,10 +657,15 @@ def send_shift_request(data_parts, mode):
     # 記錄收到調班/代班請求
     log_usage(respondent, '調班/代班請求')
     
+    # 使用對方的 line_bot_id 取得正確的 LineBotApi
+    receiver_bot_api = get_line_bot_api_for_user(respondent)
+    if not receiver_bot_api:
+        return TextSendMessage(text="該用戶尚未連線 LINE Bot，無法發送請求")
+    
     if remind_msg:
-        line_bot_api.push_message(receiver_id, [send_message, TextSendMessage(text=remind_msg)])
+        receiver_bot_api.push_message(receiver_id, [send_message, TextSendMessage(text=remind_msg)])
     else:
-        line_bot_api.push_message(receiver_id, send_message)
+        receiver_bot_api.push_message(receiver_id, send_message)
     
     return TextSendMessage(text="已詢問對方，確定後會再通知您")
 
@@ -691,7 +733,10 @@ def handle_shift_reject(case_id):
                 notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
             
             if requester_id:
-                line_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
+                # 使用申請人的 line_bot_id 取得正確的 LineBotApi
+                requester_bot_api = get_line_bot_api_for_user(data['申請人'])
+                if requester_bot_api:
+                    requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
         
         return TextSendMessage(text="已拒絕申請")
     elif data["狀態"] == '拒絕':
@@ -789,7 +834,10 @@ def notify_requester_success(data):
         if requester_id:
             # 記錄調班/代班成功通知
             log_usage(data['申請人'], '調班/代班成功通知')
-            line_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
+            # 使用申請人的 line_bot_id 取得正確的 LineBotApi
+            requester_bot_api = get_line_bot_api_for_user(data['申請人'])
+            if requester_bot_api:
+                requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
 
 
 def notify_requester_failure(data, reason):
@@ -805,7 +853,10 @@ def notify_requester_failure(data, reason):
             notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n{reason}\n「調班失敗」"
         
         if requester_id:
-            line_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
+            # 使用申請人的 line_bot_id 取得正確的 LineBotApi
+            requester_bot_api = get_line_bot_api_for_user(data['申請人'])
+            if requester_bot_api:
+                requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
 
 
 def remind_same_week_serve(user_name, date, exclude_collection=None):

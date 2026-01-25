@@ -17,6 +17,33 @@ db = firestore.client()
 import json
 from datetime import datetime, timedelta, date
 
+# LINE Bot API 初始化 - 支援多台 LINE Bot
+line_bot_apis = [LineBotApi(token) for token in channel_access_token]
+
+
+def get_line_bot_api_for_user_data(user_data):
+    """
+    根據用戶資料中的 line_bot_id 取得正確的 LineBotApi
+    
+    Args:
+        user_data: 使用者資料 dict
+        
+    Returns:
+        LineBotApi: 正確的 LINE Bot API 實例，如果未連線則返回 None
+    """
+    bot_id = user_data.get('line_bot_id', 0)
+    
+    # line_bot_id = 0 表示未連線任何 Bot
+    if bot_id == 0:
+        return None
+    
+    # line_bot_id - 1 = 陣列索引
+    array_index = bot_id - 1
+    if 0 <= array_index < len(line_bot_apis):
+        return line_bot_apis[array_index]
+    
+    return None  # 無效的 bot_id
+
     
 def reminder_all_serves():
     """
@@ -28,9 +55,8 @@ def reminder_all_serves():
     3. 遍歷每個崇拜，取得該週日的服事資料
     4. 整理成 {人員: [崇拜名-服事項目, ...]} 的格式
     5. 檢查每個有服事的用戶今天是否要被提醒
-    6. 發送提醒訊息
+    6. 發送提醒訊息（使用該用戶對應的 LINE Bot）
     """
-    line_bot_api = LineBotApi(channel_access_token)
     
     # 計算這週日的日期
     today = datetime.now()
@@ -103,13 +129,19 @@ def reminder_all_serves():
         if not alarm_type[today_weekday]:
             continue
         
-        # 4. 發送提醒訊息
+        # 4. 發送提醒訊息（使用該用戶對應的 LINE Bot）
         message = f"提醒你這週有服事喔!\n\n這週的服事（{this_sunday.replace('.', '/')}）:\n"
         message += "\n".join([f"• {s}" for s in serve_list])
         
         try:
-            line_bot_api.push_message(line_id, TextSendMessage(text=message))
-            print(f"已提醒 {person_name}")
+            # 根據用戶的 line_bot_id 選擇正確的 LineBotApi
+            user_line_bot_api = get_line_bot_api_for_user_data(user_data)
+            if not user_line_bot_api:
+                print(f"用戶 {person_name} 尚未連線 LINE Bot (line_bot_id={user_data.get('line_bot_id', 0)})")
+                continue
+            
+            user_line_bot_api.push_message(line_id, TextSendMessage(text=message))
+            print(f"已提醒 {person_name} (使用 Bot {user_data.get('line_bot_id', 0)})")
         except Exception as e:
             print(f"發送訊息給 {person_name} 失敗:", str(e))
 
