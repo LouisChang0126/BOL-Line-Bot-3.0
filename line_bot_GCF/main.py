@@ -497,7 +497,11 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
                     actions = []
     else:
         # 調班模式：找該服事其他日期的人
-        docs = db.collection(collection_id).limit(26).get()
+        today = datetime.now().strftime("%Y.%m.%d")
+        # 使用 document ID 篩選今天及之後的文件
+        docs = db.collection(collection_id) \
+            .where("__name__", ">=", db.collection(collection_id).document(today)) \
+            .limit(26).get()
         for doc in docs:
             if doc.id == '_metadata' or doc.id == change_date:
                 continue
@@ -733,6 +737,8 @@ def handle_shift_reject(case_id):
                 notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
             
             if requester_id:
+                # 記錄調班/代班失敗通知
+                log_usage(data['申請人'], '調班/代班失敗通知')
                 # 使用申請人的 line_bot_id 取得正確的 LineBotApi
                 requester_bot_api = get_line_bot_api_for_user(data['申請人'])
                 if requester_bot_api:
@@ -853,6 +859,8 @@ def notify_requester_failure(data, reason):
             notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n{reason}\n「調班失敗」"
         
         if requester_id:
+            # 記錄調班/代班失敗通知
+            log_usage(data['申請人'], '調班/代班失敗通知')
             # 使用申請人的 line_bot_id 取得正確的 LineBotApi
             requester_bot_api = get_line_bot_api_for_user(data['申請人'])
             if requester_bot_api:
