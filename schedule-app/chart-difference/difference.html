@@ -192,25 +192,13 @@
         import { getFirestore, collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { firebaseConfig } from '../firebase-config.js';
 
-        const SERVE_DISPLAY_NAMES = {
-            'youth-serve': '青年崇拜',
-            'kids-serve': '兒童崇拜',
-            'adult-serve': '成人崇拜'
-        };
-
         // 從 URL 取得 collection
         const urlParams = new URLSearchParams(window.location.search);
         const targetCollection = urlParams.get('collection') || 'youth-serve';
-        const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
-
-        document.getElementById('pageTitle').textContent = `${displayName} 編輯記錄`;
-        document.title = `${displayName} 編輯記錄 - 管理員`;
-
-        // 動態設定返回按鈕連結
-        document.getElementById('backBtn').href = `../edit-chart/edit-chart.html?collection=${targetCollection}`;
 
         let db;
         let allLogs = [];
+        let displayName = targetCollection; // 預設為 collection ID
 
         async function init() {
             try {
@@ -223,10 +211,36 @@
                 });
 
                 db = getFirestore(app);
+
+                // 從 _config/serve-list 取得崇拜名稱
+                await loadServeDisplayName();
+
+                // 更新頁面標題
+                document.getElementById('pageTitle').textContent = `${displayName} 編輯記錄`;
+                document.title = `${displayName} 編輯記錄 - 管理員`;
+
+                // 動態設定返回按鈕連結
+                document.getElementById('backBtn').href = `../edit-chart/edit-chart.html?collection=${targetCollection}`;
+
                 await loadLogs();
             } catch (error) {
                 console.error('初始化失敗:', error);
                 document.getElementById('logList').innerHTML = '<div class="no-logs">載入失敗</div>';
+            }
+        }
+
+        async function loadServeDisplayName() {
+            try {
+                const serveListDoc = await getDoc(doc(db, '_config', 'serve-list'));
+                if (serveListDoc.exists()) {
+                    const serves = serveListDoc.data().serves || [];
+                    const matchedServe = serves.find(s => s.id === targetCollection);
+                    if (matchedServe) {
+                        displayName = matchedServe.emoji ? `${matchedServe.emoji} ${matchedServe.name}` : matchedServe.name;
+                    }
+                }
+            } catch (error) {
+                console.error('載入崇拜名稱失敗:', error);
             }
         }
 
