@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用數據觀察 - 管理員</title>
+    <link rel="stylesheet" href="../styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        .observation-page {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .month-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: white;
+            padding: 8px 16px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .month-selector select {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .refresh-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: var(--primary-dark);
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .dashboard-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .dashboard-card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .dashboard-card.double-height {
+            grid-row: span 2;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .card-icon {
+            font-size: 24px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+        }
+
+        .chart-container.small {
+            height: 150px;
+        }
+
+        .chart-container.tall {
+            height: 400px;
+        }
+
+        .chart-container.ranking {
+            height: 100%;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .stat-card {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin: 16px 0;
+            font-family: 'Segoe UI', system-ui;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            background: #f8fafc;
+            padding: 16px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-item-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .stat-item-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .ranking-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .ranking-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #f8fafc;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .ranking-item:hover {
+            background: #e2e8f0;
+        }
+
+        .ranking-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .ranking-badge {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .ranking-badge.gold {
+            background: linear-gradient(135deg, #ffd700, #ffed4e);
+            color: #92400e;
+        }
+
+        .ranking-badge.silver {
+            background: linear-gradient(135deg, #c0c0c0, #e8e8e8);
+            color: #374151;
+        }
+
+        .ranking-badge.bronze {
+            background: linear-gradient(135deg, #cd7f32, #e8a87c);
+            color: #78350f;
+        }
+
+        .ranking-badge.normal {
+            background: #e2e8f0;
+            color: #64748b;
+        }
+
+        .ranking-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .ranking-count {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-card.double-height {
+                grid-row: span 1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .dashboard-card.full-width,
+            .dashboard-card.half-width {
+                grid-column: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="observation-page">
+        <div class="page-header">
+            <div class="header-left">
+                <a href="index.html" class="btn btn-secondary" style="padding: 6px 12px;">← 返回</a>
+                <h1>📊 使用數據觀察</h1>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <div class="month-selector">
+                    <label for="monthSelect">選擇月份：</label>
+                    <select id="monthSelect"></select>
+                </div>
+                <button class="refresh-btn" onclick="loadData()">🔄 刷新</button>
+            </div>
+        </div>
+
+        <div id="dashboard" class="loading">
+            <div class="spinner"></div>
+            <div>載入數據中...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
+        import { getFirestore, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig } from '../firebase-config.js';
+
+        let db;
+        let charts = {}; // 儲存所有圖表實例
+        let currentMonth = '';
+
+        async function init() {
+            const app = initializeApp(firebaseConfig);
+            const appCheck = initializeAppCheck(app, {
+                provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
+                isTokenAutoRefreshEnabled: true
+            });
+            db = getFirestore(app);
+
+            // 初始化月份選擇器
+            initMonthSelector();
+            await loadData();
+        }
+
+        async function initMonthSelector() {
+            const select = document.getElementById('monthSelect');
+
+            // 先查詢所有用戶，收集有資料的月份
+            const usersSnapshot = await getDocs(collection(db, 'users'));
+            const availableMonths = new Set();
+
+            usersSnapshot.forEach(doc => {
+                const userData = doc.data();
+                const usageCount = userData.usage_count || {};
+                // 收集所有有資料的月份
+                Object.keys(usageCount).forEach(month => {
+                    if (Object.keys(usageCount[month]).length > 0) {
+                        availableMonths.add(month);
+                    }
+                });
+            });
+
+            // 將月份排序（最新的在前面）
+            const sortedMonths = Array.from(availableMonths).sort().reverse();
+
+            // 如果沒有任何資料，顯示當前月份
+            if (sortedMonths.length === 0) {
+                const now = new Date();
+                const currentMonth = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}`;
+                sortedMonths.push(currentMonth);
+            }
+
+            // 生成選項
+            sortedMonths.forEach(monthKey => {
+                const [year, month] = monthKey.split('.');
+                const option = document.createElement('option');
+                option.value = monthKey;
+                option.textContent = `${year} 年 ${parseInt(month)} 月`;
+                select.appendChild(option);
+            });
+
+            currentMonth = select.value;
+            select.addEventListener('change', (e) => {
+                currentMonth = e.target.value;
+                loadData();
+            });
+        }
+
+        window.loadData = async function () {
+            try {
+                const dashboard = document.getElementById('dashboard');
+                dashboard.innerHTML = '<div class="spinner"></div><div>載入數據中...</div>';
+                dashboard.className = 'loading';
+
+                // 查詢所有用戶
+                const usersSnapshot = await getDocs(collection(db, 'users'));
+                const allData = processUsageData(usersSnapshot);
+
+                renderDashboard(allData);
+            } catch (error) {
+                console.error('載入數據失敗:', error);
+                document.getElementById('dashboard').innerHTML = '<div class="loading">載入失敗</div>';
+            }
+        };
+
+        function processUsageData(snapshot) {
+            const data = {
+                pushMessageUsage: 0, // 改為調班通知總和
+                commandStats: {},
+                shiftStats: {
+                    success: 0,
+                    failure: 0,
+                    request: 0
+                },
+                userRankings: [],
+                activeUsers: 0,
+                veryActiveUsers: 0,
+                monthlyTrends: {} // 改為分類趨勢 {month: {全部班表: x, 當週班表: y, ...}}
+            };
+
+            const commandTypes = ['全部班表', '當週班表', '換班', '代班', '設定提醒', '目錄'];
+
+            snapshot.forEach(doc => {
+                const userData = doc.data();
+                const usageCount = userData.usage_count || {};
+
+                // 處理當前選擇的月份
+                const monthData = usageCount[currentMonth] || {};
+                let userTotal = 0;
+
+                Object.entries(monthData).forEach(([key, count]) => {
+                    userTotal += count;
+
+                    if (commandTypes.includes(key)) {
+                        data.commandStats[key] = (data.commandStats[key] || 0) + count;
+                    } else if (key === '調班/代班成功通知') {
+                        data.shiftStats.success += count;
+                        data.pushMessageUsage += count;
+                    } else if (key === '調班/代班失敗通知') {
+                        data.shiftStats.failure += count;
+                        data.pushMessageUsage += count;
+                    } else if (key === '調班/代班請求') {
+                        data.shiftStats.request += count;
+                        data.pushMessageUsage += count;
+                    }
+                });
+
+                if (userTotal > 0) {
+                    data.activeUsers++;
+                    if (userTotal >= 5) {
+                        data.veryActiveUsers++;
+                    }
+                    data.userRankings.push({
+                        name: doc.id,
+                        count: userTotal
+                    });
+                }
+
+                // 處理月份趨勢（最近 6 個月）- 分類統計
+                Object.entries(usageCount).forEach(([month, monthData]) => {
+                    if (!data.monthlyTrends[month]) {
+                        data.monthlyTrends[month] = {
+                            '全部班表': 0,
+                            '當週班表': 0,
+                            '換班': 0,
+                            '代班': 0,
+                            '設定提醒': 0,
+                            'Push Message': 0
+                        };
+                    }
+                    Object.entries(monthData).forEach(([key, count]) => {
+                        if (commandTypes.includes(key)) {
+                            data.monthlyTrends[month][key] += count;
+                        } else if (['調班/代班成功通知', '調班/代班失敗通知', '調班/代班請求'].includes(key)) {
+                            data.monthlyTrends[month]['Push Message'] += count;
+                        }
+                    });
+                });
+            });
+
+            // 排序用戶排行
+            data.userRankings.sort((a, b) => b.count - a.count);
+            data.userRankings = data.userRankings.slice(0, 10);
+
+            return data;
+        }
+
+        function renderDashboard(data) {
+            const dashboard = document.getElementById('dashboard');
+            dashboard.className = 'dashboard-grid';
+
+            dashboard.innerHTML = `
+                <!-- Push Message 使用量 -->
+                <div class="dashboard-card full-width">
+                    <div class="card-header">
+                        <h2 class="card-title">📮 Push Message 使用量</h2>
+                        <span class="card-icon">📊</span>
+                    </div>
+                    <div class="chart-container small">
+                        <canvas id="usageBarChart"></canvas>
+                    </div>
+                    <p style="text-align: center; margin-top: 12px; color: var(--text-secondary);">
+                        ${data.pushMessageUsage} / 200 次 (${(data.pushMessageUsage / 200 * 100).toFixed(1)}%)
+                    </p>
+                </div>
+
+                <!-- 指令使用分布 -->
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h2 class="card-title">⌨️ 指令使用分布</h2>
+                        <span class="card-icon">📈</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="commandPieChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 調班通知分布 -->
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h2 class="card-title">🔄 調班通知分布</h2>
+                        <span class="card-icon">📊</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="shiftPieChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- 活躍用戶排行榜 -->
+                <div class="dashboard-card double-height">
+                    <div class="card-header">
+                        <h2 class="card-title">🏆 活躍用戶排行榜 (Top 10)</h2>
+                        <span class="card-icon">👑</span>
+                    </div>
+                    <ul class="ranking-list">
+                        ${data.userRankings.map((user, index) => `
+                            <li class="ranking-item">
+                                <div class="ranking-left">
+                                    <span class="ranking-badge ${index === 0 ? 'gold' : index === 1 ? 'silver' : index === 2 ? 'bronze' : 'normal'}">
+                                        ${index + 1}
+                                    </span>
+                                    <span class="ranking-name">${user.name}</span>
+                                </div>
+                                <span class="ranking-count">${user.count} 次</span>
+                            </li>
+                        `).join('')}
+                    </ul>
+                </div>
+                
+                <!-- 調班成功率 -->
+                <div class="dashboard-card stat-card">
+                    <div class="card-header">
+                        <h2 class="card-title">✅ 調班成功率</h2>
+                        <span class="card-icon">📈</span>
+                    </div>
+                    <div class="stat-value">${data.shiftStats.request > 0 ? Math.round(data.shiftStats.success / data.shiftStats.request * 100) : 0}%</div>
+                    <div class="stat-label">成功 ${data.shiftStats.success} / 請求 ${data.shiftStats.request}</div>
+                </div>
+
+                <!-- 用戶活躍度統計 -->
+                <div class="dashboard-card">
+                    <div class="card-header">
+                        <h2 class="card-title">👥 用戶活躍度</h2>
+                        <span class="card-icon">📊</span>
+                    </div>
+                    <div class="stat-grid">
+                        <div class="stat-item">
+                            <div class="stat-item-value">${data.activeUsers}</div>
+                            <div class="stat-item-label">有使用人數</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-value">${data.veryActiveUsers}</div>
+                            <div class="stat-item-label">活躍人數<br>(≥5次)</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-item-value">${data.activeUsers > 0 ? Math.round(data.veryActiveUsers / data.activeUsers * 100) : 0}%</div>
+                            <div class="stat-item-label">活躍率</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 使用趨勢圖 -->
+                <div class="dashboard-card full-width">
+                    <div class="card-header">
+                        <h2 class="card-title">📈 使用趨勢 (最近 6 個月)</h2>
+                        <span class="card-icon">📊</span>
+                    </div>
+                    <div class="chart-container tall">
+                        <canvas id="trendLineChart"></canvas>
+                    </div>
+                </div>
+            `;
+
+            // 渲染所有圖表
+            renderCharts(data);
+        }
+
+        function renderCharts(data) {
+            // 銷毀舊圖表
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            // 1. Push Message 使用量長條圖
+            const usageCtx = document.getElementById('usageBarChart').getContext('2d');
+            const usagePercent = data.pushMessageUsage / 200;
+            charts.usageBar = new Chart(usageCtx, {
+                type: 'bar',
+                data: {
+                    labels: ['當月使用量'],
+                    datasets: [{
+                        label: '已使用',
+                        data: [data.pushMessageUsage],
+                        backgroundColor: usagePercent > 0.8 ? '#ef4444' : usagePercent > 0.6 ? '#f59e0b' : '#10b981',
+                        borderRadius: 8
+                    }, {
+                        label: '剩餘',
+                        data: [Math.max(0, 200 - data.pushMessageUsage)],
+                        backgroundColor: '#e5e7eb',
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                            max: 200,
+                            ticks: {
+                                callback: function (value) {
+                                    return value + ' 次';
+                                }
+                            }
+                        },
+                        y: {
+                            stacked: true
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    return context.dataset.label + ': ' + context.parsed.x + ' 次';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // 2. 指令使用分布圓餅圖
+            const commandCtx = document.getElementById('commandPieChart').getContext('2d');
+            const commandLabels = Object.keys(data.commandStats);
+            const commandData = Object.values(data.commandStats);
+            charts.commandPie = new Chart(commandCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: commandLabels,
+                    datasets: [{
+                        data: commandData,
+                        backgroundColor: [
+                            '#3b82f6',
+                            '#8b5cf6',
+                            '#ec4899',
+                            '#f59e0b',
+                            '#10b981',
+                            '#06b6d4'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // 3. 調班通知分布圓餅圖
+            const shiftCtx = document.getElementById('shiftPieChart').getContext('2d');
+            charts.shiftPie = new Chart(shiftCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['調班成功通知', '調班失敗通知', '調班請求'],
+                    datasets: [{
+                        data: [data.shiftStats.success, data.shiftStats.failure, data.shiftStats.request],
+                        backgroundColor: ['#10b981', '#ef4444', '#3b82f6'],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+
+            // 4. 使用趨勢折線圖（最近 6 個月）- 多條折線
+            const trendCtx = document.getElementById('trendLineChart').getContext('2d');
+            const sortedMonths = Object.keys(data.monthlyTrends).sort().slice(-6);
+
+            const trendCategories = ['全部班表', '當週班表', '換班', '代班', '設定提醒', 'Push Message'];
+            const trendColors = {
+                '全部班表': '#3b82f6',
+                '當週班表': '#8b5cf6',
+                '換班': '#ec4899',
+                '代班': '#f59e0b',
+                '設定提醒': '#10b981',
+                'Push Message': '#ef4444'
+            };
+
+            const datasets = trendCategories.map(category => {
+                return {
+                    label: category,
+                    data: sortedMonths.map(month => data.monthlyTrends[month]?.[category] || 0),
+                    borderColor: trendColors[category],
+                    backgroundColor: trendColors[category] + '33',
+                    tension: 0.4,
+                    fill: false,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                };
+            });
+
+            charts.trendLine = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: sortedMonths.map(m => {
+                        const [year, month] = m.split('.');
+                        return `${year}/${month}`;
+                    }),
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'bottom'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function (value) {
+                                    return value + ' 次';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

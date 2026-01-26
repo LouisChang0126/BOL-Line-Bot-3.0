@@ -17,10 +17,15 @@
             position: relative;
         }
 
-        .top-right-btn {
+        .top-right-buttons {
             position: absolute;
             top: 24px;
             right: 24px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .top-right-btn {
             padding: 10px 16px;
             background: white;
             border: 1px solid var(--border-color);
@@ -223,7 +228,10 @@
 
 <body>
     <div class="selection-page">
-        <a href="edit-user.html" class="top-right-btn">👥 所有使用者管理</a>
+        <div class="top-right-buttons">
+            <a href="edit-user.html" class="top-right-btn">👥 所有使用者管理</a>
+            <a href="observation.html" class="top-right-btn">📈 使用數據觀察</a>
+        </div>
         <div class="selection-title">
             <h1>⛪ 教會服事班表系統</h1>
             <p>請選擇要編輯的班表</p>
