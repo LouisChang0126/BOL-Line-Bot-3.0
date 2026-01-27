@@ -706,6 +706,11 @@ async function addServiceItem() {
 
     const trimmedName = name.trim();
 
+    if (trimmedName.includes('|')) {
+        alert('名稱不能包含 "|" 符號');
+        return;
+    }
+
     if (serviceItems.includes(trimmedName)) {
         alert('此服事項目已存在');
         return;
@@ -755,6 +760,11 @@ async function addInfoColumn() {
     if (!name || name.trim() === '') return;
 
     const trimmedName = name.trim();
+
+    if (trimmedName.includes('|')) {
+        alert('名稱不能包含 "|" 符號');
+        return;
+    }
 
     if (serviceItems.includes(trimmedName)) {
         alert('此欄位名稱已存在');
@@ -816,6 +826,11 @@ document.getElementById('saveServiceBtn').addEventListener('click', async () => 
 
     if (!newName) {
         alert('請輸入服事項目名稱');
+        return;
+    }
+
+    if (newName.includes('|')) {
+        alert('名稱不能包含 "|" 符號');
         return;
     }
 
@@ -1065,6 +1080,11 @@ document.getElementById('addPersonChipBtn').addEventListener('click', () => {
     const name = document.getElementById('newPersonInput').value.trim();
     if (!name) {
         alert('請輸入姓名');
+        return;
+    }
+
+    if (name.includes('|')) {
+        alert('姓名不能包含 "|" 符號');
         return;
     }
 
@@ -1328,6 +1348,12 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
                 } else {
                     // 解析人名：支援 "/" 分隔
                     const names = cellValue.split('/').map(n => n.trim()).filter(n => n !== '');
+
+                    if (names.some(n => n.includes('|'))) {
+                        alert('匯入失敗：人員名稱不能包含 "|" 符號');
+                        throw new Error('人員名稱包含 "|" 符號');
+                    }
+
                     rowData[serviceName] = names;
 
                     // 加入到所有人名集合

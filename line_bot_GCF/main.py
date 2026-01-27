@@ -359,17 +359,14 @@ def build_serve_selection_columns(serves, mode):
     actions = []
     
     for serve in serves:
-        # 排除特定服事類型
-        if serve['serve_type'] in ['招待', '愛宴', '貝斯', '吉他']:
-            continue
             
-        label = f"{serve['collection_name'][:6]}-{serve['serve_type'][:4]}"  # 限制長度
+        label = f"{serve['collection_name']}-{serve['serve_type']}"
         text = f"{serve['collection_name']} {serve['serve_type']}"
         
         actions.append(PostbackTemplateAction(
-            label=label[:12],  # LINE 限制 12 字元
+            label=label[:20],  # LINE 限制 20 字元
             text=text[:60],
-            data=f"A*{mode}+{serve['collection']}+{serve['serve_type']}"
+            data=f"A*{mode}|{serve['collection']}|{serve['serve_type']}"
         ))
         
         if len(actions) == 3:
@@ -431,7 +428,7 @@ def select_shift_date(line_id, mode, collection_id, serve_type):
         actions.append(PostbackTemplateAction(
             label=date.replace('.', '/'),
             text=f"{date.replace('.', '/')} {serve_type}",
-            data=f"A&{mode}+{date}+{collection_id}+{serve_type}+{user_name}"
+            data=f"A&{mode}|{date}|{collection_id}|{serve_type}|{user_name}"
         ))
         
         if len(actions) == 3:
@@ -486,7 +483,7 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
                 actions.append(PostbackTemplateAction(
                     label=user_doc.id,
                     text=f"請 {user_doc.id} 代班",
-                    data=f"G#{user_doc.id}+{change_date}+{collection_id}+{serve_type}+{requester_name}"
+                    data=f"G#{user_doc.id}|{change_date}|{collection_id}|{serve_type}|{requester_name}"
                 ))
                 if len(actions) == 3:
                     columns.append(CarouselColumn(
@@ -515,9 +512,9 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
                 # 多人用 B#，單人用 B&
                 data_prefix = 'B#' if len(persons_list) > 1 else 'B&'
                 actions.append(PostbackTemplateAction(
-                    label=f"{date_str[5:]} {persons_display}"[:12],
+                    label=f"{date_str[5:]} {persons_display}"[:20],
                     text=f"與 {persons_display} 調班 {date_str[5:]}",
-                    data=f"{data_prefix}{date_str}+{persons_display}+{change_date}+{collection_id}+{serve_type}+{requester_name}"
+                    data=f"{data_prefix}{date_str}|{persons_display}|{change_date}|{collection_id}|{serve_type}|{requester_name}"
                 ))
                 if len(actions) == 3:
                     columns.append(CarouselColumn(
@@ -562,7 +559,7 @@ def confirm_shift_request(data_parts, mode):
         respondent, apply_date, collection_id, serve_type, requester = data_parts
         collection_name = get_serve_name_by_id(collection_id)
         confirm_text = f"確定要把 {apply_date[5:].replace('.', '/')} 的 {serve_type}\n給 {respondent} 代班嗎?\n({collection_name})"
-        data = f"G&{'+'.join(data_parts)}"
+        data = f"G&{'|'.join(data_parts)}"
         mode_title = '代班'
         remind_msg = None
     else:
@@ -570,7 +567,7 @@ def confirm_shift_request(data_parts, mode):
         target_date, respondent, apply_date, collection_id, serve_type, requester = data_parts
         collection_name = get_serve_name_by_id(collection_id)
         confirm_text = f"確定要用 {apply_date[5:].replace('.', '/')} 的 {serve_type}\n跟 {respondent} 換 {target_date[5:]} 的嗎?\n({collection_name})"
-        data = f"C&{'+'.join(data_parts)}"
+        data = f"C&{'|'.join(data_parts)}"
         mode_title = '調班'
         remind_msg = remind_same_week_serve(requester, target_date.replace('/', '.'), collection_id)
     
@@ -932,12 +929,12 @@ def handle_two_person_shift(data_parts):
                 PostbackTemplateAction(
                     label=names[0],
                     text=f'選 {names[0]}',
-                    data=f"B&{target_date}+{names[0]}+{apply_date}+{collection_id}+{serve_type}+{requester}"
+                    data=f"B&{target_date}|{names[0]}|{apply_date}|{collection_id}|{serve_type}|{requester}"
                 ),
                 PostbackTemplateAction(
                     label=names[1],
                     text=f'選 {names[1]}',
-                    data=f"B&{target_date}+{names[1]}+{apply_date}+{collection_id}+{serve_type}+{requester}"
+                    data=f"B&{target_date}|{names[1]}|{apply_date}|{collection_id}|{serve_type}|{requester}"
                 )
             ]
         )
@@ -1045,7 +1042,7 @@ def build_schedule_selection_menu(collection_ids):
     for collection_id in collection_ids:
         serve_name = get_serve_name_by_id(collection_id)
         actions.append(PostbackTemplateAction(
-            label=serve_name[:12],  # LINE 限制 12 字元
+            label=serve_name[:20],  # LINE 限制 20 字元
             text=f"查看 {serve_name} 班表",
             data=f"W&{collection_id}"
         ))
@@ -1264,15 +1261,15 @@ def handle_postback(event):
     
     if prefix == 'A*':
         # 選擇崇拜和服事種類後，顯示日期選單
-        # data: {mode}+{collection}+{serve_type}
-        parts = data.split('+')
+        # data: {mode}|{collection}|{serve_type}
+        parts = data.split('|')
         mode, collection_id, serve_type = parts[0], parts[1], parts[2]
         replyMessages = select_shift_date(line_id, mode, collection_id, serve_type)
     
     elif prefix == 'A&':
         # 選擇日期後，顯示候選人選單
-        # data: {mode}+{date}+{collection}+{serve_type}+{user_name}
-        parts = data.split('+')
+        # data: {mode}|{date}|{collection}|{serve_type}|{user_name}
+        parts = data.split('|')
         mode = parts[0]
         columns = find_shift_candidates(parts[2], parts[3], parts[1], parts[4], mode)
         replyMessages = TemplateSendMessage(
@@ -1282,25 +1279,25 @@ def handle_postback(event):
     
     elif prefix == 'B&':
         # 確認調班申請
-        # data: {被申請日}+{被申請人}+{申請日}+{collection}+{serve_type}+{申請人}
-        replyMessages = confirm_shift_request(data.split('+'), 'S')
+        # data: {被申請日}|{被申請人}|{申請日}|{collection}|{serve_type}|{申請人}
+        replyMessages = confirm_shift_request(data.split('|'), 'S')
     
     elif prefix == 'B#':
         # 該服事有多人的處理
-        replyMessages = handle_two_person_shift(data.split('+'))
+        replyMessages = handle_two_person_shift(data.split('|'))
     
     elif prefix == 'G#':
         # 確認代班申請
-        # data: {被申請人}+{申請日}+{collection}+{serve_type}+{申請人}
-        replyMessages = confirm_shift_request(data.split('+'), 'G')
+        # data: {被申請人}|{申請日}|{collection}|{serve_type}|{申請人}
+        replyMessages = confirm_shift_request(data.split('|'), 'G')
     
     elif prefix == 'C&':
         # 發送調班請求
-        replyMessages = send_shift_request(data.split('+'), 'S')
+        replyMessages = send_shift_request(data.split('|'), 'S')
     
     elif prefix == 'G&':
         # 發送代班請求
-        replyMessages = send_shift_request(data.split('+'), 'G')
+        replyMessages = send_shift_request(data.split('|'), 'G')
     
     elif prefix == 'D&':
         # 被申請人確認
