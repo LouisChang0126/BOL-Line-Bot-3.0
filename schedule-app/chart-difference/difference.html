@@ -190,7 +190,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
         import { getFirestore, collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, where } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-        import { firebaseConfig } from '../firebase-config.js';
+        import { firebaseConfig, RECAPTCHA_SITE_KEY } from '../firebase-config.js';
 
         // 從 URL 取得 collection
         const urlParams = new URLSearchParams(window.location.search);
@@ -206,7 +206,7 @@
 
                 // 初始化 App Check
                 const appCheck = initializeAppCheck(app, {
-                    provider: new ReCaptchaV3Provider('6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx'),
+                    provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
                     isTokenAutoRefreshEnabled: true
                 });
 

@@ -193,6 +193,11 @@ async function loadData() {
 
                 // 收集所有人名
                 serviceItems.forEach(item => {
+                    // 跳過資訊欄位
+                    if (nonUserColumns.includes(item)) {
+                        return;
+                    }
+
                     if (data[item] && Array.isArray(data[item])) {
                         data[item].forEach(name => allPersonNames.add(name));
                     }

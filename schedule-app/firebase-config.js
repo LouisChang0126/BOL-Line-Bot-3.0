@@ -10,3 +10,4 @@ export const firebaseConfig = {
 
 // Firestore 集合名稱
 export const COLLECTION_NAME = "serve";
+export const RECAPTCHA_SITE_KEY = "6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx";
