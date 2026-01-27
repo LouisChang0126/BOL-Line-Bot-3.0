@@ -970,17 +970,44 @@ async function deleteServiceItem(serviceName) {
 function openEditPersonModal(date, service) {
     currentEditingCell = { date, service };
 
+    // 判斷是否為資訊欄位
+    const isInfoColumn = nonUserColumns.includes(service);
+
     // 顯示目前編輯的日期與服事項目
     document.getElementById('editPersonModalSubtitle').textContent = `${date} - ${service}`;
 
-    // 顯示所有人名下拉選單
-    renderPersonDropdown();
+    // 取得 modal 內的兩個 label 元素
+    const formGroups = document.getElementById('editPersonModal').querySelectorAll('.form-group');
+    const firstLabel = formGroups[0]?.querySelector('label');
+    const secondLabel = formGroups[1]?.querySelector('label');
 
-    // 顯示目前人員
-    renderCurrentPersonChips();
+    if (isInfoColumn) {
+        // 資訊欄位模式：隱藏人員選擇區域
+        document.getElementById('personSelectContainer').style.display = 'none';
+        if (firstLabel) firstLabel.textContent = '資訊內容';
+        if (secondLabel) secondLabel.style.display = 'none';
+
+        // 渲染資訊欄位的輸入框
+        renderInfoInputs();
+    } else {
+        // 服事項目模式：顯示人員選擇區域
+        document.getElementById('personSelectContainer').style.display = 'block';
+        if (firstLabel) firstLabel.textContent = '選擇現有人員或輸入新人員';
+        if (secondLabel) {
+            secondLabel.style.display = 'block';
+            secondLabel.textContent = '目前服事人員';
+        }
+
+        // 顯示所有人名下拉選單
+        renderPersonDropdown();
+
+        // 顯示目前人員
+        renderCurrentPersonChips();
+
+        document.getElementById('newPersonInput').value = '';
+    }
 
     document.getElementById('editPersonModal').classList.remove('hidden');
-    document.getElementById('newPersonInput').value = '';
 }
 
 function renderPersonDropdown() {
@@ -1076,6 +1103,97 @@ function renderCurrentPersonChips() {
     });
 }
 
+// 渲染資訊欄位的輸入框（適用於非人員欄位）
+function renderInfoInputs() {
+    const { date, service } = currentEditingCell;
+    const row = scheduleData.find(r => r.date === date);
+    const items = row[service] || [];
+
+    const container = document.getElementById('currentPersonChips');
+
+    let html = '';
+
+    // 為每個現有項目創建輸入框和刪除按鈕
+    items.forEach((item, index) => {
+        html += `
+            <div class="info-input-row">
+                <input type="text" 
+                       class="info-text-input" 
+                       data-index="${index}" 
+                       value="${item}" 
+                       placeholder="輸入資訊...">
+                <button class="remove-info-btn" data-index="${index}">×</button>
+            </div>
+        `;
+    });
+
+    // 新增一個空的輸入框和「+」按鈕
+    html += `
+        <div class="info-input-row">
+            <input type="text" 
+                   class="info-text-input" 
+                   id="newInfoInput" 
+                   placeholder="輸入新資訊...">
+            <button class="add-info-btn" id="addInfoBtn">+</button>
+        </div>
+    `;
+
+    container.innerHTML = html;
+
+    // 為現有項目的輸入框設定事件（實時更新）
+    container.querySelectorAll('.info-text-input:not(#newInfoInput)').forEach(input => {
+        input.addEventListener('change', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            const newValue = e.target.value.trim();
+
+            if (newValue === '') {
+                // 如果清空，則刪除該項
+                removeInfoItem(date, service, index);
+                renderInfoInputs();
+            } else {
+                // 更新項目
+                updateInfoItem(date, service, index, newValue);
+            }
+        });
+    });
+
+    // 設定刪除按鈕事件
+    container.querySelectorAll('.remove-info-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const index = parseInt(e.target.dataset.index);
+            removeInfoItem(date, service, index);
+            renderInfoInputs();
+        });
+    });
+
+    // 設定新增按鈕事件
+    const addBtn = document.getElementById('addInfoBtn');
+    if (addBtn) {
+        addBtn.addEventListener('click', () => {
+            const newInput = document.getElementById('newInfoInput');
+            const value = newInput.value.trim();
+
+            if (!value) {
+                alert('請輸入資訊');
+                return;
+            }
+
+            addInfoItem(date, service, value);
+            renderInfoInputs();
+        });
+    }
+
+    // 為新資訊輸入框設定 Enter 鍵快捷鍵
+    const newInput = document.getElementById('newInfoInput');
+    if (newInput) {
+        newInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('addInfoBtn').click();
+            }
+        });
+    }
+}
+
 document.getElementById('addPersonChipBtn').addEventListener('click', () => {
     const name = document.getElementById('newPersonInput').value.trim();
     if (!name) {
@@ -1093,6 +1211,69 @@ document.getElementById('addPersonChipBtn').addEventListener('click', () => {
 
     document.getElementById('newPersonInput').value = '';
 });
+
+// 新增資訊項目
+async function addInfoItem(date, service, value) {
+    const row = scheduleData.find(r => r.date === date);
+    if (!row) return;
+
+    if (!row[service]) {
+        row[service] = [];
+    }
+
+    // 新增項目
+    row[service].push(value);
+
+    // 儲存
+    const data = { ...row };
+    delete data.date;
+    await saveSchedule(date, data);
+
+    // 記錄歷史和差異
+    pushHistory();
+    updateEditDifference();
+
+    renderTable();
+}
+
+// 更新資訊項目
+async function updateInfoItem(date, service, index, newValue) {
+    const row = scheduleData.find(r => r.date === date);
+    if (!row || !row[service]) return;
+
+    row[service][index] = newValue;
+
+    // 儲存
+    const data = { ...row };
+    delete data.date;
+    await saveSchedule(date, data);
+
+    // 記錄歷史和差異
+    pushHistory();
+    updateEditDifference();
+
+    renderTable();
+}
+
+// 刪除資訊項目
+async function removeInfoItem(date, service, index) {
+    const row = scheduleData.find(r => r.date === date);
+    if (!row || !row[service]) return;
+
+    row[service].splice(index, 1);
+
+    // 儲存
+    const data = { ...row };
+    delete data.date;
+    await saveSchedule(date, data);
+
+    // 記錄歷史和差異
+    pushHistory();
+    updateEditDifference();
+
+    renderTable();
+}
+
 
 async function addPersonToCell(date, service, person) {
     const row = scheduleData.find(r => r.date === date);

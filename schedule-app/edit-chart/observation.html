@@ -401,7 +401,7 @@
 
         function processUsageData(snapshot) {
             const data = {
-                pushMessageUsage: 0, // 改為調班通知總和
+                pushMessageUsageByBot: {}, // 按 line_bot_id 分組: {1: count, 2: count}
                 commandStats: {},
                 shiftStats: {
                     success: 0,
@@ -419,6 +419,7 @@
             snapshot.forEach(doc => {
                 const userData = doc.data();
                 const usageCount = userData.usage_count || {};
+                const lineBotId = userData.line_bot_id || 0; // 取得用戶的 line_bot_id
 
                 // 處理當前選擇的月份
                 const monthData = usageCount[currentMonth] || {};
@@ -431,13 +432,20 @@
                         data.commandStats[key] = (data.commandStats[key] || 0) + count;
                     } else if (key === '調班/代班成功通知') {
                         data.shiftStats.success += count;
-                        data.pushMessageUsage += count;
+                        // 按 line_bot_id 累加
+                        if (lineBotId > 0) {
+                            data.pushMessageUsageByBot[lineBotId] = (data.pushMessageUsageByBot[lineBotId] || 0) + count;
+                        }
                     } else if (key === '調班/代班失敗通知') {
                         data.shiftStats.failure += count;
-                        data.pushMessageUsage += count;
+                        if (lineBotId > 0) {
+                            data.pushMessageUsageByBot[lineBotId] = (data.pushMessageUsageByBot[lineBotId] || 0) + count;
+                        }
                     } else if (key === '調班/代班請求') {
                         data.shiftStats.request += count;
-                        data.pushMessageUsage += count;
+                        if (lineBotId > 0) {
+                            data.pushMessageUsageByBot[lineBotId] = (data.pushMessageUsageByBot[lineBotId] || 0) + count;
+                        }
                     }
                 });
 
@@ -489,14 +497,16 @@
                 <!-- Push Message 使用量 -->
                 <div class="dashboard-card full-width">
                     <div class="card-header">
-                        <h2 class="card-title">📮 Push Message 使用量</h2>
+                        <h2 class="card-title">📮 Push Message 使用量（依 Line Bot）</h2>
                         <span class="card-icon">📊</span>
                     </div>
                     <div class="chart-container small">
                         <canvas id="usageBarChart"></canvas>
                     </div>
-                    <p style="text-align: center; margin-top: 12px; color: var(--text-secondary);">
-                        ${data.pushMessageUsage} / 200 次 (${(data.pushMessageUsage / 200 * 100).toFixed(1)}%)
+                    <p style="text-align: center; margin-top: 12px; color: var(--text-secondary); font-size: 13px;">
+                        ${Object.entries(data.pushMessageUsageByBot).map(([botId, count]) =>
+                `Bot ${botId}: ${count} / 200 次 (${(count / 200 * 100).toFixed(1)}%)`
+            ).join(' | ')}
                     </p>
                 </div>
 
@@ -596,21 +606,33 @@
             Object.values(charts).forEach(chart => chart.destroy());
             charts = {};
 
-            // 1. Push Message 使用量長條圖
+            // 1. Push Message 使用量長條圖（按 Line Bot ID 分組）
             const usageCtx = document.getElementById('usageBarChart').getContext('2d');
-            const usagePercent = data.pushMessageUsage / 200;
+
+            // 準備數據
+            const botIds = Object.keys(data.pushMessageUsageByBot).sort();
+            const botLabels = botIds.map(id => `LINE Bot ${id}`);
+            const botUsages = botIds.map(id => data.pushMessageUsageByBot[id]);
+            const botRemainings = botUsages.map(usage => Math.max(0, 200 - usage));
+
+            // 生成顏色（根據使用率）
+            const botColors = botUsages.map(usage => {
+                const percent = usage / 200;
+                return percent > 0.8 ? '#ef4444' : percent > 0.6 ? '#f59e0b' : '#10b981';
+            });
+
             charts.usageBar = new Chart(usageCtx, {
                 type: 'bar',
                 data: {
-                    labels: ['當月使用量'],
+                    labels: botLabels,
                     datasets: [{
                         label: '已使用',
-                        data: [data.pushMessageUsage],
-                        backgroundColor: usagePercent > 0.8 ? '#ef4444' : usagePercent > 0.6 ? '#f59e0b' : '#10b981',
+                        data: botUsages,
+                        backgroundColor: botColors,
                         borderRadius: 8
                     }, {
                         label: '剩餘',
-                        data: [Math.max(0, 200 - data.pushMessageUsage)],
+                        data: botRemainings,
                         backgroundColor: '#e5e7eb',
                         borderRadius: 8
                     }]

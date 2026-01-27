@@ -766,6 +766,77 @@ body {
 }
 
 /* ===========================
+   資訊欄位輸入框
+   =========================== */
+.info-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.info-text-input {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-family: inherit;
+  transition: all var(--transition-fast);
+}
+
+.info-text-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0  0 3px var(--primary-light);
+}
+
+.info-text-input::placeholder {
+  color: var(--text-light);
+}
+
+.add-info-btn,
+.remove-info-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.add-info-btn {
+  background: var(--primary-color);
+  color: white;
+}
+
+.add-info-btn:hover {
+  background: var(--primary-hover);
+  transform: scale(1.1);
+}
+
+.remove-info-btn {
+  background: var(--danger-color);
+  color: white;
+}
+
+.remove-info-btn:hover {
+  background: #E00007;
+  transform: scale(1.1);
+}
+
+
+/* ===========================
    表頭操作按鈕
    =========================== */
 .header-actions {
