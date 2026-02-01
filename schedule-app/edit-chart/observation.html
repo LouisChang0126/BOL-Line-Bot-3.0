@@ -446,6 +446,10 @@
                         if (lineBotId > 0) {
                             data.pushMessageUsageByBot[lineBotId] = (data.pushMessageUsageByBot[lineBotId] || 0) + count;
                         }
+                    } else if (key === '服事提醒') {
+                        if (lineBotId > 0) {
+                            data.pushMessageUsageByBot[lineBotId] = (data.pushMessageUsageByBot[lineBotId] || 0) + count;
+                        }
                     }
                 });
 
@@ -475,7 +479,7 @@
                     Object.entries(monthData).forEach(([key, count]) => {
                         if (commandTypes.includes(key)) {
                             data.monthlyTrends[month][key] += count;
-                        } else if (['調班/代班成功通知', '調班/代班失敗通知', '調班/代班請求'].includes(key)) {
+                        } else if (['調班/代班成功通知', '調班/代班失敗通知', '調班/代班請求', '服事提醒'].includes(key)) {
                             data.monthlyTrends[month]['Push Message'] += count;
                         }
                     });

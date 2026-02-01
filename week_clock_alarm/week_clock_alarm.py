@@ -21,6 +21,42 @@ from datetime import datetime, timedelta, date
 line_bot_apis = [LineBotApi(token) for token in channel_access_token]
 
 
+def log_usage(user_name, action_type):
+    """
+    記錄使用者的使用量統計
+    
+    Args:
+        user_name: 使用者名稱
+        action_type: 操作類型 (如 "服事提醒")
+    """
+    if not user_name:
+        return
+    
+    try:
+        # 取得當前年月
+        month_key = datetime.now().strftime("%Y.%m")
+        
+        # 使用 Firestore 的原子操作增加計數
+        user_ref = db.collection("users").document(user_name)
+        user_doc = user_ref.get()
+        
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            usage_count = user_data.get('usage_count', {})
+            
+            if month_key not in usage_count:
+                usage_count[month_key] = {}
+            
+            if action_type not in usage_count[month_key]:
+                usage_count[month_key][action_type] = 0
+            
+            usage_count[month_key][action_type] += 1
+            
+            user_ref.update({'usage_count': usage_count})
+    except Exception as e:
+        print(f"log_usage error: {e}")
+
+
 def get_line_bot_api_for_user_data(user_data):
     """
     根據用戶資料中的 line_bot_id 取得正確的 LineBotApi
@@ -142,6 +178,9 @@ def reminder_all_serves():
             
             user_line_bot_api.push_message(line_id, TextSendMessage(text=message))
             print(f"已提醒 {person_name} (使用 Bot {user_data.get('line_bot_id', 0)})")
+            
+            # 記錄使用統計
+            log_usage(person_name, "服事提醒")
         except Exception as e:
             print(f"發送訊息給 {person_name} 失敗:", str(e))
 
