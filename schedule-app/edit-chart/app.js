@@ -871,6 +871,27 @@ document.getElementById('saveServiceBtn').addEventListener('click', async () => 
             const index = serviceItems.indexOf(oldName);
             serviceItems[index] = newName;
 
+            // 同步更新 displayConfig 中的項目名稱
+            if (displayConfig && displayConfig.groups) {
+                // 更新所有群組中的項目
+                displayConfig.groups.forEach(group => {
+                    if (group.items && Array.isArray(group.items)) {
+                        const itemIndex = group.items.indexOf(oldName);
+                        if (itemIndex > -1) {
+                            group.items[itemIndex] = newName;
+                        }
+                    }
+                });
+
+                // 更新隱藏列表中的項目
+                if (displayConfig.hidden && Array.isArray(displayConfig.hidden)) {
+                    const hiddenIndex = displayConfig.hidden.indexOf(oldName);
+                    if (hiddenIndex > -1) {
+                        displayConfig.hidden[hiddenIndex] = newName;
+                    }
+                }
+            }
+
             // 更新所有資料
             const updates = [];
             scheduleData.forEach(row => {
