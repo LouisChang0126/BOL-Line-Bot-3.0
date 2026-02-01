@@ -790,7 +790,7 @@ body {
 .info-text-input:focus {
   outline: none;
   border-color: var(--primary-color);
-  box-shadow: 0 0  0 3px var(--primary-light);
+  box-shadow: 0 0 0 3px var(--primary-light);
 }
 
 .info-text-input::placeholder {
@@ -1304,4 +1304,99 @@ body {
 
 .stats-info strong {
   color: var(--text-primary);
+}
+
+/* ===========================
+   螢幕方向鎖定提示
+   =========================== */
+#rotate-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 99999;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(10px);
+}
+
+.rotate-message {
+  text-align: center;
+  color: white;
+  padding: var(--spacing-2xl);
+  max-width: 400px;
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.rotate-icon {
+  font-size: 80px;
+  margin-bottom: var(--spacing-lg);
+  animation: bounce 2s ease-in-out infinite;
+}
+
+.rotate-message h2 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: var(--spacing-md);
+  color: white;
+}
+
+.rotate-message p {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.6;
+}
+
+.rotate-message strong {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.rotate-arrow {
+  font-size: 60px;
+  margin-top: var(--spacing-lg);
+  animation: rotate 2s linear infinite;
+  display: inline-block;
+}
+
+@keyframes bounce {
+
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+
+  50% {
+    transform: translateY(-20px) rotate(-10deg);
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 在直向模式時顯示提示 */
+@media (orientation: portrait) {
+  #rotate-overlay {
+    display: flex !important;
+  }
 }
