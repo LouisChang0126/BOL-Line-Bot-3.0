@@ -254,7 +254,8 @@ def get_collection_schedule(collection_id):
         dict: { 日期: { 服事項目: [人員列表], ... }, ... }
     """
     schedule = {}
-    today = datetime.now().strftime("%Y.%m.%d")
+    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    today = now_taiwan.strftime("%Y.%m.%d")
     
     # 使用 document ID 篩選今天及之後的文件（最多半年份）
     docs = db.collection(collection_id) \
@@ -494,7 +495,8 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
                     actions = []
     else:
         # 調班模式：找該服事其他日期的人
-        today = datetime.now().strftime("%Y.%m.%d")
+        now_taiwan = datetime.utcnow() + timedelta(hours=8)
+        today = now_taiwan.strftime("%Y.%m.%d")
         # 使用 document ID 篩選今天及之後的文件
         docs = db.collection(collection_id) \
             .where("__name__", ">=", db.collection(collection_id).document(today)) \
@@ -771,7 +773,8 @@ def execute_shift(case_id):
     
     collection_id = data.get('collection', 'service')  # 相容舊資料
     serve_type = data['種類']
-    today = datetime.now().strftime("%Y.%m.%d")
+    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    today = now_taiwan.strftime("%Y.%m.%d")
     
     # 檢查並執行調班
     apply_doc = db.collection(collection_id).document(data['申請日']).get()
@@ -1088,21 +1091,15 @@ def build_schedule_message(collection_id):
         return TextSendMessage(text="找不到服事項目資料")
     
     # 取得當週班表
-    today = datetime.now().strftime("%Y.%m.%d")
-    docs = db.collection(collection_id).order_by("__name__").limit(5).get()
+    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    today = now_taiwan.strftime("%Y.%m.%d")
+    docs = db.collection(collection_id) \
+        .where("__name__", ">=", db.collection(collection_id).document(today)) \
+        .limit(1).get()
     
     schedule_doc = None
-    for doc in docs:
-        if doc.id != '_metadata' and doc.id >= today:
-            schedule_doc = doc
-            break
-    
-    if not schedule_doc:
-        # 取最新的一筆
-        for doc in docs:
-            if doc.id != '_metadata':
-                schedule_doc = doc
-                break
+    if docs and docs[0].id != '_metadata':
+        schedule_doc = docs[0]
     
     if not schedule_doc:
         return TextSendMessage(text="找不到班表資料")
