@@ -113,7 +113,6 @@ schedule-app/
 ├── view.html               # 班表查看頁面（支援 ?user= highlight）
 ├── styles.css              # Airbnb 風格樣式
 ├── firebase-config.js      # Firebase 配置
-├── orientation-lock.js     # 螢幕方向鎖定腳本（可選）
 ├── README.md               # 說明文件
 │
 ├── edit-chart/             # 編輯班表（給管理員）
