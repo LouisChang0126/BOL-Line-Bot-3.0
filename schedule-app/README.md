@@ -10,7 +10,6 @@
 |------|------|------|
 | 📖 **班表查看** | `schedule-app/` | 只能查看班表，支援使用者 highlight |
 | ✏️ **班表編輯** | `edit-chart/` | 編輯班表、管理使用者，支援撤銷/重做 |
-| 🔧 **編輯記錄** | `chart-difference/` | 查看編輯記錄，一鍵還原 |
 | 📊 **使用數據觀察** | `edit-chart/observation.html` | 查看 LINE Bot 使用統計與分析 |
 
 ### 📅 日期管理
@@ -115,16 +114,14 @@ schedule-app/
 ├── firebase-config.js      # Firebase 配置
 ├── README.md               # 說明文件
 │
-├── edit-chart/             # 編輯班表（給管理員）
-│   ├── index.html          # 班表選擇頁面
-│   ├── edit-chart.html     # 班表編輯頁面
-│   ├── edit-user.html      # 使用者管理頁面
-│   ├── observation.html    # 使用數據觀察儀表板
-│   └── app.js              # 核心應用程式邏輯
-│
-└── chart-difference/       # 編輯記錄（給管理員）
+└── edit-chart/             # 編輯班表（給管理員）
     ├── index.html          # 班表選擇頁面
-    └── difference.html     # 編輯記錄查看與還原
+    ├── edit-chart.html     # 班表編輯頁面
+    ├── edit-user.html      # 使用者管理頁面
+    ├── observation.html    # 使用數據觀察儀表板
+    ├── difference.html     # 編輯記錄查看與還原
+    └── app.js              # 核心應用程式邏輯
+
 ```
 
 ## 📊 Firestore 資料結構
@@ -249,7 +246,7 @@ schedule-app/
 A: 請使用右鍵選單選擇起始格子，再點擊「從此格貼上」。
 
 ### Q: 如何還原誤刪的資料？
-A: 管理員可在 `chart-difference/` 頁面查看編輯記錄並一鍵還原。
+A: 管理員可在 `edit-chart/difference.html` 頁面查看編輯記錄並一鍵還原。
 
 ### Q: 撤銷功能有限制嗎？
 A: 最多記錄20步操作，超過會覆蓋最舊的記錄。

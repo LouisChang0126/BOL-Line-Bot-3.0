@@ -1959,7 +1959,7 @@ function initDisplayConfigEditor() {
     if (viewLogsBtn) {
         viewLogsBtn.addEventListener('click', () => {
             const collectionName = window.COLLECTION_NAME;
-            window.location.href = `../chart-difference/difference.html?collection=${collectionName}`;
+            window.location.href = `./difference.html?collection=${collectionName}`;
         });
     }
 
