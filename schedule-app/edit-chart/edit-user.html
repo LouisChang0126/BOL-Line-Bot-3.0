@@ -590,20 +590,6 @@
             const allNames = new Set([...schedulePersons, ...Object.keys(allUsers)]);
             let usersArray = Array.from(allNames);
 
-
-            // 排序：如果有 targetCollection，將「在此崇拜班表中」的人排在前面
-            usersArray.sort((a, b) => {
-                const aInSchedule = schedulePersons.has(a);
-                const bInSchedule = schedulePersons.has(b);
-                if (targetCollection) {
-                    // 優先排序：在班表中的排前面
-                    if (aInSchedule && !bInSchedule) return -1;
-                    if (!aInSchedule && bInSchedule) return 1;
-                }
-                // 次要排序：按名稱排序
-                return a.localeCompare(b, 'zh-TW');
-            });
-
             // 搜尋過濾
             if (searchTerm) {
                 usersArray = usersArray.filter(name =>
@@ -611,74 +597,58 @@
                 );
             }
 
+            // 按名稱排序
+            usersArray.sort((a, b) => a.localeCompare(b, 'zh-TW'));
+
             let needsUpdateCount = 0;
             let html = '';
 
-            // 新增使用者卡片
-            html += `
-                <div class="user-card add-user-card" id="addUserCard">
-                    ➕ 手動新增使用者
-                </div>
-            `;
+            if (targetCollection) {
+                // === 有 targetCollection：分兩區 ===
+                const inSchedule = usersArray.filter(name => schedulePersons.has(name));
+                const notInSchedule = usersArray.filter(name => !schedulePersons.has(name));
 
-            usersArray.forEach(name => {
-                const userData = allUsers[name];
-                const isNew = !userData;
-                const isInSchedule = schedulePersons.has(name);
-                const needsUpdate = checkNeedsUpdate(name);
-
-                if (needsUpdate) needsUpdateCount++;
-
-                // 取得服事項目
-                let serveTags = '';
-                if (userData && userData.serve_types && userData.serve_types[targetCollection]) {
-                    serveTags = userData.serve_types[targetCollection]
-                        .map(s => `<span class="serve-tag">${s}</span>`)
-                        .join('');
-                }
-
-                // 取得其他崇拜資訊
-                let otherServes = '';
-                if (userData && userData.serve_types) {
-                    const others = Object.keys(userData.serve_types)
-                        .filter(c => c !== targetCollection && userData.serve_types[c].length > 0)
-                        .map(c => SERVE_DISPLAY_NAMES[c] || c);
-                    if (others.length > 0) {
-                        otherServes = `<div style="margin-top: 4px; font-size: 11px; color: var(--text-light);">也在：${others.join('、')}</div>`;
-                    }
-                }
-
-                // 檢查缺少的服事
-                let missingServes = '';
-                if (userData && isInSchedule) {
-                    const scheduledServes = personServeItems[name] || new Set();
-                    const registeredServes = userData.serve_types?.[targetCollection] || [];
-                    const missing = Array.from(scheduledServes).filter(s => !registeredServes.includes(s));
-                    if (missing.length > 0) {
-                        missingServes = `<div style="margin-top: 4px; font-size: 11px; color: #f97316;">缺少：${missing.join('、')}</div>`;
-                    }
-                }
-
-                const shouldHighlight = (isNew || needsUpdate);
-
+                // 區塊一：此崇拜的使用者
+                const displayName = SERVE_DISPLAY_NAMES[targetCollection] || targetCollection;
+                html += `<div style="grid-column: 1 / -1; padding: 12px 0 4px 4px; font-size: 15px; font-weight: 600; color: var(--text-primary);">
+                    📋 ${displayName}（${inSchedule.length} 人）
+                </div>`;
+                // 新增使用者卡片放在此區第一格
                 html += `
-                    <div class="user-card ${shouldHighlight ? 'new-user' : ''}" data-name="${name}">
-                        <div class="user-card-header">
-                            <span class="user-card-name">${name}</span>
-                            ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
-                            ${!isNew && needsUpdate ? '<span class="user-card-badge new">需更新</span>' : ''}
-                            ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
-                            ${userData && !userData.lineId && userData.login_token ? `<button class="copy-invite-btn" data-token="${userData.login_token}" data-name="${name}" onclick="event.stopPropagation(); copyInviteLink(this)">📋 複製邀請碼</button>` : ''}
-                        </div>
-                        <div class="user-card-body">
-                            ${isInSchedule ? '<div>📋 在此崇拜班表中</div>' : '<div style="color: var(--text-light);">不在此崇拜班表中</div>'}
-                            ${serveTags ? `<div class="user-card-serve">${serveTags}</div>` : ''}
-                            ${missingServes}
-                            ${otherServes}
-                        </div>
+                    <div class="user-card add-user-card" id="addUserCard">
+                        ➕ 手動新增使用者
                     </div>
                 `;
-            });
+                inSchedule.forEach(name => {
+                    const result = renderUserCard(name, true);
+                    html += result.html;
+                    if (result.needsUpdate) needsUpdateCount++;
+                });
+
+                // 區塊二：其他使用者
+                if (notInSchedule.length > 0) {
+                    html += `<div style="grid-column: 1 / -1; padding: 20px 0 4px 4px; font-size: 15px; font-weight: 600; color: var(--text-secondary); border-top: 1px solid var(--border-color); margin-top: 12px;">
+                        👤 其他使用者（${notInSchedule.length} 人）
+                    </div>`;
+                    notInSchedule.forEach(name => {
+                        const result = renderUserCard(name, false);
+                        html += result.html;
+                        if (result.needsUpdate) needsUpdateCount++;
+                    });
+                }
+            } else {
+                // === 沒有 targetCollection：不分區 ===
+                html += `
+                    <div class="user-card add-user-card" id="addUserCard">
+                        ➕ 手動新增使用者
+                    </div>
+                `;
+                usersArray.forEach(name => {
+                    const result = renderUserCard(name, null);
+                    html += result.html;
+                    if (result.needsUpdate) needsUpdateCount++;
+                });
+            }
 
             if (usersArray.length === 0 && !searchTerm) {
                 html = `
@@ -708,6 +678,86 @@
                     openEditUserModal(name);
                 });
             });
+        }
+
+        // 渲染單一使用者卡片
+        // isInSchedule: true/false（有 targetCollection 時），null（沒有 targetCollection 時）
+        function renderUserCard(name, isInSchedule) {
+            const userData = allUsers[name];
+            const isNew = !userData;
+            const needsUpdate = targetCollection ? checkNeedsUpdate(name) : false;
+
+            // 取得服事項目
+            let serveTags = '';
+            if (targetCollection && userData && userData.serve_types && userData.serve_types[targetCollection]) {
+                serveTags = userData.serve_types[targetCollection]
+                    .map(s => `<span class="serve-tag">${s}</span>`)
+                    .join('');
+            } else if (!targetCollection && userData && userData.serve_types) {
+                // 沒有 targetCollection 時，顯示所有崇拜的服事
+                const allServeTags = [];
+                Object.entries(userData.serve_types).forEach(([collName, items]) => {
+                    if (items && items.length > 0) {
+                        const displayName = SERVE_DISPLAY_NAMES[collName] || collName;
+                        allServeTags.push(`<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px;"><span style="font-size: 11px; color: var(--text-secondary);">${displayName}:</span>` +
+                            items.map(s => `<span class="serve-tag">${s}</span>`).join('') + `</div>`);
+                    }
+                });
+                serveTags = allServeTags.join('');
+            }
+
+            // 取得其他崇拜資訊（只在有 targetCollection 時）
+            let otherServes = '';
+            if (targetCollection && userData && userData.serve_types) {
+                const others = Object.keys(userData.serve_types)
+                    .filter(c => c !== targetCollection && userData.serve_types[c].length > 0)
+                    .map(c => SERVE_DISPLAY_NAMES[c] || c);
+                if (others.length > 0) {
+                    otherServes = `<div style="margin-top: 4px; font-size: 11px; color: var(--text-light);">也在：${others.join('、')}</div>`;
+                }
+            }
+
+            // 檢查缺少的服事（只在有 targetCollection 時）
+            let missingServes = '';
+            if (targetCollection && userData && isInSchedule) {
+                const scheduledServes = personServeItems[name] || new Set();
+                const registeredServes = userData.serve_types?.[targetCollection] || [];
+                const missing = Array.from(scheduledServes).filter(s => !registeredServes.includes(s));
+                if (missing.length > 0) {
+                    missingServes = `<div style="margin-top: 4px; font-size: 11px; color: #f97316;">缺少：${missing.join('、')}</div>`;
+                }
+            }
+
+            const shouldHighlight = (isNew || needsUpdate);
+
+            // 狀態訊息
+            let statusLine = '';
+            if (targetCollection) {
+                if (isInSchedule) {
+                    statusLine = '<div>📋 在此崇拜班表中</div>';
+                }
+                // 不在班表中時不顯示任何狀態文字（因為已在「其他使用者」區塊）
+            }
+
+            const cardHtml = `
+                <div class="user-card ${shouldHighlight ? 'new-user' : ''}" data-name="${name}">
+                    <div class="user-card-header">
+                        <span class="user-card-name">${name}</span>
+                        ${isNew ? '<span class="user-card-badge new">新使用者</span>' : ''}
+                        ${!isNew && needsUpdate ? '<span class="user-card-badge new">需更新</span>' : ''}
+                        ${userData && userData.lineId ? '<span class="user-card-badge linked">已綁定LINE</span>' : ''}
+                        ${userData && !userData.lineId && userData.login_token ? `<button class="copy-invite-btn" data-token="${userData.login_token}" data-name="${name}" onclick="event.stopPropagation(); copyInviteLink(this)">📋 複製邀請碼</button>` : ''}
+                    </div>
+                    <div class="user-card-body">
+                        ${statusLine}
+                        ${serveTags ? `<div class="user-card-serve">${serveTags}</div>` : ''}
+                        ${missingServes}
+                        ${otherServes}
+                    </div>
+                </div>
+            `;
+
+            return { html: cardHtml, needsUpdate };
         }
 
         // 開啟新增使用者 Modal
