@@ -47,24 +47,9 @@ line_bot_api = line_bot_apis[line_bot_id - 1] if line_bot_id >= 1 else line_bot_
 # 使用者相關功能
 # =====================================================
 
-def is_signed_in(line_id):
-    """
-    檢查使用者是否已經登入（是否已綁定 LINE ID）
-    
-    Args:
-        line_id: LINE 使用者 ID
-        
-    Returns:
-        bool: 是否已登入
-    """
-    query = db.collection("users").where("lineId", "==", line_id).limit(1)
-    docs = query.get()
-    return len(docs) > 0 and docs[0].exists
-
-
 def get_user_by_line_id(line_id):
     """
-    根據 LINE ID 取得使用者資料
+    根據 LINE ID 取得使用者資料（同時可判斷是否已登入）
     
     Args:
         line_id: LINE 使用者 ID
@@ -72,9 +57,12 @@ def get_user_by_line_id(line_id):
     Returns:
         tuple: (使用者名稱, 使用者資料 dict) 或 (None, None)
     """
-    docs = db.collection("users").where("lineId", "==", line_id).limit(1).get()
-    if len(docs) > 0 and docs[0].exists:
-        return docs[0].id, docs[0].to_dict()
+    try:
+        docs = db.collection("users").where("lineId", "==", line_id).limit(1).get()
+        if len(docs) > 0 and docs[0].exists:
+            return docs[0].id, docs[0].to_dict()
+    except Exception as e:
+        print(f"get_user_by_line_id error: {e}")
     return None, None
 
 
@@ -297,18 +285,18 @@ def get_user_serve_dates_from_schedule(user_name, schedule, serve_type):
 # 調班/代班功能
 # =====================================================
 
-def can_shift(line_id, mode):
+def can_shift(user_name, user_data, mode):
     """
     檢查是否可以調班/代班，並顯示選擇崇拜的選單
     
     Args:
-        line_id: LINE 使用者 ID
+        user_name: 使用者名稱
+        user_data: 使用者資料 dict
         mode: 'S' (調班) 或 'G' (代班)
         
     Returns:
         LINE message 物件
     """
-    user_name, user_data = get_user_by_line_id(line_id)
     if not user_data:
         return TextSendMessage(text="找不到使用者資料")
     
@@ -984,13 +972,14 @@ def change_reminder_day(command, line_id):
 # 班表查詢功能
 # =====================================================
 
-def get_week_schedule_text(line_id, collection_id=None):
+def get_week_schedule_text(user_name, user_data, collection_id=None):
     """
     取得當週班表文字
     若用戶有多個崇拜的服事，則顯示選擇選單
     
     Args:
-        line_id: LINE 使用者 ID
+        user_name: 使用者名稱
+        user_data: 使用者資料 dict
         collection_id: 崇拜 collection ID，若為 None 則自動判斷
         
     Returns:
@@ -1000,8 +989,7 @@ def get_week_schedule_text(line_id, collection_id=None):
     if collection_id:
         return build_schedule_message(collection_id)
     
-    # 取得使用者資料，判斷參與幾個崇拜
-    user_name, user_data = get_user_by_line_id(line_id)
+    # 取得使用者參與的崇拜
     if not user_data:
         # 未登入的用戶，顯示第一個崇拜
         serves = get_serve_list()
@@ -1118,17 +1106,16 @@ def build_schedule_message(collection_id):
     return TextSendMessage(text=text.strip())
 
 
-def get_full_schedule_link(line_id):
+def get_full_schedule_link(user_name):
     """
     取得完整班表連結
     
     Args:
-        line_id: LINE 使用者 ID
+        user_name: 使用者名稱
         
     Returns:
         LINE message 物件
     """
-    user_name, _ = get_user_by_line_id(line_id)
     if user_name:
         return TextSendMessage(
             text=f"請點選連結（這是永久連結，可以用 Google Chrome 開）\nhttps://bol-line-bot-3.web.app/?user={user_name}"
@@ -1196,25 +1183,25 @@ def handle_message(event):
     line_id = event.source.user_id
     command = event.message.text.strip()
     
-    if is_signed_in(line_id):
+    user_name, user_data = get_user_by_line_id(line_id)
+    if user_name:
         # 已登入使用者
-        user_name, _ = get_user_by_line_id(line_id)
         
         if command in ['總班表', '全部班表']:
             log_usage(user_name, '全部班表')
-            replyMessages = get_full_schedule_link(line_id)
+            replyMessages = get_full_schedule_link(user_name)
         
         elif command in ['班表', '本週班表', '當週班表', '當周班表', '本周班表']:
             log_usage(user_name, '當週班表')
-            replyMessages = get_week_schedule_text(line_id)
+            replyMessages = get_week_schedule_text(user_name, user_data)
         
         elif command in ['換班', '調班']:
             log_usage(user_name, '換班')
-            replyMessages = can_shift(line_id, 'S')
+            replyMessages = can_shift(user_name, user_data, 'S')
         
         elif command in ['代班']:
             log_usage(user_name, '代班')
-            replyMessages = can_shift(line_id, 'G')
+            replyMessages = can_shift(user_name, user_data, 'G')
         
         elif command in ['設定提醒', '提醒設定', '設定']:
             log_usage(user_name, '設定提醒')
