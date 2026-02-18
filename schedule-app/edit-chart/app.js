@@ -611,6 +611,11 @@ function renderTableBody() {
     // 設定服事欄位點擊事件（只對未來資料）
     document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
         cell.addEventListener('click', (e) => {
+            // 多格選取後不觸發編輯彈窗
+            if (multiSelectStarted || multiSelectedCells.length > 0) {
+                multiSelectStarted = false;
+                return;
+            }
             if (!e.target.closest('.person-chip')) {
                 const date = cell.dataset.date;
                 const service = cell.dataset.service;
@@ -624,6 +629,9 @@ function renderTableBody() {
 
     // 設定右鍵選單事件
     setupContextMenu();
+
+    // 設定多格選取事件
+    setupMultiCellSelection();
 }
 
 // ===========================
@@ -1449,9 +1457,236 @@ function setupDragAndDrop() {
 // ===========================
 let pasteTargetCell = null; // 記錄右鍵點擊的格子位置
 
+// ===========================
+// 多格選取功能
+// ===========================
+let multiSelectedCells = []; // 選取的格子 [{date, service, dateIndex, serviceIndex}, ...]
+let isMultiSelecting = false; // 是否正在進行多格選取
+let multiSelectAnchor = null; // 選取起點
+let multiSelectTimer = null; // 長按計時器
+let multiSelectStarted = false; // 長按是否已觸發
+
+function clearMultiSelection() {
+    multiSelectedCells = [];
+    document.querySelectorAll('.service-cell.multi-selected, .service-cell.multi-selecting').forEach(c => {
+        c.classList.remove('multi-selected', 'multi-selecting');
+    });
+}
+
+function getCellKey(date, service) {
+    return `${date}|${service}`;
+}
+
+function findCellElement(date, service) {
+    return document.querySelector(`.service-cell[data-date="${date}"][data-service="${service}"]`);
+}
+
+// 計算矩形選取範圍內的所有格子
+function getCellsInRange(anchor, current) {
+    const minRow = Math.min(anchor.dateIndex, current.dateIndex);
+    const maxRow = Math.max(anchor.dateIndex, current.dateIndex);
+    const minCol = Math.min(anchor.serviceIndex, current.serviceIndex);
+    const maxCol = Math.max(anchor.serviceIndex, current.serviceIndex);
+
+    const cells = [];
+    for (let r = minRow; r <= maxRow; r++) {
+        for (let c = minCol; c <= maxCol; c++) {
+            if (r < scheduleData.length && c < serviceItems.length) {
+                cells.push({
+                    date: scheduleData[r].date,
+                    service: serviceItems[c],
+                    dateIndex: r,
+                    serviceIndex: c
+                });
+            }
+        }
+    }
+    return cells;
+}
+
+// 設定多格選取事件（在 renderTableBody 中呼叫）
+function setupMultiCellSelection() {
+    const cells = document.querySelectorAll('.service-cell[data-droppable="true"]');
+
+    cells.forEach(cell => {
+        // mousedown：開始長按計時
+        cell.addEventListener('mousedown', (e) => {
+            // 只處理左鍵且點擊在空白區域（placeholder 或 cell 本身）
+            if (e.button !== 0) return;
+            if (e.target.closest('.person-chip')) return;
+
+            const date = cell.dataset.date;
+            const service = cell.dataset.service;
+            const dateIndex = scheduleData.findIndex(r => r.date === date);
+            const serviceIndex = serviceItems.indexOf(service);
+            if (dateIndex === -1 || serviceIndex === -1) return;
+
+            multiSelectStarted = false;
+            multiSelectTimer = setTimeout(() => {
+                // 長按觸發：開始多格選取
+                multiSelectStarted = true;
+                isMultiSelecting = true;
+                document.body.classList.add('multi-selecting-active');
+                multiSelectAnchor = { date, service, dateIndex, serviceIndex };
+                clearMultiSelection();
+
+                const range = getCellsInRange(multiSelectAnchor, multiSelectAnchor);
+                range.forEach(c => {
+                    const el = findCellElement(c.date, c.service);
+                    if (el) el.classList.add('multi-selecting');
+                });
+
+                // 防止文字選取
+                e.preventDefault();
+            }, 100); // 100ms 長按
+        });
+
+        // mouseover：拖拉延伸選取
+        cell.addEventListener('mouseover', (e) => {
+            if (!isMultiSelecting || !multiSelectAnchor) return;
+
+            const date = cell.dataset.date;
+            const service = cell.dataset.service;
+            const dateIndex = scheduleData.findIndex(r => r.date === date);
+            const serviceIndex = serviceItems.indexOf(service);
+            if (dateIndex === -1 || serviceIndex === -1) return;
+
+            // 清除舊的 selecting 樣式
+            document.querySelectorAll('.service-cell.multi-selecting').forEach(c => {
+                c.classList.remove('multi-selecting');
+            });
+
+            // 計算新的選取範圍
+            const range = getCellsInRange(multiSelectAnchor, { dateIndex, serviceIndex });
+            range.forEach(c => {
+                const el = findCellElement(c.date, c.service);
+                if (el) el.classList.add('multi-selecting');
+            });
+        });
+    });
+
+    // mouseup：結束選取
+    document.addEventListener('mouseup', (e) => {
+        if (multiSelectTimer) {
+            clearTimeout(multiSelectTimer);
+            multiSelectTimer = null;
+        }
+
+        if (!isMultiSelecting) return;
+        isMultiSelecting = false;
+        document.body.classList.remove('multi-selecting-active');
+
+        // 將 selecting 轉為 selected
+        document.querySelectorAll('.service-cell.multi-selecting').forEach(c => {
+            c.classList.remove('multi-selecting');
+            c.classList.add('multi-selected');
+        });
+
+        // 收集所有被選取的格子
+        multiSelectedCells = [];
+        document.querySelectorAll('.service-cell.multi-selected').forEach(c => {
+            const date = c.dataset.date;
+            const service = c.dataset.service;
+            const dateIndex = scheduleData.findIndex(r => r.date === date);
+            const serviceIndex = serviceItems.indexOf(service);
+            if (dateIndex !== -1 && serviceIndex !== -1) {
+                multiSelectedCells.push({ date, service, dateIndex, serviceIndex });
+            }
+        });
+
+        // 如果只選了一格，清除多格選取（保持原本的點擊行為）
+        if (multiSelectedCells.length <= 1) {
+            clearMultiSelection();
+        }
+    });
+
+    // 點擊表格外時清除選取
+    document.addEventListener('mousedown', (e) => {
+        if (!e.target.closest('.service-cell') && !e.target.closest('.context-menu')) {
+            clearMultiSelection();
+        }
+    });
+}
+
+// 取得多格選取的內容（以 tab-separated 格式）
+function getMultiSelectedContent() {
+    if (multiSelectedCells.length === 0) return '';
+
+    // 找出選取範圍的行列邊界
+    const rows = [...new Set(multiSelectedCells.map(c => c.dateIndex))].sort((a, b) => a - b);
+    const cols = [...new Set(multiSelectedCells.map(c => c.serviceIndex))].sort((a, b) => a - b);
+
+    const lines = [];
+    rows.forEach(r => {
+        const rowCells = [];
+        cols.forEach(c => {
+            const row = scheduleData[r];
+            const service = serviceItems[c];
+            const persons = row[service] || [];
+            rowCells.push(persons.join('/'));
+        });
+        lines.push(rowCells.join('\t'));
+    });
+    return lines.join('\n');
+}
+
+// 複製多格選取的內容到剪貼簿
+async function copyMultiSelectedCells() {
+    const content = getMultiSelectedContent();
+    if (!content) return;
+
+    try {
+        await navigator.clipboard.writeText(content);
+        updateStatus('已複製選取的格子');
+    } catch (err) {
+        console.error('複製失敗:', err);
+        alert('無法寫入剪貼簿');
+    }
+}
+
+// 剪下多格選取的內容
+async function cutMultiSelectedCells() {
+    const content = getMultiSelectedContent();
+    if (!content) return;
+
+    try {
+        await navigator.clipboard.writeText(content);
+    } catch (err) {
+        console.error('複製失敗:', err);
+        alert('無法寫入剪貼簿');
+        return;
+    }
+
+    // 清空被選取的格子
+    updateStatus('剪下中...');
+    try {
+        for (const cell of multiSelectedCells) {
+            const row = scheduleData[cell.dateIndex];
+            if (row) {
+                row[cell.service] = [];
+                const data = { ...row };
+                delete data.date;
+                await saveSchedule(row.date, data);
+            }
+        }
+
+        pushHistory();
+        updateEditDifference();
+        clearMultiSelection();
+        renderTable();
+        updateStatus('已剪下選取的格子');
+    } catch (error) {
+        console.error('剪下失敗:', error);
+        alert('剪下失敗');
+        updateStatus('就緒');
+    }
+}
+
 function setupPasteHandler() {
     const contextMenu = document.getElementById('contextMenu');
     const contextMenuPaste = document.getElementById('contextMenuPaste');
+    const contextMenuCopy = document.getElementById('contextMenuCopy');
+    const contextMenuCut = document.getElementById('contextMenuCut');
 
     // 點擊其他地方時關閉右鍵選單
     document.addEventListener('click', (e) => {
@@ -1460,16 +1695,78 @@ function setupPasteHandler() {
         }
     });
 
-    // 按 ESC 關閉右鍵選單
+    // 鍵盤快捷鍵
     document.addEventListener('keydown', (e) => {
+        // ESC 關閉右鍵選單
         if (e.key === 'Escape') {
             contextMenu.classList.add('hidden');
+            clearMultiSelection();
+        }
+
+        // Ctrl+C：複製多格選取
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && multiSelectedCells.length > 0) {
+            e.preventDefault();
+            copyMultiSelectedCells();
+        }
+
+        // Ctrl+X：剪下多格選取
+        if ((e.ctrlKey || e.metaKey) && e.key === 'x' && multiSelectedCells.length > 0) {
+            e.preventDefault();
+            cutMultiSelectedCells();
         }
     });
 
-    // 右鍵選單的貼上按鈕
+    // 複製按鈕
+    contextMenuCopy.addEventListener('click', async () => {
+        contextMenu.classList.add('hidden');
+        if (contextMenuCopy.classList.contains('disabled')) return;
+
+        if (multiSelectedCells.length > 0) {
+            await copyMultiSelectedCells();
+        } else if (pasteTargetCell) {
+            // 單格複製
+            const row = scheduleData[pasteTargetCell.dateIndex];
+            const persons = row[pasteTargetCell.service] || [];
+            try {
+                await navigator.clipboard.writeText(persons.join('/'));
+                updateStatus('已複製格子內容');
+            } catch (err) {
+                console.error('複製失敗:', err);
+            }
+        }
+    });
+
+    // 剪下按鈕
+    contextMenuCut.addEventListener('click', async () => {
+        contextMenu.classList.add('hidden');
+        if (contextMenuCut.classList.contains('disabled')) return;
+
+        if (multiSelectedCells.length > 0) {
+            await cutMultiSelectedCells();
+        } else if (pasteTargetCell) {
+            // 單格剪下
+            const row = scheduleData[pasteTargetCell.dateIndex];
+            const persons = row[pasteTargetCell.service] || [];
+            try {
+                await navigator.clipboard.writeText(persons.join('/'));
+                row[pasteTargetCell.service] = [];
+                const data = { ...row };
+                delete data.date;
+                await saveSchedule(row.date, data);
+                pushHistory();
+                updateEditDifference();
+                renderTable();
+                updateStatus('已剪下格子內容');
+            } catch (err) {
+                console.error('剪下失敗:', err);
+            }
+        }
+    });
+
+    // 貼上按鈕
     contextMenuPaste.addEventListener('click', async () => {
         contextMenu.classList.add('hidden');
+        if (contextMenuPaste.classList.contains('disabled')) return;
 
         if (!pasteTargetCell) return;
 
@@ -1492,10 +1789,19 @@ function setupPasteHandler() {
 // 設定右鍵選單事件（在 renderTableBody 中呼叫）
 function setupContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
+    const contextMenuCopy = document.getElementById('contextMenuCopy');
+    const contextMenuCut = document.getElementById('contextMenuCut');
+    const contextMenuPaste = document.getElementById('contextMenuPaste');
 
-    document.querySelectorAll('.service-cell').forEach(cell => {
+    document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
         cell.addEventListener('contextmenu', (e) => {
             e.preventDefault();
+
+            // 取消長按計時器（避免右鍵觸發多格選取）
+            if (multiSelectTimer) {
+                clearTimeout(multiSelectTimer);
+                multiSelectTimer = null;
+            }
 
             const date = cell.dataset.date;
             const service = cell.dataset.service;
@@ -1506,7 +1812,25 @@ function setupContextMenu() {
 
             if (dateIndex === -1 || serviceIndex === -1) return;
 
-            pasteTargetCell = { dateIndex, serviceIndex, date, service };
+            const isMultiSelected = multiSelectedCells.length > 0;
+            const isCellInSelection = multiSelectedCells.some(
+                c => c.date === date && c.service === service
+            );
+
+            if (isMultiSelected && isCellInSelection) {
+                // 右鍵點在已選取的多格上：顯示複製、剪下，禁用貼上
+                contextMenuCopy.classList.remove('disabled');
+                contextMenuCut.classList.remove('disabled');
+                contextMenuPaste.classList.add('disabled');
+                pasteTargetCell = null;
+            } else {
+                // 右鍵點在單個格子上：清除多格選取，顯示全部選項
+                clearMultiSelection();
+                pasteTargetCell = { dateIndex, serviceIndex, date, service };
+                contextMenuCopy.classList.remove('disabled');
+                contextMenuCut.classList.remove('disabled');
+                contextMenuPaste.classList.remove('disabled');
+            }
 
             // 顯示右鍵選單
             contextMenu.style.left = `${e.clientX}px`;
@@ -1518,17 +1842,16 @@ function setupContextMenu() {
 
 // 從指定格子開始貼上資料
 async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) {
-    // 分割成列，保留中間的空白行，只移除最後的空行
+    // 分割成列（只移除最末一個換行符產生的空字串）
     let rows = pastedData.split('\n');
-
-    // 移除結尾的空行
-    while (rows.length > 0 && rows[rows.length - 1].trim() === '') {
+    if (rows.length > 0 && rows[rows.length - 1] === '') {
         rows.pop();
     }
 
     if (rows.length === 0) return;
 
-    const confirm = window.confirm(`偵測到貼上 ${rows.length} 列資料，是否要從此格開始匯入？`);
+    const colCount = Math.max(...rows.map(r => r.split('\t').length));
+    const confirm = window.confirm(`偵測到貼上 ${rows.length} 列 × ${colCount} 欄 的資料，是否要從此格開始匯入？`);
     if (!confirm) return;
 
     updateStatus('匯入資料中...');

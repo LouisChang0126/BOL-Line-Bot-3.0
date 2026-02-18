@@ -594,6 +594,35 @@ body {
   background: var(--bg-hover);
 }
 
+.context-menu-item.disabled {
+  color: var(--text-light);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.context-menu-item.disabled:hover {
+  background: transparent;
+}
+
+/* 多格選取 */
+.service-cell.multi-selected {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+  background: rgba(99, 102, 241, 0.08) !important;
+}
+
+.service-cell.multi-selecting {
+  outline: 2px dashed var(--primary-color);
+  outline-offset: -2px;
+  background: rgba(99, 102, 241, 0.05) !important;
+}
+
+/* 多格選取進行中，禁用整個表格的文字選取 */
+body.multi-selecting-active {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* ===========================
    表單元素
    =========================== */
