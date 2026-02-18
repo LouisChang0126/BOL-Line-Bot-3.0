@@ -77,6 +77,25 @@
             margin-left: 8px;
         }
 
+        .source-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+
+        .source-badge.admin {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+
+        .source-badge.linebot {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
         .diff-section {
             margin-top: 16px;
             padding: 16px;
@@ -280,16 +299,19 @@
 
             allLogs.forEach((log, index) => {
                 const difference = log['difference'] || {};
-                const originChart = log['origin-chart'] || {};
                 const lastEdited = log['last-edited-time'] || log.id;
                 const isLatest = index === 0;
                 const canRestore = isLatest; // 只有最新的可以還原
+                const source = log['source'] || 'admin';
+                const sourceBadge = source === 'linebot'
+                    ? '<span class="source-badge linebot">🤖 LINE Bot 調班</span>'
+                    : '<span class="source-badge admin">✏️ 管理員編輯</span>';
 
                 html += `
             <div class="log-card ${isLatest ? 'latest' : 'disabled'}" data-log-id="${log.id}">
               <div class="log-header">
                 <div>
-                  <h3>編輯記錄 ${log.id}${isLatest ? '<span class="latest-badge">最新</span>' : ''}</h3>
+                  <h3>編輯記錄 ${log.id}${isLatest ? '<span class="latest-badge">最新</span>' : ''}${sourceBadge}</h3>
                   <div class="log-meta">最後編輯：${lastEdited}</div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
@@ -301,7 +323,7 @@
               </div>
               <div class="diff-section" id="diff-${log.id}" style="display: none;">
                 <div class="diff-title">變更內容</div>
-                ${renderDifference(difference, originChart)}
+                ${renderDifference(difference)}
               </div>
             </div>
           `;
@@ -310,7 +332,7 @@
             logList.innerHTML = html;
         }
 
-        function renderDifference(difference, originChart) {
+        function renderDifference(difference) {
             if (Object.keys(difference).length === 0) {
                 return '<div style="color: #94a3b8;">無變更</div>';
             }
@@ -321,12 +343,13 @@
                 if (!dateGroups[date]) {
                     dateGroups[date] = [];
                 }
-                Object.entries(services).forEach(([service, newValue]) => {
-                    const originalRow = originChart && originChart[date];
-                    const originalValue = originalRow && originalRow[service];
+                Object.entries(services).forEach(([service, value]) => {
+                    // 支援新格式 { old, new }
+                    const oldValue = value.old || [];
+                    const newValue = value.new || [];
 
-                    const originalDisplay = Array.isArray(originalValue) && originalValue.length > 0
-                        ? originalValue.join(', ')
+                    const originalDisplay = Array.isArray(oldValue) && oldValue.length > 0
+                        ? oldValue.join(', ')
                         : '(空)';
                     const newDisplay = Array.isArray(newValue) && newValue.length > 0
                         ? newValue.join(', ')
@@ -392,17 +415,30 @@
 
                 const logData = logDoc.data();
                 const serveName = logData['serve-id'];
-                const originChart = logData['origin-chart'];
+                const difference = logData['difference'];
 
-                if (!originChart) {
-                    alert('此記錄沒有原始資料');
+                if (!difference || Object.keys(difference).length === 0) {
+                    alert('此記錄沒有變更資料');
                     return;
                 }
 
-                // 還原資料
-                for (const [dateOrMeta, data] of Object.entries(originChart)) {
-                    const docRef = doc(db, serveName, dateOrMeta);
-                    await setDoc(docRef, data);
+                // 倒推還原：將每個變更的 old 值寫回班表
+                for (const [date, services] of Object.entries(difference)) {
+                    const docRef = doc(db, serveName, date);
+                    const updates = {};
+
+                    for (const [service, value] of Object.entries(services)) {
+                        updates[service] = value.old || [];
+                    }
+
+                    // 使用 setDoc 合併，只更新有變更的欄位
+                    const currentDoc = await getDoc(docRef);
+                    if (currentDoc.exists()) {
+                        const currentData = currentDoc.data();
+                        await setDoc(docRef, { ...currentData, ...updates });
+                    } else {
+                        await setDoc(docRef, updates);
+                    }
                 }
 
                 // 刪除此編輯記錄

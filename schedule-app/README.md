@@ -212,11 +212,18 @@ schedule-app/
 ### 編輯記錄 Collection（_edit_chart_log）
 
 ```javascript
-// Document ID: "2026.01.07.19.22"（進入時間）
+// Document ID: "2026.01.07.19.22"（進入時間 / 調班時間）
 {
   "serve-id": "youth-serve",
-  "origin-chart": { ... },      // 編輯前的完整班表
-  "difference": { ... },        // 變更內容
+  "source": "admin",            // "admin"（管理員編輯）或 "linebot"（LINE Bot 調班）
+  "difference": {               // 變更內容（只存有修改的格子）
+    "2026.02.08": {
+      "招待": {
+        "old": [],              // 修改前的值
+        "new": ["小美"]         // 修改後的值
+      }
+    }
+  },
   "last-edited-time": "2026.01.07.21.45"
 }
 ```

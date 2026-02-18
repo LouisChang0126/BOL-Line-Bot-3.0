@@ -1684,25 +1684,29 @@ function setupEventListeners() {
 // 編輯記錄功能
 // ===========================
 function saveOriginalChartSnapshot() {
-    // 深拷貝當前班表資料
-    originalChart = {
-        _metadata: { serviceItems: [...serviceItems] }
-    };
+    // 合併式快照：只補充 originalChart 中尚未記錄的日期/服事
+    // 這樣從 difference.html 回來後，不會覆蓋之前的基準值
+    if (!originalChart || Object.keys(originalChart).length === 0) {
+        originalChart = {};
+    }
 
     scheduleData.forEach(row => {
-        const rowData = {};
+        if (!originalChart[row.date]) {
+            originalChart[row.date] = {};
+        }
         serviceItems.forEach(service => {
-            rowData[service] = row[service] ? [...row[service]] : [];
+            // 只在該格子尚未記錄時才保存基準值
+            if (!(service in originalChart[row.date])) {
+                originalChart[row.date][service] = row[service] ? [...row[service]] : [];
+            }
         });
-        originalChart[row.date] = rowData;
     });
 
     console.log('已保存原始班表快照');
 }
 
-// 計算並更新編輯差異（比對原始值和當前值）
+// 計算並更新編輯差異（比對原始值和當前值，累積式更新）
 function updateEditDifference() {
-    editDifference = {};
     let hasDiff = false;
 
     scheduleData.forEach(row => {
@@ -1721,13 +1725,26 @@ function updateEditDifference() {
                 if (!editDifference[date]) {
                     editDifference[date] = {};
                 }
-                editDifference[date][service] = [...currentValue];
+                editDifference[date][service] = {
+                    old: [...originalValue],
+                    new: [...currentValue]
+                };
                 hasDiff = true;
+            } else {
+                // 如果恢復到原始值，移除該差異條目
+                if (editDifference[date] && editDifference[date][service]) {
+                    delete editDifference[date][service];
+                    // 如果該日期已無差異，移除整個日期
+                    if (Object.keys(editDifference[date]).length === 0) {
+                        delete editDifference[date];
+                    }
+                }
             }
         });
     });
 
-    hasEdited = hasDiff;
+    // 檢查是否還有任何差異
+    hasEdited = Object.keys(editDifference).length > 0;
 
     // 儲存編輯記錄
     if (hasEdited) {
@@ -1750,7 +1767,7 @@ async function saveEditLog() {
 
         await setDoc(logRef, {
             'serve-id': window.COLLECTION_NAME,
-            'origin-chart': originalChart,
+            'source': 'admin',
             'difference': editDifference,
             'last-edited-time': lastEditedTime
         });
@@ -1768,7 +1785,8 @@ function formatCurrentTime() {
     const d = String(now.getDate()).padStart(2, '0');
     const h = String(now.getHours()).padStart(2, '0');
     const min = String(now.getMinutes()).padStart(2, '0');
-    return `${y}.${m}.${d}.${h}.${min}`;
+    const sec = String(now.getSeconds()).padStart(2, '0');
+    return `${y}.${m}.${d}.${h}.${min}.${sec}`;
 }
 
 // 頁面離開前儲存

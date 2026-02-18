@@ -807,6 +807,43 @@ def execute_shift(case_id):
     # 更新狀態
     db.collection("_shift").document(case_id).update({"狀態": '成功'})
     
+    # 記錄到編輯記錄 (_edit_chart_log)
+    try:
+        log_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y.%m.%d.%H.%M.%S")
+        difference = {}
+        
+        if data['被申請日'] != 'none':
+            # 調班模式：兩個日期都有變更
+            difference[data['申請日']] = {
+                serve_type: {
+                    'old': apply_persons,
+                    'new': new_apply
+                }
+            }
+            difference[data['被申請日']] = {
+                serve_type: {
+                    'old': target_persons,
+                    'new': new_target
+                }
+            }
+        else:
+            # 代班模式：只有申請日有變更
+            difference[data['申請日']] = {
+                serve_type: {
+                    'old': apply_persons,
+                    'new': new_apply
+                }
+            }
+        
+        db.collection("_edit_chart_log").document(log_time).set({
+            'serve-id': collection_id,
+            'source': 'linebot',
+            'difference': difference,
+            'last-edited-time': log_time
+        })
+    except Exception as e:
+        print(f"寫入編輯記錄失敗: {e}")
+    
     # 通知申請人成功
     notify_requester_success(data)
     
