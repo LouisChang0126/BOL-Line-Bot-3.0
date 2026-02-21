@@ -975,6 +975,12 @@ async function deleteServiceItem(serviceName) {
             }
         }
 
+        // 從 nonUserColumns 中移除
+        const nIdx = nonUserColumns.indexOf(serviceName);
+        if (nIdx > -1) {
+            nonUserColumns.splice(nIdx, 1);
+        }
+
         // 更新所有資料
         const updates = [];
         scheduleData.forEach(row => {
@@ -1583,7 +1589,7 @@ function setupMultiCellSelection() {
 
                 // 防止文字選取
                 e.preventDefault();
-            }, 100); // 100ms 長按
+            }, 150); // 150ms 長按
         });
 
         // mouseover：拖拉延伸選取
