@@ -72,6 +72,36 @@
       <div class="context-menu-item" id="contextMenuCut">✂️ 剪下</div>
       <div class="context-menu-item" id="contextMenuPaste">📋 從此格貼上</div>
     </div>
+
+    <!-- 貼上預覽 Modal -->
+    <div class="modal-overlay hidden" id="pastePreviewModal">
+      <div class="modal" style="max-width: 850px;">
+        <div class="modal-header">
+          <h2>📋 貼上預覽</h2>
+          <button class="modal-close" onclick="closeModal('pastePreviewModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="separator-options">
+            <span class="separator-label">人名分隔符：</span>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value="/" checked> <code>/</code>
+              斜線</label>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value="+"> <code>+</code>
+              加號</label>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value=","> <code>,</code>
+              半形逗號</label>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value="，"> <code>，</code>
+              全形逗號</label>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value=" "> 空格</label>
+            <label class="separator-option"><input type="radio" name="pasteSeparator" value=""> 無分隔</label>
+          </div>
+          <div id="pastePreviewContent" style="overflow-x: auto; margin-top: 12px;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal('pastePreviewModal')">取消</button>
+          <button class="btn btn-primary" id="confirmPasteBtn">確認匯入</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 編輯服事項目對話框 -->

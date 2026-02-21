@@ -568,6 +568,78 @@ body {
   font-weight: normal;
 }
 
+/* 貼上預覽 - 分隔符選項 */
+.separator-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  font-size: 13px;
+}
+
+.separator-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+
+.separator-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.separator-option input[type="radio"] {
+  margin: 0;
+}
+
+.separator-option code {
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary-color);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* 貼上預覽 - 表格 */
+.paste-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.paste-preview-table th {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.paste-preview-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  vertical-align: top;
+}
+
+.paste-preview-table .preview-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  margin: 1px 2px;
+  background: var(--primary-light);
+  color: var(--primary-color);
+}
+
 /* ===========================
    右鍵選單
    =========================== */
@@ -604,17 +676,43 @@ body {
   background: transparent;
 }
 
-/* 多格選取 */
-.service-cell.multi-selected {
-  outline: 2px solid var(--primary-color);
-  outline-offset: -2px;
+/* 多格選取 - Excel 風格大外框 */
+.service-cell.multi-selected,
+.service-cell.multi-selecting {
   background: rgba(99, 102, 241, 0.08) !important;
 }
 
-.service-cell.multi-selecting {
-  outline: 2px dashed var(--primary-color);
-  outline-offset: -2px;
-  background: rgba(99, 102, 241, 0.05) !important;
+.service-cell.multi-select-top {
+  border-top: 2px solid var(--primary-color) !important;
+}
+
+.service-cell.multi-select-bottom {
+  border-bottom: 2px solid var(--primary-color) !important;
+}
+
+.service-cell.multi-select-left {
+  border-left: 2px solid var(--primary-color) !important;
+}
+
+.service-cell.multi-select-right {
+  border-right: 2px solid var(--primary-color) !important;
+}
+
+/* 拖拉選取中用虛線 */
+.service-cell.multi-selecting.multi-select-top {
+  border-top: 2px dashed var(--primary-color) !important;
+}
+
+.service-cell.multi-selecting.multi-select-bottom {
+  border-bottom: 2px dashed var(--primary-color) !important;
+}
+
+.service-cell.multi-selecting.multi-select-left {
+  border-left: 2px dashed var(--primary-color) !important;
+}
+
+.service-cell.multi-selecting.multi-select-right {
+  border-right: 2px dashed var(--primary-color) !important;
 }
 
 /* 多格選取進行中，禁用整個表格的文字選取 */

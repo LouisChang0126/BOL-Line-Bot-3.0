@@ -117,6 +117,9 @@ async function initApp() {
     // 設定貼上事件
     setupPasteHandler();
 
+    // 設定貼上預覽 Modal
+    setupPastePreviewModal();
+
     // 設定撤銷/重做事件
     setupUndoRedoHandler();
 
@@ -1456,6 +1459,7 @@ function setupDragAndDrop() {
 // 右鍵選單貼上功能
 // ===========================
 let pasteTargetCell = null; // 記錄右鍵點擊的格子位置
+const INTERNAL_COPY_MARKER = '\u200B\u200B\u200B'; // 獨立一行標記，用於識別內部複製
 
 // ===========================
 // 多格選取功能
@@ -1466,10 +1470,50 @@ let multiSelectAnchor = null; // 選取起點
 let multiSelectTimer = null; // 長按計時器
 let multiSelectStarted = false; // 長按是否已觸發
 
+const MULTI_BORDER_CLASSES = ['multi-selected', 'multi-selecting', 'multi-select-top', 'multi-select-bottom', 'multi-select-left', 'multi-select-right'];
+
 function clearMultiSelection() {
     multiSelectedCells = [];
     document.querySelectorAll('.service-cell.multi-selected, .service-cell.multi-selecting').forEach(c => {
-        c.classList.remove('multi-selected', 'multi-selecting');
+        c.classList.remove(...MULTI_BORDER_CLASSES);
+    });
+}
+
+// 根據選取範圍計算邊界並套用邊框類別（Excel 風格大外框）
+function applySelectionBorders(cssClass) {
+    // 先清除所有邊框類別
+    document.querySelectorAll('.service-cell.multi-select-top, .service-cell.multi-select-bottom, .service-cell.multi-select-left, .service-cell.multi-select-right').forEach(c => {
+        c.classList.remove('multi-select-top', 'multi-select-bottom', 'multi-select-left', 'multi-select-right');
+    });
+
+    const selectedCells = document.querySelectorAll(`.service-cell.${cssClass}`);
+    if (selectedCells.length === 0) return;
+
+    // 收集所有選取格子的 row/col 座標
+    const positions = new Set();
+    let minRow = Infinity, maxRow = -Infinity, minCol = Infinity, maxCol = -Infinity;
+
+    selectedCells.forEach(c => {
+        const dateIndex = scheduleData.findIndex(r => r.date === c.dataset.date);
+        const serviceIndex = serviceItems.indexOf(c.dataset.service);
+        if (dateIndex === -1 || serviceIndex === -1) return;
+        positions.add(`${dateIndex},${serviceIndex}`);
+        minRow = Math.min(minRow, dateIndex);
+        maxRow = Math.max(maxRow, dateIndex);
+        minCol = Math.min(minCol, serviceIndex);
+        maxCol = Math.max(maxCol, serviceIndex);
+    });
+
+    // 對每個格子判斷是否在邊界
+    selectedCells.forEach(c => {
+        const dateIndex = scheduleData.findIndex(r => r.date === c.dataset.date);
+        const serviceIndex = serviceItems.indexOf(c.dataset.service);
+        if (dateIndex === -1 || serviceIndex === -1) return;
+
+        if (dateIndex === minRow) c.classList.add('multi-select-top');
+        if (dateIndex === maxRow) c.classList.add('multi-select-bottom');
+        if (serviceIndex === minCol) c.classList.add('multi-select-left');
+        if (serviceIndex === maxCol) c.classList.add('multi-select-right');
     });
 }
 
@@ -1535,6 +1579,7 @@ function setupMultiCellSelection() {
                     const el = findCellElement(c.date, c.service);
                     if (el) el.classList.add('multi-selecting');
                 });
+                applySelectionBorders('multi-selecting');
 
                 // 防止文字選取
                 e.preventDefault();
@@ -1553,7 +1598,7 @@ function setupMultiCellSelection() {
 
             // 清除舊的 selecting 樣式
             document.querySelectorAll('.service-cell.multi-selecting').forEach(c => {
-                c.classList.remove('multi-selecting');
+                c.classList.remove(...MULTI_BORDER_CLASSES);
             });
 
             // 計算新的選取範圍
@@ -1562,6 +1607,7 @@ function setupMultiCellSelection() {
                 const el = findCellElement(c.date, c.service);
                 if (el) el.classList.add('multi-selecting');
             });
+            applySelectionBorders('multi-selecting');
         });
     });
 
@@ -1581,6 +1627,7 @@ function setupMultiCellSelection() {
             c.classList.remove('multi-selecting');
             c.classList.add('multi-selected');
         });
+        applySelectionBorders('multi-selected');
 
         // 收集所有被選取的格子
         multiSelectedCells = [];
@@ -1636,7 +1683,7 @@ async function copyMultiSelectedCells() {
     if (!content) return;
 
     try {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(INTERNAL_COPY_MARKER + content);
         updateStatus('已複製選取的格子');
     } catch (err) {
         console.error('複製失敗:', err);
@@ -1650,7 +1697,7 @@ async function cutMultiSelectedCells() {
     if (!content) return;
 
     try {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(INTERNAL_COPY_MARKER + content);
     } catch (err) {
         console.error('複製失敗:', err);
         alert('無法寫入剪貼簿');
@@ -1728,7 +1775,7 @@ function setupPasteHandler() {
             const row = scheduleData[pasteTargetCell.dateIndex];
             const persons = row[pasteTargetCell.service] || [];
             try {
-                await navigator.clipboard.writeText(persons.join('/'));
+                await navigator.clipboard.writeText(INTERNAL_COPY_MARKER + persons.join('/'));
                 updateStatus('已複製格子內容');
             } catch (err) {
                 console.error('複製失敗:', err);
@@ -1748,7 +1795,7 @@ function setupPasteHandler() {
             const row = scheduleData[pasteTargetCell.dateIndex];
             const persons = row[pasteTargetCell.service] || [];
             try {
-                await navigator.clipboard.writeText(persons.join('/'));
+                await navigator.clipboard.writeText(INTERNAL_COPY_MARKER + persons.join('/'));
                 row[pasteTargetCell.service] = [];
                 const data = { ...row };
                 delete data.date;
@@ -1840,9 +1887,128 @@ function setupContextMenu() {
     });
 }
 
-// 從指定格子開始貼上資料
+// 從指定格子開始貼上資料（入口函數）
 async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) {
-    // 分割成列（只移除最末一個換行符產生的空字串）
+    // 檢查是否為內部複製
+    if (pastedData.startsWith(INTERNAL_COPY_MARKER)) {
+        // 內部複製：移除標記後直接貼上
+        const cleanData = pastedData.slice(INTERNAL_COPY_MARKER.length);
+        await executePaste(startDateIndex, startServiceIndex, cleanData, '/');
+    } else {
+        // 外部貼上：開啟預覽 Modal
+        openPastePreviewModal(startDateIndex, startServiceIndex, pastedData);
+    }
+}
+
+// 暫存貼上預覽的資料
+let pendingPasteData = null;
+
+// 開啟貼上預覽 Modal
+function openPastePreviewModal(startDateIndex, startServiceIndex, rawData) {
+    pendingPasteData = { startDateIndex, startServiceIndex, rawData };
+
+    // 重置分隔符選取為預設 "/"
+    const radios = document.querySelectorAll('input[name="pasteSeparator"]');
+    radios.forEach(r => r.checked = (r.value === '/'));
+
+    renderPastePreview('/');
+
+    document.getElementById('pastePreviewModal').classList.remove('hidden');
+}
+
+// 根據分隔符渲染貼上預覽
+function renderPastePreview(separator) {
+    if (!pendingPasteData) return;
+
+    const { startDateIndex, startServiceIndex, rawData } = pendingPasteData;
+
+    let rows = rawData.split('\n');
+    if (rows.length > 0 && rows[rows.length - 1] === '') {
+        rows.pop();
+    }
+
+    const parsedRows = rows.map(row => row.split('\t'));
+    const colCount = Math.max(...parsedRows.map(r => r.length));
+
+    // 建立表頭（使用實際的服事項目名稱）
+    let html = '<table class="paste-preview-table"><thead><tr><th>日期</th>';
+    for (let j = 0; j < colCount && (startServiceIndex + j) < serviceItems.length; j++) {
+        html += `<th>${serviceItems[startServiceIndex + j]}</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    // 建立每一列
+    for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
+        const cells = parsedRows[i];
+        const dateStr = scheduleData[startDateIndex + i].date;
+
+        html += `<tr><td style="white-space: nowrap; font-weight: 600;">${dateStr}</td>`;
+
+        for (let j = 0; j < colCount && (startServiceIndex + j) < serviceItems.length; j++) {
+            const cellValue = (cells[j] || '').trim();
+            html += '<td>';
+
+            if (cellValue === '') {
+                html += '<span style="color: var(--text-light); font-style: italic;">（空）</span>';
+            } else {
+                // 根據分隔符解析人名
+                let names;
+                if (separator === '') {
+                    names = [cellValue];
+                } else {
+                    names = cellValue.split(separator).map(n => n.trim()).filter(n => n !== '');
+                }
+                names.forEach(name => {
+                    html += `<span class="preview-chip">${name}</span>`;
+                });
+            }
+
+            html += '</td>';
+        }
+
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+
+    // 超出範圍提示
+    const overflowRows = parsedRows.length - (scheduleData.length - startDateIndex);
+    const overflowCols = colCount - (serviceItems.length - startServiceIndex);
+    if (overflowRows > 0 || overflowCols > 0) {
+        html += '<div style="margin-top: 8px; font-size: 12px; color: #f97316;">⚠️ ';
+        if (overflowRows > 0) html += `有 ${overflowRows} 列超出表格範圍。`;
+        if (overflowCols > 0) html += `有 ${overflowCols} 欄超出表格範圍。`;
+        html += '超出部分將被忽略。</div>';
+    }
+
+    document.getElementById('pastePreviewContent').innerHTML = html;
+}
+
+// 設定貼上預覽 Modal 事件
+function setupPastePreviewModal() {
+    // 分隔符切換
+    document.querySelectorAll('input[name="pasteSeparator"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            renderPastePreview(e.target.value);
+        });
+    });
+
+    // 確認匯入按鈕
+    document.getElementById('confirmPasteBtn').addEventListener('click', async () => {
+        if (!pendingPasteData) return;
+
+        const separator = document.querySelector('input[name="pasteSeparator"]:checked').value;
+        const { startDateIndex, startServiceIndex, rawData } = pendingPasteData;
+
+        closeModal('pastePreviewModal');
+        pendingPasteData = null;
+
+        await executePaste(startDateIndex, startServiceIndex, rawData, separator);
+    });
+}
+
+// 執行實際的貼上操作
+async function executePaste(startDateIndex, startServiceIndex, pastedData, separator) {
     let rows = pastedData.split('\n');
     if (rows.length > 0 && rows[rows.length - 1] === '') {
         rows.pop();
@@ -1850,18 +2016,10 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
 
     if (rows.length === 0) return;
 
-    const colCount = Math.max(...rows.map(r => r.split('\t').length));
-    const confirm = window.confirm(`偵測到貼上 ${rows.length} 列 × ${colCount} 欄 的資料，是否要從此格開始匯入？`);
-    if (!confirm) return;
-
     updateStatus('匯入資料中...');
 
     try {
-        // 解析每一列（保留空白行）
-        const parsedRows = rows.map(row => {
-            const cells = row.split('\t');
-            return cells;
-        });
+        const parsedRows = rows.map(row => row.split('\t'));
 
         // 從指定位置開始處理
         for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
@@ -1876,8 +2034,12 @@ async function pasteDataFromCell(startDateIndex, startServiceIndex, pastedData) 
                 if (cellValue === '') {
                     rowData[serviceName] = [];
                 } else {
-                    // 解析人名：支援 "/" 分隔
-                    const names = cellValue.split('/').map(n => n.trim()).filter(n => n !== '');
+                    let names;
+                    if (separator === '') {
+                        names = [cellValue];
+                    } else {
+                        names = cellValue.split(separator).map(n => n.trim()).filter(n => n !== '');
+                    }
 
                     if (names.some(n => n.includes('|'))) {
                         alert('匯入失敗：人員名稱不能包含 "|" 符號');
@@ -1990,6 +2152,7 @@ function setupEventListeners() {
             closeModal('editDateModal');
             closeModal('editServiceModal');
             closeModal('editPersonModal');
+            closeModal('pastePreviewModal');
         }
     });
 
