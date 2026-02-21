@@ -1907,11 +1907,20 @@ let pendingPasteData = null;
 function openPastePreviewModal(startDateIndex, startServiceIndex, rawData) {
     pendingPasteData = { startDateIndex, startServiceIndex, rawData };
 
-    // 重置分隔符選取為預設 "/"
-    const radios = document.querySelectorAll('input[name="pasteSeparator"]');
-    radios.forEach(r => r.checked = (r.value === '/'));
+    // 偵測分隔符：依優先順序檢查貼上內容是否包含該字元
+    const separatorPriority = ['/', '+', ',', '，', ' '];
+    let detectedSeparator = ''; // 預設無分隔
+    for (const sep of separatorPriority) {
+        if (rawData.includes(sep)) {
+            detectedSeparator = sep;
+            break;
+        }
+    }
 
-    renderPastePreview('/');
+    const radios = document.querySelectorAll('input[name="pasteSeparator"]');
+    radios.forEach(r => r.checked = (r.value === detectedSeparator));
+
+    renderPastePreview(detectedSeparator);
 
     document.getElementById('pastePreviewModal').classList.remove('hidden');
 }
