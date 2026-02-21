@@ -475,6 +475,9 @@ function setupServiceHeaderDragAndDrop() {
                 // 儲存新順序到 metadata
                 await saveMetadata();
 
+                pushHistory();
+                updateEditDifference();
+
                 // 重新渲染表格
                 renderTable();
                 updateStatus('服事項目順序已更新');
@@ -677,6 +680,8 @@ async function addNewRow() {
         // 儲存到 Firestore
         await saveSchedule(newDateStr, data);
 
+        pushHistory();
+        updateEditDifference();
         renderTable();
         updateStatus('已新增一週');
 
@@ -702,6 +707,8 @@ async function deleteLastRow() {
         const lastRow = scheduleData.pop();
         await deleteSchedule(lastRow.date);
 
+        pushHistory();
+        updateEditDifference();
         renderTable();
         updateStatus('已刪除最後一週');
 
@@ -759,6 +766,8 @@ async function addServiceItem() {
 
         await Promise.all(updates);
 
+        pushHistory();
+        updateEditDifference();
         renderTable();
         updateStatus('服事項目已新增');
 
@@ -815,6 +824,8 @@ async function addInfoColumn() {
 
         await Promise.all(updates);
 
+        pushHistory();
+        updateEditDifference();
         renderTable();
         updateStatus('資訊欄位已新增');
 
@@ -996,6 +1007,8 @@ async function deleteServiceItem(serviceName) {
 
         await Promise.all(updates);
 
+        pushHistory();
+        updateEditDifference();
         renderTable();
         closeModal('editServiceModal');
         updateStatus('服事項目已刪除');
@@ -1735,6 +1748,34 @@ async function cutMultiSelectedCells() {
     }
 }
 
+// 刪除（清空）多格選取的內容
+async function deleteMultiSelectedCells() {
+    if (multiSelectedCells.length === 0) return;
+
+    updateStatus('清空中...');
+    try {
+        for (const cell of multiSelectedCells) {
+            const row = scheduleData[cell.dateIndex];
+            if (row) {
+                row[cell.service] = [];
+                const data = { ...row };
+                delete data.date;
+                await saveSchedule(row.date, data);
+            }
+        }
+
+        pushHistory();
+        updateEditDifference();
+        clearMultiSelection();
+        renderTable();
+        updateStatus('已清空選取的格子');
+    } catch (error) {
+        console.error('清空失敗:', error);
+        alert('清空失敗');
+        updateStatus('就緒');
+    }
+}
+
 function setupPasteHandler() {
     const contextMenu = document.getElementById('contextMenu');
     const contextMenuPaste = document.getElementById('contextMenuPaste');
@@ -1766,6 +1807,14 @@ function setupPasteHandler() {
         if ((e.ctrlKey || e.metaKey) && e.key === 'x' && multiSelectedCells.length > 0) {
             e.preventDefault();
             cutMultiSelectedCells();
+        }
+
+        // Delete / Backspace：清空多格選取
+        if ((e.key === 'Delete' || e.key === 'Backspace') && multiSelectedCells.length > 0) {
+            // 不在輸入框中時才觸發
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+            deleteMultiSelectedCells();
         }
     });
 
@@ -2303,10 +2352,12 @@ function setupBeforeUnloadHandler() {
 // 撤銷/重做功能
 // ===========================
 function initHistory() {
-    // 保存初始狀態
+    // 保存初始狀態（包含完整快照）
     const initialState = JSON.stringify({
         scheduleData: scheduleData.map(row => ({ ...row })),
-        serviceItems: [...serviceItems]
+        serviceItems: [...serviceItems],
+        nonUserColumns: [...nonUserColumns],
+        displayConfig: displayConfig ? JSON.parse(JSON.stringify(displayConfig)) : null
     });
     historyStack = [initialState];
     historyIndex = 0;
@@ -2318,7 +2369,7 @@ function pushHistory() {
     // 移除當前位置之後的所有記錄
     historyStack = historyStack.slice(0, historyIndex + 1);
 
-    // 推入新狀態
+    // 推入新狀態（包含完整快照）
     const newState = JSON.stringify({
         scheduleData: scheduleData.map(row => {
             const rowCopy = { ...row };
@@ -2329,7 +2380,9 @@ function pushHistory() {
             });
             return rowCopy;
         }),
-        serviceItems: [...serviceItems]
+        serviceItems: [...serviceItems],
+        nonUserColumns: [...nonUserColumns],
+        displayConfig: displayConfig ? JSON.parse(JSON.stringify(displayConfig)) : null
     });
     historyStack.push(newState);
 
@@ -2365,13 +2418,28 @@ function redo() {
 async function restoreFromHistory() {
     const state = JSON.parse(historyStack[historyIndex]);
 
+    // 記錄舊的日期集合（用於偵測列數變化）
+    const oldDates = new Set(scheduleData.map(r => r.date));
+    const newDates = new Set(state.scheduleData.map(r => r.date));
+
     // 恢復資料
     scheduleData = state.scheduleData;
     serviceItems = state.serviceItems;
+    nonUserColumns = state.nonUserColumns || [];
+    displayConfig = state.displayConfig || null;
 
     // 同步到 Firestore
     try {
         const updates = [];
+
+        // 刪除不再存在的日期文件
+        for (const date of oldDates) {
+            if (!newDates.has(date)) {
+                updates.push(deleteSchedule(date));
+            }
+        }
+
+        // 儲存所有現有列
         scheduleData.forEach(row => {
             const data = { ...row };
             delete data.date;
