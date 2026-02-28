@@ -928,6 +928,39 @@ document.getElementById('saveServiceBtn').addEventListener('click', async () => 
             // 儲存 metadata
             updates.push(saveMetadata());
 
+            // 同步更新 users collection 的 serve_types
+            try {
+                const { collection, getDocs, query, where, doc, setDoc } = window.firestore;
+                const db = window.db;
+                const COLLECTION_NAME = window.COLLECTION_NAME;
+
+                // 只撈出有該崇拜 serve_types 的 users
+                const usersQuery = query(
+                    collection(db, 'users'),
+                    where(`serve_types.${COLLECTION_NAME}`, '!=', null)
+                );
+                const usersSnapshot = await getDocs(usersQuery);
+                usersSnapshot.forEach(docRef => {
+                    const userData = docRef.data();
+                    console.log(userData);
+
+                    const serveTypes = userData.serve_types;
+                    const arr = serveTypes[COLLECTION_NAME];
+                    if (!Array.isArray(arr) || !arr.includes(oldName)) return;
+
+                    // 有此服事名稱，替換為新名稱
+                    updates.push(setDoc(doc(db, 'users', docRef.id), {
+                        ...userData,
+                        serve_types: {
+                            ...serveTypes,
+                            [COLLECTION_NAME]: arr.map(s => s === oldName ? newName : s)
+                        }
+                    }));
+                });
+            } catch (err) {
+                console.warn('更新 users serve_types 失敗:', err);
+            }
+
             await Promise.all(updates);
         } else {
             // 只有 checkbox 變更，只需儲存 metadata

@@ -188,8 +188,8 @@ schedule-app/
   line_bot_id: 1,                // 使用的 LINE Bot（0=未連線，1-4=Bot編號）
   login_token: "abc123...",      // 16字元登入邀請碼
   serve_types: {
-    "youth-serve": ["主領", "音控"],  // 各場崇拜的服事項目
-    "kids-serve": ["司會"]
+    "_service_1": ["主領", "音控"],  // 各場崇拜的服事項目
+    "_service_3": ["司會"]
   },
   usage_count: {                  // 使用統計
     "2026.01": {
