@@ -5,11 +5,9 @@ import { initAgentFeature, injectPendingHighlights, showModalAlert } from './age
 import {
     renderTable, renderTableHead, renderTableBody,
     showAddColumnModal, updateAddColTypeUI,
-    openEditServiceModal,
     openEditPersonModal, renderPersonDropdown, renderCurrentPersonChips, renderInfoInputs,
     renderDisplayConfigModal,
-    setUIContext,
-    showConfirm
+    setUIContext, showConfirm
 } from './ui.js';
 
 // ===========================
@@ -898,6 +896,8 @@ function getCellsInRange(anchor, current) {
     return cells;
 }
 
+// 新增一個變數來追蹤是否已經綁定過全域事件，避免 Memory Leak
+let isGlobalMultiSelectBound = false;
 // 設定多格選取事件（在 renderTableBody 中呼叫）
 function setupMultiCellSelection() {
     const cells = document.querySelectorAll('.service-cell[data-droppable="true"]');
@@ -961,48 +961,56 @@ function setupMultiCellSelection() {
         });
     });
 
-    // mouseup：結束選取
-    document.addEventListener('mouseup', (e) => {
-        if (multiSelectTimer) {
-            clearTimeout(multiSelectTimer);
-            multiSelectTimer = null;
-        }
+    // ==========================================
+    // 確保 document 上的事件只綁定一次
+    // ==========================================
+    if (!isGlobalMultiSelectBound) {
+        // mouseup：結束選取
+        document.addEventListener('mouseup', (e) => {
+            if (multiSelectTimer) {
+                clearTimeout(multiSelectTimer);
+                multiSelectTimer = null;
+            }
 
-        if (!isMultiSelecting) return;
-        isMultiSelecting = false;
-        document.body.classList.remove('multi-selecting-active');
+            if (!isMultiSelecting) return;
+            isMultiSelecting = false;
+            document.body.classList.remove('multi-selecting-active');
 
-        // 將 selecting 轉為 selected
-        document.querySelectorAll('.service-cell.multi-selecting').forEach(c => {
-            c.classList.remove('multi-selecting');
-            c.classList.add('multi-selected');
-        });
-        applySelectionBorders('multi-selected');
+            // 將 selecting 轉為 selected
+            document.querySelectorAll('.service-cell.multi-selecting').forEach(c => {
+                c.classList.remove('multi-selecting');
+                c.classList.add('multi-selected');
+            });
+            applySelectionBorders('multi-selected');
 
-        // 收集所有被選取的格子
-        multiSelectedCells = [];
-        document.querySelectorAll('.service-cell.multi-selected').forEach(c => {
-            const date = c.dataset.date;
-            const service = c.dataset.service;
-            const dateIndex = scheduleData.findIndex(r => r.date === date);
-            const serviceIndex = serviceItems.indexOf(service);
-            if (dateIndex !== -1 && serviceIndex !== -1) {
-                multiSelectedCells.push({ date, service, dateIndex, serviceIndex });
+            // 收集所有被選取的格子
+            multiSelectedCells = [];
+            document.querySelectorAll('.service-cell.multi-selected').forEach(c => {
+                const date = c.dataset.date;
+                const service = c.dataset.service;
+                const dateIndex = scheduleData.findIndex(r => r.date === date);
+                const serviceIndex = serviceItems.indexOf(service);
+                if (dateIndex !== -1 && serviceIndex !== -1) {
+                    multiSelectedCells.push({ date, service, dateIndex, serviceIndex });
+                }
+            });
+
+            // 如果只選了一格，清除多格選取（保持原本的點擊行為）
+            if (multiSelectedCells.length <= 1) {
+                clearMultiSelection();
             }
         });
 
-        // 如果只選了一格，清除多格選取（保持原本的點擊行為）
-        if (multiSelectedCells.length <= 1) {
-            clearMultiSelection();
-        }
-    });
+        // 點擊表格外時清除選取
+        document.addEventListener('mousedown', (e) => {
+            if (!e.target.closest('.service-cell') && !e.target.closest('.context-menu')) {
+                clearMultiSelection();
+            }
+        });
 
-    // 點擊表格外時清除選取
-    document.addEventListener('mousedown', (e) => {
-        if (!e.target.closest('.service-cell') && !e.target.closest('.context-menu')) {
-            clearMultiSelection();
-        }
-    });
+        // 標記為已綁定
+        isGlobalMultiSelectBound = true;
+    }
 }
 
 // 取得多格選取的內容（以 tab-separated 格式）
@@ -1057,15 +1065,17 @@ async function cutMultiSelectedCells() {
     // 清空被選取的格子
     updateStatus('剪下中...');
     try {
+        const updates = [];
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
             if (row) {
                 row[cell.service] = [];
                 const data = { ...row };
                 delete data.date;
-                await saveSchedule(row.date, data);
+                updates.push(saveSchedule(row.date, data));
             }
         }
+        await Promise.all(updates);
 
         pushHistory();
         updateEditDifference();
@@ -1085,15 +1095,17 @@ async function deleteMultiSelectedCells() {
 
     updateStatus('清空中...');
     try {
+        const updates = [];
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
             if (row) {
                 row[cell.service] = [];
                 const data = { ...row };
                 delete data.date;
-                await saveSchedule(row.date, data);
+                updates.push(saveSchedule(row.date, data));
             }
         }
+        await Promise.all(updates);
 
         pushHistory();
         updateEditDifference();

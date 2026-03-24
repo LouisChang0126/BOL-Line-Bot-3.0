@@ -1,4 +1,4 @@
-import { 
+import {
     scheduleData, serviceItems, nonUserColumns, personColorMap,
     saveSchedule, addNewRow, deleteLastRow, doAddServiceItem, deleteServiceItem,
     pushHistory, updateEditDifference, updateStatus
@@ -289,6 +289,7 @@ export async function sendAgentRequest() {
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
                 retryCount++;
+                await delay(1000);
                 continue;
             }
 

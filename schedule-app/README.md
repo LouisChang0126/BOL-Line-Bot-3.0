@@ -93,7 +93,7 @@
 - 🔄 **即時同步**：所有變更自動儲存到 Firestore
 - 📱 **螢幕方向提示**（可選）：在行動裝置上建議橫向瀏覽（目前已停用）
 
-### 🤖 AI 排班助手 (`edit-chart-agent.html`)
+### 🤖 AI 排班助手
 - 💬 **Agent 側邊欄**：與 AI 對話式排班，支援 Claude 4.6 Sonnet / Opus 模型選擇
 - 📎 **CSV 上傳**：上傳參考資料協助 AI 排班
 - ✅ **Rule Engine**：自動檢查連續排班、單週服事上限等規則，不合規時自動重試（最多 2 次）
@@ -133,7 +133,9 @@ schedule-app/
     ├── edit-user.html      # 使用者管理頁面
     ├── observation.html    # 使用數據觀察儀表板
     ├── difference.html     # 編輯記錄查看與還原
-    └── app.js              # 核心應用程式邏輯
+    ├── app.js              # 核心應用程式邏輯（與 Firestore 通訊）
+    ├── ui.js               # UI 渲染邏輯（表單生成、彈窗渲染）
+    └── agent.js            # AI 排班輔助邏輯
 
 ```
 
@@ -257,7 +259,8 @@ schedule-app/
 - **安全性**：Firebase App Check + reCAPTCHA v3
 - **部署**：Firebase Hosting
 - **圖表**：Chart.js 4.4.1
-- **模組化**：ES6 Modules
+- **模組化**：ES6 Modules，邏輯/UI/AI 功能完全解耦
+- **確認視窗**：自定義非同步 (Async) Modal 系統，解決瀏覽器封鎖 confirm 彈窗問題
 - **樣式**：CSS3 + CSS Variables
 
 ## ❓ 常見問題
@@ -291,6 +294,12 @@ A:
 - `3-4`：預留給未來擴充
 
 ## 📝 更新日誌
+
+### v4.0.0 (2026-03-25)
+- 🏗️ **架構重構**：將 `app.js` 拆分為 `app.js` (資料)、`ui.js` (渲染) 與 `agent.js` (AI)
+- ✅ **穩定性強化**：全面使用自定義 Asynchronous Modal 替換 `window.confirm`，避免瀏覽器攔截
+- 🎨 **色彩同步**：修正人員積木顏色在跨模組渲染時的失效問題
+- 🔧 **效能優化**：優化事件監聽綁定邏輯，減少不必要的重複渲染
 
 ### v3.5.0 (2026-02-01)
 - 🆕 新增使用數據觀察儀表板
