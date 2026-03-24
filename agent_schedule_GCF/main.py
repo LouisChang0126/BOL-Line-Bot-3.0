@@ -65,6 +65,24 @@ SCHEDULE_TOOL = {
                     "required": ["date"]
                 }
             },
+            "addWeeks": {
+                "type": "integer",
+                "description": "要在班表最後面新增幾週？(例如 1 代表新增一週)。注意：新增的週會自動延續最後一週的日期。如果不需新增請填 0。"
+            },
+            "removeWeeks": {
+                "type": "integer",
+                "description": "要從班表最後面刪除幾週？(例如 1 代表刪除最後一週)。如果不需刪除請填 0。"
+            },
+            "addServiceColumns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "要新增的服事或資訊欄位名稱清單。例如 ['音控', '注意事項']。不需新增請保持空陣列。"
+            },
+            "removeServiceColumns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "要刪除的服事或資訊欄位名稱清單。不需刪除請保持空陣列。"
+            },
             "explanation": {
                 "type": "string",
                 "description": "簡短說明排班邏輯和考量"
@@ -181,6 +199,10 @@ def generate_agent_schedule(request):
         response = cors_response({
             'scheduleData': result,
             'explanation': explanation,
+            'addWeeks': content_block.input.get('addWeeks', 0) if result is not None else 0,
+            'removeWeeks': content_block.input.get('removeWeeks', 0) if result is not None else 0,
+            'addServiceColumns': content_block.input.get('addServiceColumns', []) if result is not None else [],
+            'removeServiceColumns': content_block.input.get('removeServiceColumns', []) if result is not None else [],
             'model': selected_model,
             'usage': {
                 'input_tokens': message.usage.input_tokens,
@@ -229,10 +251,11 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text):
 以下是必須遵守的排班規則：{rules_section}
 {csv_section}
 ## 重要提示
-1. 你必須使用 `update_schedule` 工具回傳完整的排班資料。
-2. 回傳的 `scheduleData` 中的每個物件必須包含 `date` 欄位和各服事項目欄位。
-3. 服事項目的值必須是人名字串陣列（例如 ["小明", "小華"]）。
-4. 保持日期欄位和服事項目欄位名稱與原始資料一致。
-5. 請仔細遵守排班規則，不要讓任何人違反規則。
-6. 如果使用者只要求修改部分內容，請保持其他部分不變。
-7. 在 `explanation` 中簡短說明你的排班邏輯。"""
+1. 如需修改排班表，請必須使用 `update_schedule` 工具回傳完整的排班資料。如果使用者只是在聊天確認資訊，請不要呼叫工具，直接用文字回覆。
+2. 若要求「新增週數」，請在 `addWeeks` 填入數量，且**必須在 `scheduleData` 陣列中直接加入對應的新週數物件**（日期自動加 7 天），如果你有安排人員請一併寫入新週數中。
+3. 若要求「刪除週數」，請在 `removeWeeks` 填入數量，並將 `scheduleData` 中最後的週數物件移除。
+4. 若要求「新增/刪除服事欄位」，請將名稱放入 `addServiceColumns` / `removeServiceColumns` 陣列中，並同步更新 `scheduleData` 每週物件中的鍵值。
+5. 若要求「新增/編輯/刪除服事項目」，回傳的 `scheduleData` 中的每個物件必須包含 `date` 欄位和各服事項目欄位。
+6. 服事項目的值必須是人名字串陣列（例如 ["小明", "小華"]）。
+7. 請仔細遵守排班規則，不要讓任何人違反規則。
+8. 如果使用者只要求修改部分內容，請保持其他部分不變。在 `explanation` 中簡短說明你的排班邏輯。"""

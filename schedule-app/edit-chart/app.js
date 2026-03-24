@@ -643,9 +643,9 @@ function renderTableBody() {
 // ===========================
 // 日期管理
 // ===========================
-async function addNewRow() {
+async function addNewRow(skipConfirm = false) {
     if (scheduleData.length === 0) {
-        alert('請先建立初始資料');
+        if (!skipConfirm) alert('請先建立初始資料');
         return;
     }
 
@@ -692,14 +692,16 @@ async function addNewRow() {
     }
 }
 
-async function deleteLastRow() {
+async function deleteLastRow(skipConfirm = false) {
     if (scheduleData.length === 0) {
-        alert('沒有資料可刪除');
+        if (!skipConfirm) alert('沒有資料可刪除');
         return;
     }
 
-    const confirm = window.confirm('確定要刪除最後一週的資料嗎？');
-    if (!confirm) return;
+    if (!skipConfirm) {
+        const confirm = window.confirm('確定要刪除最後一週的資料嗎？');
+        if (!confirm) return;
+    }
 
     updateStatus('刪除中...');
 
@@ -1020,9 +1022,11 @@ document.getElementById('deleteServiceBtn').addEventListener('click', () => {
     }
 });
 
-async function deleteServiceItem(serviceName) {
-    const confirm = window.confirm(`確定要刪除服事項目「${serviceName}」嗎？這將刪除所有相關資料。`);
-    if (!confirm) return;
+async function deleteServiceItem(serviceName, skipConfirm = false) {
+    if (!skipConfirm) {
+        const confirm = window.confirm(`確定要刪除服事項目「${serviceName}」嗎？這將刪除所有相關資料。`);
+        if (!confirm) return;
+    }
 
     updateStatus('刪除服事項目中...');
 
@@ -3329,7 +3333,41 @@ async function sendAgentRequest() {
                 addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant');
             }
 
+            // --- 處理結構變更 (Structural Changes) ---
+            // 必須先處理結構變更，表格中有了對應的日期列/服事欄後，setPendingChanges 才能正確比對出差異
+            
+            // 1. 處理新增週數
+            if (result.addWeeks > 0) {
+                for (let i = 0; i < result.addWeeks; i++) {
+                    await addNewRow(true); // skipConfirm
+                }
+            }
+            // 2. 處理刪除週數
+            if (result.removeWeeks > 0) {
+                for (let i = 0; i < result.removeWeeks; i++) {
+                    await deleteLastRow(true); // skipConfirm
+                }
+            }
+            // 3. 處理新增服事/資訊欄位
+            if (result.addServiceColumns && result.addServiceColumns.length > 0) {
+                for (const colName of result.addServiceColumns) {
+                    if (!serviceItems.includes(colName)) {
+                        await doAddServiceItem(colName);
+                    }
+                }
+            }
+            // 4. 處理刪除服事/資訊欄位
+            if (result.removeServiceColumns && result.removeServiceColumns.length > 0) {
+                for (const colName of result.removeServiceColumns) {
+                    if (serviceItems.includes(colName)) {
+                        await deleteServiceItem(colName, true); // skipConfirm
+                    }
+                }
+            }
+
+            // 最後才計算內容差異，此時 scheduleData 已經是擴充後的狀態
             setPendingChanges(result.scheduleData);
+
             break;
 
         } catch (error) {
