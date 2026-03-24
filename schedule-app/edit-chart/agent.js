@@ -424,25 +424,34 @@ window.rejectCellChange = function (date, service) {
 export async function acceptAllChanges() {
     if (!pendingAgentChanges) return;
 
-    const updates = [];
-    Object.entries(pendingAgentChanges).forEach(([date, services]) => {
-        const row = scheduleData.find(r => r.date === date);
-        if (!row) return;
-        Object.entries(services).forEach(([service, change]) => { row[service] = [...change.new]; });
-        const data = { ...row };
-        delete data.date;
-        updates.push(saveSchedule(row.date, data));
-    });
+    try {
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
 
-    await Promise.all(updates);
-    pushHistory();
-    updateEditDifference();
+        Object.entries(pendingAgentChanges).forEach(([date, services]) => {
+            const row = scheduleData.find(r => r.date === date);
+            if (!row) return;
+            Object.entries(services).forEach(([service, change]) => { row[service] = [...change.new]; });
+            const data = { ...row };
+            delete data.date;
+            batch.set(doc(db, COLLECTION_NAME, row.date), data);
+        });
 
-    pendingAgentChanges = null;
-    document.getElementById('agentReviewBar').classList.add('hidden');
-    renderTable();
-    addChatMessage('✅ 已接受所有變更', 'assistant');
-    updateStatus('Agent 變更已套用');
+        await batch.commit();
+        pushHistory();
+        updateEditDifference();
+
+        pendingAgentChanges = null;
+        document.getElementById('agentReviewBar').classList.add('hidden');
+        renderTable();
+        addChatMessage('✅ 已接受所有變更', 'assistant');
+        updateStatus('Agent 變更已套用');
+    } catch (error) {
+        console.error('接受變更失敗:', error);
+        addChatMessage('❌ 寫入資料庫失敗', 'error');
+    }
 }
 
 // Reject 全部

@@ -355,8 +355,7 @@
     // 引入 Firebase
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
-    import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-
+    import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit, writeBatch } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
     // 引入配置
     import { firebaseConfig, RECAPTCHA_SITE_KEY, AGENT_API_URL } from '../firebase-config.js';
 
@@ -442,7 +441,7 @@
         console.log('✅ Firestore 連接成功');
 
         window.db = db;
-        window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit };
+        window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit, writeBatch };
         window.COLLECTION_NAME = collectionName;
         window.AGENT_API_URL = AGENT_API_URL;
 

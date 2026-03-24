@@ -468,16 +468,27 @@ export async function doAddServiceItem(trimmedName) {
             const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
             if (ungrouped) ungrouped.items.push(trimmedName);
         }
-        const updates = [];
+
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
+
+        // 批次更新所有班表列
         scheduleData.forEach(row => {
             row[trimmedName] = [];
             const data = { ...row };
             delete data.date;
-            updates.push(saveSchedule(row.date, data));
+            batch.set(doc(db, COLLECTION_NAME, row.date), data);
         });
-        // 儲存 metadata（包含 displayConfig）
-        updates.push(saveMetadata());
-        await Promise.all(updates);
+
+        // 批次更新 Metadata
+        const metadata = { serviceItems, nonUserColumns };
+        if (displayConfig) metadata.displayConfig = displayConfig;
+        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+
+        await batch.commit();
+
         pushHistory();
         updateEditDifference();
         renderTable();
@@ -499,15 +510,27 @@ async function doAddInfoColumn(trimmedName) {
             const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
             if (ungrouped) ungrouped.items.push(trimmedName);
         }
-        const updates = [];
+
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
+
+        // 批次更新所有班表列
         scheduleData.forEach(row => {
             row[trimmedName] = [];
             const data = { ...row };
             delete data.date;
-            updates.push(saveSchedule(row.date, data));
+            batch.set(doc(db, COLLECTION_NAME, row.date), data);
         });
-        updates.push(saveMetadata());
-        await Promise.all(updates);
+
+        // 批次更新 Metadata
+        const metadata = { serviceItems, nonUserColumns };
+        if (displayConfig) metadata.displayConfig = displayConfig;
+        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+
+        await batch.commit();
+
         pushHistory();
         updateEditDifference();
         renderTable();
@@ -541,40 +564,37 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
             if (displayConfig.groups) {
                 displayConfig.groups.forEach(group => {
                     const itemIndex = group.items.indexOf(serviceName);
-                    if (itemIndex > -1) {
-                        group.items.splice(itemIndex, 1);
-                    }
+                    if (itemIndex > -1) group.items.splice(itemIndex, 1);
                 });
             }
             // 從隱藏列表中移除
             if (displayConfig.hidden) {
                 const hiddenIndex = displayConfig.hidden.indexOf(serviceName);
-                if (hiddenIndex > -1) {
-                    displayConfig.hidden.splice(hiddenIndex, 1);
-                }
+                if (hiddenIndex > -1) displayConfig.hidden.splice(hiddenIndex, 1);
             }
         }
 
         // 從 nonUserColumns 中移除
         const nIdx = nonUserColumns.indexOf(serviceName);
-        if (nIdx > -1) {
-            nonUserColumns.splice(nIdx, 1);
-        }
+        if (nIdx > -1) nonUserColumns.splice(nIdx, 1);
 
-        // 更新所有資料
-        const updates = [];
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
+
         scheduleData.forEach(row => {
             delete row[serviceName];
-
             const data = { ...row };
             delete data.date;
-            updates.push(saveSchedule(row.date, data));
+            batch.set(doc(db, COLLECTION_NAME, row.date), data);
         });
 
-        // 儲存 metadata（包含 displayConfig）
-        updates.push(saveMetadata());
+        const metadata = { serviceItems, nonUserColumns };
+        if (displayConfig) metadata.displayConfig = displayConfig;
+        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
 
-        await Promise.all(updates);
+        await batch.commit();
 
         pushHistory();
         updateEditDifference();
@@ -592,10 +612,6 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
 // ===========================
 // 人員管理
 // ===========================
-// openEditPersonModal / renderPersonDropdown / renderCurrentPersonChips / renderInfoInputs
-// 已移至 ui.js，此處保留資料操作函式並透過 window 橋接供 ui.js 呼叫
-
-
 
 // 新增資訊項目
 async function addInfoItem(date, service, value) {
@@ -1065,17 +1081,21 @@ async function cutMultiSelectedCells() {
     // 清空被選取的格子
     updateStatus('剪下中...');
     try {
-        const updates = [];
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
+
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
             if (row) {
                 row[cell.service] = [];
                 const data = { ...row };
                 delete data.date;
-                updates.push(saveSchedule(row.date, data));
+                batch.set(doc(db, COLLECTION_NAME, row.date), data);
             }
         }
-        await Promise.all(updates);
+        await batch.commit();
 
         pushHistory();
         updateEditDifference();
@@ -1095,17 +1115,21 @@ async function deleteMultiSelectedCells() {
 
     updateStatus('清空中...');
     try {
-        const updates = [];
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
+
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
             if (row) {
                 row[cell.service] = [];
                 const data = { ...row };
                 delete data.date;
-                updates.push(saveSchedule(row.date, data));
+                batch.set(doc(db, COLLECTION_NAME, row.date), data);
             }
         }
-        await Promise.all(updates);
+        await batch.commit();
 
         pushHistory();
         updateEditDifference();
@@ -1427,6 +1451,10 @@ async function executePaste(startDateIndex, startServiceIndex, pastedData, separ
 
     try {
         const parsedRows = rows.map(row => row.split('\t'));
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
 
         // 從指定位置開始處理
         for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
@@ -1463,8 +1491,9 @@ async function executePaste(startDateIndex, startServiceIndex, pastedData, separ
             // 儲存
             const data = { ...rowData };
             delete data.date;
-            await saveSchedule(rowData.date, data);
+            batch.set(doc(db, COLLECTION_NAME, rowData.date), data);
         }
+        await batch.commit();
 
         // 重建顏色映射
         rebuildPersonColorMap();
@@ -1472,7 +1501,6 @@ async function executePaste(startDateIndex, startServiceIndex, pastedData, separ
         // 記錄歷史和差異
         pushHistory();
         updateEditDifference();
-
         renderTable();
         updateStatus('資料匯入完成');
 
@@ -1968,31 +1996,34 @@ async function restoreFromHistory() {
 
     // 同步到 Firestore
     try {
-        const updates = [];
+        const { writeBatch, doc } = window.firestore;
+        const db = window.db;
+        const COLLECTION_NAME = window.COLLECTION_NAME;
+        const batch = writeBatch(db);
 
         // 刪除不再存在的日期文件
         for (const date of oldDates) {
-            if (!newDates.has(date)) {
-                updates.push(deleteSchedule(date));
-            }
+            if (!newDates.has(date)) batch.delete(doc(db, COLLECTION_NAME, date));
         }
 
         // 儲存所有現有列
         scheduleData.forEach(row => {
             const data = { ...row };
             delete data.date;
-            updates.push(saveSchedule(row.date, data));
+            batch.set(doc(db, COLLECTION_NAME, row.date), data);
         });
-        updates.push(saveMetadata());
-        await Promise.all(updates);
+
+        const metadata = { serviceItems, nonUserColumns };
+        if (displayConfig) metadata.displayConfig = displayConfig;
+        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+
+        await batch.commit();
     } catch (error) {
         console.error('同步到 Firestore 失敗:', error);
     }
 
     // 更新差異記錄
     updateEditDifference();
-
-    // 重新渲染
     renderTable();
     updateUndoRedoButtons();
 
