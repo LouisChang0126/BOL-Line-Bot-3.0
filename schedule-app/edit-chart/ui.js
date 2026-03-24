@@ -722,13 +722,19 @@ window.deleteGroup = function (groupId) {
 export function showConfirm(message, title = '確認操作') {
     return new Promise((resolve) => {
         const modal = document.getElementById('confirmModal');
+        if (!modal) {
+            console.error('Confirm modal not found');
+            resolve(window.confirm(message));
+            return;
+        }
+
         const titleEl = document.getElementById('confirmModalTitle');
         const messageEl = document.getElementById('confirmModalMessage');
         const confirmBtn = document.getElementById('confirmModalBtn');
         const cancelBtn = modal.querySelector('.btn-secondary');
         const closeBtn = modal.querySelector('.modal-close');
 
-        if (!modal || !confirmBtn) {
+        if (!confirmBtn || !cancelBtn || !closeBtn || !titleEl || !messageEl) {
             console.error('Confirm modal elements not found');
             resolve(window.confirm(message));
             return;

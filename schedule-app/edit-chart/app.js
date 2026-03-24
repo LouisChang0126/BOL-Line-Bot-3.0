@@ -436,8 +436,10 @@ export async function deleteLastRow(skipConfirm = false) {
 
     updateStatus('刪除中...');
 
+    let lastRow = null;
+
     try {
-        const lastRow = scheduleData.pop();
+        lastRow = scheduleData.pop();
         await deleteSchedule(lastRow.date);
 
         pushHistory();
@@ -448,7 +450,7 @@ export async function deleteLastRow(skipConfirm = false) {
     } catch (error) {
         console.error('刪除失敗:', error);
         alert('刪除失敗');
-        scheduleData.push(lastRow); // 還原
+        if (lastRow) scheduleData.push(lastRow); // 還原
         updateStatus('就緒');
     }
 }

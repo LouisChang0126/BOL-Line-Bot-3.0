@@ -214,6 +214,11 @@ export async function sendAgentRequest() {
     const prompt = promptInput.value.trim();
     if (!prompt || agentIsLoading) return;
 
+    if (!AGENT_API_URL) {
+        addChatMessage('未設定 Agent API URL，請先檢查 firebase-config.js。', 'error');
+        return;
+    }
+
     addChatMessage(prompt, 'user');
     promptInput.value = '';
     promptInput.style.height = 'auto';
@@ -289,7 +294,7 @@ export async function sendAgentRequest() {
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
                 retryCount++;
-                await delay(1000);
+                await new Promise(resolve => setTimeout(resolve, 1000));
                 continue;
             }
 
@@ -388,25 +393,34 @@ export function setPendingChanges(newScheduleData) {
 }
 
 // Accept 單格
-window.acceptCellChange = function (date, service) {
+window.acceptCellChange = async function (date, service) {
     if (!pendingAgentChanges || !pendingAgentChanges[date] || !pendingAgentChanges[date][service]) return;
 
     const change = pendingAgentChanges[date][service];
     const row = scheduleData.find(r => r.date === date);
-    if (row) {
-        row[service] = [...change.new];
+    if (!row) return;
+
+    const oldValue = Array.isArray(row[service]) ? [...row[service]] : [];
+    row[service] = [...change.new];
+
+    try {
         const data = { ...row };
         delete data.date;
-        saveSchedule(row.date, data);
+        await saveSchedule(row.date, data);
         pushHistory();
         updateEditDifference();
+
+        delete pendingAgentChanges[date][service];
+        if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
+
+        checkPendingComplete();
+        renderTable();
+    } catch (error) {
+        row[service] = oldValue;
+        console.error('acceptCellChange failed:', error);
+        addChatMessage(`單格儲存失敗：${error.message}`, 'error');
+        renderTable();
     }
-
-    delete pendingAgentChanges[date][service];
-    if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
-
-    checkPendingComplete();
-    renderTable();
 };
 
 // Reject 單格
@@ -527,10 +541,26 @@ export function injectPendingHighlights() {
             // 加入 Accept / Reject 按鈕，並加上 event.stopPropagation()
             const btnsDiv = document.createElement('div');
             btnsDiv.className = 'cell-review-btns';
-            btnsDiv.innerHTML = `
-                <button class="cell-review-btn accept" onclick="event.stopPropagation(); acceptCellChange('${date}', '${service}')">✅</button>
-                <button class="cell-review-btn reject" onclick="event.stopPropagation(); rejectCellChange('${date}', '${service}')">❌</button>
-            `;
+            const acceptBtn = document.createElement('button');
+            acceptBtn.className = 'cell-review-btn accept';
+            acceptBtn.type = 'button';
+            acceptBtn.textContent = '✅';
+            acceptBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.acceptCellChange(date, service);
+            });
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'cell-review-btn reject';
+            rejectBtn.type = 'button';
+            rejectBtn.textContent = '❌';
+            rejectBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.rejectCellChange(date, service);
+            });
+
+            btnsDiv.appendChild(acceptBtn);
+            btnsDiv.appendChild(rejectBtn);
             cell.appendChild(btnsDiv);
         });
     });

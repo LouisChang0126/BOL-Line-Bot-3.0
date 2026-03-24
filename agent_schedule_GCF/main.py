@@ -42,7 +42,7 @@ def add_cors_headers(response, origin):
 # Claude Tool 定義：限制回傳 scheduleData 格式
 SCHEDULE_TOOL = {
     "name": "update_schedule",
-    "description": "更新排班表。請使用此工具回傳新的排班資料。每個日期的每個服事項目都是一個人名陣列。",
+    "description": "更新排班表。請使用此工具回傳新的排班資料。每個日期的每個服事項目都是一個人名的陣列。",
     "input_schema": {
         "type": "object",
         "properties": {
