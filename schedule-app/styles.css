@@ -1527,3 +1527,444 @@ body.multi-selecting-active {
     display: flex !important;
   }
 }
+
+/* ===========================
+   Agent 排班副駕 UI
+   =========================== */
+
+/* 兩欄佈局 */
+.agent-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.agent-main-area {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+  transition: margin-right 0.3s ease;
+}
+
+/* Agent 側邊欄 */
+.agent-sidebar {
+  width: 380px;
+  min-width: 200px;
+  max-width: 70vw;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.agent-sidebar.collapsed {
+  transform: translateX(0);
+  opacity: 0;
+  width: 0 !important;
+  min-width: 0 !important;
+  border: none;
+  overflow: hidden;
+  transition: width 0.3s ease, min-width 0.3s ease, opacity 0.3s ease;
+}
+
+/* 可拖曳分隔線 */
+.agent-resizer {
+  width: 6px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  border-left: 2px solid transparent;
+  transition: border-color 0.2s, background 0.2s;
+  z-index: 101;
+  position: relative;
+}
+
+.agent-resizer:hover,
+.agent-resizer.dragging {
+  border-left-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.agent-resizer.collapsed {
+  display: none;
+}
+
+.agent-sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  color: white;
+}
+
+.agent-sidebar-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.agent-sidebar-close {
+  background: rgba(255,255,255,0.2);
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.agent-sidebar-close:hover {
+  background: rgba(255,255,255,0.3);
+}
+
+/* 設定區域 */
+.agent-config-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.agent-config-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.agent-select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  font-size: 13px;
+  background: white;
+  cursor: pointer;
+}
+
+.agent-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* 規則勾選 */
+.agent-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-rule-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.agent-rule-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* 聊天區域 */
+.agent-chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-chat-welcome {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-secondary);
+}
+
+.agent-chat-welcome-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.agent-chat-welcome p {
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agent-chat-hint {
+  margin-top: 12px !important;
+  font-size: 12px !important;
+  color: var(--text-light);
+}
+
+/* 聊天訊息氣泡 */
+.agent-msg {
+  max-width: 90%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.agent-msg.user {
+  align-self: flex-end;
+  background: var(--primary-color);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.agent-msg.assistant {
+  align-self: flex-start;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.agent-msg.error {
+  align-self: flex-start;
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+/* Loading 動畫 */
+.agent-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  align-self: flex-start;
+}
+
+.agent-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-light);
+  animation: agentDotPulse 1.4s infinite;
+}
+
+.agent-loading-dot:nth-child(2) { animation-delay: 0.2s; }
+.agent-loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes agentDotPulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.2); }
+}
+
+/* 輸入區域 */
+.agent-input-area {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.agent-attachment-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: var(--primary-light);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--primary-color);
+}
+
+.agent-attachment-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-attachment-remove {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.agent-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.agent-attach-btn {
+  cursor: pointer;
+  font-size: 20px;
+  padding: 6px;
+  border-radius: 6px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.agent-attach-btn:hover {
+  background: var(--bg-secondary);
+}
+
+.agent-prompt-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 13px;
+  resize: none;
+  max-height: 100px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.agent-prompt-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.agent-send-btn {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.agent-send-btn:hover {
+  background: var(--primary-hover);
+}
+
+.agent-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Review 操作列 */
+.agent-review-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid #86efac;
+  border-radius: var(--border-radius);
+  margin: 0 20px 12px;
+  animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-review-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #16a34a;
+}
+
+.agent-review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-success {
+  background: #16a34a;
+  color: white;
+  border: none;
+}
+
+.btn-success:hover {
+  background: #15803d;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* 差異高亮 - Review UI */
+.service-cell.pending-add {
+  background: rgba(34, 197, 94, 0.12) !important;
+  box-shadow: inset 0 0 0 2px #22c55e;
+}
+
+.service-cell.pending-remove {
+  background: rgba(239, 68, 68, 0.12) !important;
+  box-shadow: inset 0 0 0 2px #ef4444;
+}
+
+.service-cell.pending-modify {
+  background: rgba(234, 179, 8, 0.12) !important;
+  box-shadow: inset 0 0 0 2px #eab308;
+}
+
+/* 格子內的 Review 按鈕 */
+.cell-review-btns {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  justify-content: center;
+}
+
+.cell-review-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.cell-review-btn.accept:hover {
+  background: #dcfce7;
+  border-color: #22c55e;
+}
+
+.cell-review-btn.reject:hover {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+/* Warning 標記 */
+.agent-warning-badge {
+  display: inline-block;
+  background: #fef3c7;
+  color: #d97706;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}

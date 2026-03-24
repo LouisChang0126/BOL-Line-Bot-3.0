@@ -9,201 +9,322 @@
 </head>
 
 <body>
-  <div class="app-container">
-    <!-- 頂部控制區 (合併標題與控制面板) -->
-    <div class="header-section">
-      <div class="app-title">
-        <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
-        <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
-      </div>
+  <!-- Agent 兩欄佈局 -->
+  <div class="agent-layout">
 
-      <div class="control-actions compact">
-        <button class="btn btn-secondary" id="showPastBtn" style="display: none;" onclick="togglePastData()">
-          📅 顯示歷史
-        </button>
-        <div class="btn-group">
-          <button class="btn btn-secondary btn-group-left" id="undoBtn" title="上一步 (Ctrl+Z)" disabled>
-            ⬅️ 上一步
-          </button>
-          <button class="btn btn-secondary btn-group-right" id="redoBtn" title="下一步 (Ctrl+Y)" disabled>
-            下一步 ➡️
-          </button>
-        </div>
-        <button class="btn btn-secondary" id="addServiceBtn">
-          ✨ 新增服事
-        </button>
-        <button class="btn btn-secondary" id="addInfoColumnBtn">
-          📝 新增資訊欄位
-        </button>
-        <button class="btn btn-secondary" id="editDisplayConfigBtn">
-          📊 編輯顯示欄位
-        </button>
-        <button class="btn btn-secondary" id="viewLogsBtn">
-          📜 編輯記錄
-        </button>
-        <button class="btn btn-secondary btn-with-badge" id="manageUsersBtn">
-          👥 管理使用者
-          <span class="badge-alert hidden" id="userAlertBadge">!</span>
-        </button>
-      </div>
-
-      <div class="status-indicator">
-        <div class="text-muted" id="statusText">載入中...</div>
-      </div>
-    </div>
-
-    <!-- 表格容器 -->
-    <div class="table-container">
-      <div class="table-scroll">
-        <table class="schedule-table" id="scheduleTable">
-          <thead id="tableHead">
-            <!-- 動態生成 -->
-          </thead>
-          <tbody id="tableBody">
-            <!-- 動態生成 -->
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 右鍵選單 -->
-    <div class="context-menu hidden" id="contextMenu">
-      <div class="context-menu-item" id="contextMenuCopy">📄 複製</div>
-      <div class="context-menu-item" id="contextMenuCut">✂️ 剪下</div>
-      <div class="context-menu-item" id="contextMenuPaste">📋 從此格貼上</div>
-    </div>
-
-    <!-- 貼上預覽 Modal -->
-    <div class="modal-overlay hidden" id="pastePreviewModal">
-      <div class="modal" style="max-width: 850px;">
-        <div class="modal-header">
-          <h2>📋 貼上預覽</h2>
-          <button class="modal-close" onclick="closeModal('pastePreviewModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="separator-options">
-            <span class="separator-label">人名分隔符：</span>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value="/" checked> <code>/</code>
-              斜線</label>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value="+"> <code>+</code>
-              加號</label>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value=","> <code>,</code>
-              半形逗號</label>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value="，"> <code>，</code>
-              全形逗號</label>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value=" "> 空格</label>
-            <label class="separator-option"><input type="radio" name="pasteSeparator" value=""> 無分隔</label>
+    <!-- 左側：主要排班表區域 -->
+    <div class="agent-main-area">
+      <div class="app-container">
+        <!-- 頂部控制區 -->
+        <div class="header-section">
+          <div class="app-title">
+            <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
+            <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
           </div>
-          <div id="pastePreviewContent" style="overflow-x: auto; margin-top: 12px;"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal('pastePreviewModal')">取消</button>
-          <button class="btn btn-primary" id="confirmPasteBtn">確認匯入</button>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- 編輯服事項目對話框 -->
-  <div class="modal-overlay hidden" id="editServiceModal">
-    <div class="modal">
-      <div class="modal-header">
-        <h2>編輯服事項目</h2>
-        <button class="modal-close" onclick="closeModal('editServiceModal')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>服事項目名稱</label>
-          <input type="text" class="form-control" id="serviceNameInput" placeholder="請輸入服事項目名稱">
-        </div>
-        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-          <input type="checkbox" id="isInfoColumnCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
-          <label for="isInfoColumnCheckbox" style="margin: 0; cursor: pointer;">這是資訊欄位（不包含人名）</label>
-        </div>
-      </div>
-      <div class="modal-footer" style="justify-content: space-between;">
-        <button class="btn btn-danger" id="deleteServiceBtn">移除服事項目</button>
-        <div style="display: flex; gap: 16px;">
-          <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
-          <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
-        </div>
-      </div>
-    </div>
-  </div>
+          <div class="control-actions compact">
+            <button class="btn btn-secondary" id="showPastBtn" style="display: none;" onclick="togglePastData()">
+              📅顯示歷史
+            </button>
+            <div class="btn-group">
+              <button class="btn btn-secondary btn-group-left" id="undoBtn" title="上一步 (Ctrl+Z)" disabled>
+                ⬅️上一步
+              </button>
+              <button class="btn btn-secondary btn-group-right" id="redoBtn" title="下一步 (Ctrl+Y)" disabled>
+                下一步➡️
+              </button>
+            </div>
+            <button class="btn btn-secondary" id="addColumnBtn">
+              ✨新增服事/資訊
+            </button>
+            <button class="btn btn-secondary" id="editDisplayConfigBtn">
+              📊編輯顯示欄位
+            </button>
+            <button class="btn btn-secondary" id="viewLogsBtn">
+              📜編輯記錄
+            </button>
+            <button class="btn btn-secondary btn-with-badge" id="manageUsersBtn">
+              👥管理使用者
+              <span class="badge-alert hidden" id="userAlertBadge">!</span>
+            </button>
+            <button class="btn btn-primary" id="toggleSidebarBtn" title="開關AI側邊欄">
+              🤖AI
+            </button>
+          </div>
 
-  <!-- 編輯人員對話框 -->
-  <div class="modal-overlay hidden" id="editPersonModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div>
-          <h2>編輯服事人員</h2>
-          <div class="modal-subtitle" id="editPersonModalSubtitle">
-            <!-- 動態顯示日期和服事項目 -->
+          <div class="status-indicator">
+            <div class="text-muted" id="statusText">載入中...</div>
           </div>
         </div>
-        <button class="modal-close" onclick="closeModal('editPersonModal')">&times;</button>
+
+        <!-- 通用輸入 Modal（新增服事 / 新增資訊欄位） -->
+        <div class="modal-overlay hidden" id="addColumnModal">
+          <div class="modal" style="max-width: 420px;">
+            <div class="modal-header">
+              <h2>✨新增欄位</h2>
+              <button class="modal-close" onclick="closeModal('addColumnModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+              <!-- 類型選擇 radio btn-group -->
+              <div class="form-group" style="margin-bottom: 16px;">
+                <label style="display:block; margin-bottom:8px; font-weight:600;">類型</label>
+                <div class="btn-group" style="width:100%;">
+                  <label class="btn btn-secondary btn-group-left addcol-type-btn" id="addColTypeServiceBtn"
+                    style="flex:1; text-align:center; cursor:pointer; margin:0;">
+                    <input type="radio" name="addColType" value="service" checked
+                      style="position:absolute; opacity:0; width:0;" id="addColTypeService">
+                    ✨服事項目
+                  </label>
+                  <label class="btn btn-secondary btn-group-right addcol-type-btn" id="addColTypeInfoBtn"
+                    style="flex:1; text-align:center; cursor:pointer; margin:0;">
+                    <input type="radio" name="addColType" value="info"
+                      style="position:absolute; opacity:0; width:0;" id="addColTypeInfo">
+                    📝資訊欄位
+                  </label>
+                </div>
+              </div>
+              <!-- 名稱輸入 -->
+              <div class="form-group">
+                <label id="addColumnModalLabel">名稱</label>
+                <input type="text" class="form-control" id="addColumnInput" placeholder="請輸入名稱..."
+                  autocomplete="off">
+                <div class="form-hint text-muted" style="margin-top: 6px; font-size: 12px;">
+                  名稱不能包含 <code>|</code> 符號
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" onclick="closeModal('addColumnModal')">取消</button>
+              <button class="btn btn-primary" id="addColumnConfirmBtn">新增</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Review 操作列 -->
+        <div class="agent-review-bar hidden" id="agentReviewBar">
+          <span class="agent-review-label">🤖 Agent 提案審核中</span>
+          <div class="agent-review-actions">
+            <button class="btn btn-success btn-sm" id="acceptAllBtn">✅ 全部接受</button>
+            <button class="btn btn-danger btn-sm" id="rejectAllBtn">❌ 全部拒絕</button>
+          </div>
+        </div>
+
+        <!-- 表格容器 -->
+        <div class="table-container">
+          <div class="table-scroll" style="overflow-x: auto;">
+            <table class="schedule-table" id="scheduleTable">
+              <thead id="tableHead">
+                <!-- 動態生成 -->
+              </thead>
+              <tbody id="tableBody">
+                <!-- 動態生成 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 右鍵選單 -->
+        <div class="context-menu hidden" id="contextMenu">
+          <div class="context-menu-item" id="contextMenuCopy">📄 複製</div>
+          <div class="context-menu-item" id="contextMenuCut">✂️ 剪下</div>
+          <div class="context-menu-item" id="contextMenuPaste">📋 從此格貼上</div>
+        </div>
+
+        <!-- 貼上預覽 Modal -->
+        <div class="modal-overlay hidden" id="pastePreviewModal">
+          <div class="modal" style="max-width: 850px;">
+            <div class="modal-header">
+              <h2>📋 貼上預覽</h2>
+              <button class="modal-close" onclick="closeModal('pastePreviewModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="separator-options">
+                <span class="separator-label">人名分隔符：</span>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value="/" checked>
+                  <code>/</code>
+                  斜線</label>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value="+"> <code>+</code>
+                  加號</label>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value=","> <code>,</code>
+                  半形逗號</label>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value="，"> <code>，</code>
+                  全形逗號</label>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value=" "> 空格</label>
+                <label class="separator-option"><input type="radio" name="pasteSeparator" value=""> 無分隔</label>
+              </div>
+              <div id="pastePreviewContent" style="overflow-x: auto; margin-top: 12px;"></div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" onclick="closeModal('pastePreviewModal')">取消</button>
+              <button class="btn btn-primary" id="confirmPasteBtn">確認匯入</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="modal-body">
-        <div class="form-group">
-          <label>選擇現有人員或輸入新人員</label>
-          <div class="person-select-container" id="personSelectContainer">
-            <!-- 動態生成的現有人員積木 -->
-            <div class="person-chips-select" id="personDropdown">
+
+      <!-- 編輯服事項目對話框 -->
+      <div class="modal-overlay hidden" id="editServiceModal">
+        <div class="modal">
+          <div class="modal-header">
+            <h2>編輯服事項目</h2>
+            <button class="modal-close" onclick="closeModal('editServiceModal')">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>服事項目名稱</label>
+              <input type="text" class="form-control" id="serviceNameInput" placeholder="請輸入服事項目名稱">
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+              <input type="checkbox" id="isInfoColumnCheckbox" style="width: 18px; height: 18px; cursor: pointer;">
+              <label for="isInfoColumnCheckbox" style="margin: 0; cursor: pointer;">這是資訊欄位（不包含人名）</label>
+            </div>
+          </div>
+          <div class="modal-footer" style="justify-content: space-between;">
+            <button class="btn btn-danger" id="deleteServiceBtn">移除服事項目</button>
+            <div style="display: flex; gap: 16px;">
+              <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
+              <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 編輯人員對話框 -->
+      <div class="modal-overlay hidden" id="editPersonModal">
+        <div class="modal">
+          <div class="modal-header">
+            <div>
+              <h2>編輯服事人員</h2>
+              <div class="modal-subtitle" id="editPersonModalSubtitle">
+                <!-- 動態顯示日期和服事項目 -->
+              </div>
+            </div>
+            <button class="modal-close" onclick="closeModal('editPersonModal')">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label>選擇現有人員或輸入新人員</label>
+              <div class="person-select-container" id="personSelectContainer">
+                <!-- 動態生成的現有人員積木 -->
+                <div class="person-chips-select" id="personDropdown">
+                  <!-- 動態生成 -->
+                </div>
+                <!-- 輸入新人員的空白積木 -->
+                <div class="person-chip-input-wrapper">
+                  <input type="text" class="person-chip-input" id="newPersonInput" placeholder="輸入新姓名...">
+                  <button class="person-chip-input-btn" id="addPersonChipBtn">+</button>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>目前服事人員</label>
+              <div class="person-chips" id="currentPersonChips">
+                <!-- 動態生成 -->
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-primary" onclick="closeModal('editPersonModal')">完成</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 編輯顯示欄位對話框 -->
+      <div class="modal-overlay hidden" id="displayConfigModal">
+        <div class="modal" style="max-width: 800px; max-height: 80vh;">
+          <div class="modal-header">
+            <h2>📊 編輯顯示欄位</h2>
+            <button class="modal-close" onclick="closeModal('displayConfigModal')">&times;</button>
+          </div>
+          <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
+            <div id="displayConfigGroups" class="display-config-groups">
               <!-- 動態生成 -->
             </div>
-            <!-- 輸入新人員的空白積木 -->
-            <div class="person-chip-input-wrapper">
-              <input type="text" class="person-chip-input" id="newPersonInput" placeholder="輸入新姓名...">
-              <button class="person-chip-input-btn" id="addPersonChipBtn">+</button>
+            <div class="add-group-section">
+              <button class="btn btn-secondary" id="addGroupBtn" style="width: 100%;">
+                ➕ 新增群組
+              </button>
+            </div>
+            <div class="hidden-zone" id="hiddenZone">
+              <div class="hidden-zone-title">🚫 不顯示區域 (拖入此處的項目會隱藏)</div>
+              <div class="hidden-zone-items" id="hiddenZoneItems">
+                <!-- 動態生成 -->
+              </div>
             </div>
           </div>
-        </div>
-        <div class="form-group">
-          <label>目前服事人員</label>
-          <div class="person-chips" id="currentPersonChips">
-            <!-- 動態生成 -->
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal('displayConfigModal')">取消</button>
+            <button class="btn btn-primary" id="saveDisplayConfigBtn">儲存設定</button>
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeModal('editPersonModal')">完成</button>
-      </div>
     </div>
-  </div>
 
-  <!-- 編輯顯示欄位對話框 -->
-  <div class="modal-overlay hidden" id="displayConfigModal">
-    <div class="modal" style="max-width: 800px; max-height: 80vh;">
-      <div class="modal-header">
-        <h2>📊 編輯顯示欄位</h2>
-        <button class="modal-close" onclick="closeModal('displayConfigModal')">&times;</button>
+    <!-- 可拖曳分隔線 -->
+    <div class="agent-resizer" id="agentResizer" title="拖曳調整寬度"></div>
+
+    <!-- 右側：Agent 側邊欄 -->
+    <div class="agent-sidebar" id="agentSidebar">
+      <div class="agent-sidebar-header">
+        <h3>🤖 AI 排班助手</h3>
+        <button class="agent-sidebar-close" id="closeSidebarBtn">&times;</button>
       </div>
-      <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
-        <!-- 群組區域 -->
-        <div id="displayConfigGroups" class="display-config-groups">
-          <!-- 動態生成 -->
-        </div>
 
-        <!-- 新增群組按鈕 -->
-        <div class="add-group-section">
-          <button class="btn btn-secondary" id="addGroupBtn" style="width: 100%;">
-            ➕ 新增群組
+      <!-- 模型選擇 -->
+      <div class="agent-config-section">
+        <label class="agent-config-label">模型選擇</label>
+        <select class="agent-select" id="modelSelect">
+          <option value="claude-sonnet-4-6">Claude 4.6 Sonnet</option>
+          <option value="claude-opus-4-6">Claude 4.6 Opus</option>
+        </select>
+      </div>
+
+      <!-- 規則勾選區 -->
+      <div class="agent-config-section">
+        <label class="agent-config-label">排班規則</label>
+        <div class="agent-rules">
+          <label class="agent-rule-option">
+            <input type="checkbox" id="ruleConsecutive" checked>
+            <span>禁止連續 2 週相同服事</span>
+          </label>
+          <label class="agent-rule-option">
+            <input type="checkbox" id="ruleMaxRoles" checked>
+            <span>單週最多 3 項服事</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 聊天對話區域 -->
+      <div class="agent-chat-area" id="agentChatArea">
+        <div class="agent-chat-welcome">
+          <div class="agent-chat-welcome-icon">🤖</div>
+          <p>嗨！我是 AI 排班助手。</p>
+          <p>請告訴我你想如何排班，我會產生建議供你審核。</p>
+          <p class="agent-chat-hint">💡 你可以上傳 CSV 檔案作為排班參考資料。</p>
+        </div>
+      </div>
+
+      <!-- 輸入區域 -->
+      <div class="agent-input-area">
+        <!-- 附件提示 -->
+        <div class="agent-attachment-preview hidden" id="attachmentPreview">
+          <span class="agent-attachment-name" id="attachmentName"></span>
+          <button class="agent-attachment-remove" id="removeAttachmentBtn">&times;</button>
+        </div>
+        <!-- 輸入框和按鈕 -->
+        <div class="agent-input-row">
+          <label class="agent-attach-btn" title="上傳 CSV 檔案">
+            📎
+            <input type="file" accept=".csv" id="csvFileInput" style="display: none;">
+          </label>
+          <textarea class="agent-prompt-input" id="agentPromptInput" placeholder="輸入排班指令..." rows="1"></textarea>
+          <button class="agent-send-btn" id="agentSendBtn" title="送出">
+            <span>➤</span>
           </button>
         </div>
-
-        <!-- 不顯示區域 -->
-        <div class="hidden-zone" id="hiddenZone">
-          <div class="hidden-zone-title">🚫 不顯示區域 (拖入此處的項目會隱藏)</div>
-          <div class="hidden-zone-items" id="hiddenZoneItems">
-            <!-- 動態生成 -->
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('displayConfigModal')">取消</button>
-        <button class="btn btn-primary" id="saveDisplayConfigBtn">儲存設定</button>
       </div>
     </div>
+
   </div>
 
   <!-- Firebase SDK -->
@@ -216,7 +337,7 @@
     import { getFirestore, collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
     // 引入配置
-    import { firebaseConfig, RECAPTCHA_SITE_KEY } from '../firebase-config.js';
+    import { firebaseConfig, RECAPTCHA_SITE_KEY, AGENT_API_URL } from '../firebase-config.js';
 
     // 從 URL 參數取得 collection 名稱
     const urlParams = new URLSearchParams(window.location.search);
@@ -224,7 +345,7 @@
 
     // 顯示錯誤頁面
     function showError(title, message) {
-      document.querySelector('.app-container').innerHTML = `
+      document.querySelector('.agent-main-area .app-container').innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
           <h1 style="color: #ef4444; font-size: 48px; margin-bottom: 16px;">⚠️</h1>
           <h2 style="color: #ef4444; margin-bottom: 8px;">${title}</h2>
@@ -251,7 +372,6 @@
         return null;
       }
 
-      // 檢查 collection 是否有效
       const serve = serveList.find(s => s.id === collectionName);
       if (!serve) {
         showError('找不到班表', `無效的班表名稱: ${collectionName || '(未指定)'}`);
@@ -261,7 +381,7 @@
       return serve;
     }
 
-    // 更新頁面標題（在驗證成功後呼叫）
+    // 更新頁面標題
     function updatePageTitle(serve) {
       document.getElementById('collectionTitle').textContent = serve.name + '班表';
       document.title = `${serve.name}班表 - 教會服事班表系統`;
@@ -286,13 +406,12 @@
       collectionName: collectionName
     });
 
-    // 初始化 Firebase（使用 async IIFE）
+    // 初始化 Firebase
     (async function initFirebase() {
       try {
         const app = initializeApp(firebaseConfig);
         console.log('✅ Firebase App 初始化成功');
 
-        // 初始化 App Check
         const appCheck = initializeAppCheck(app, {
           provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
           isTokenAutoRefreshEnabled: true
@@ -301,23 +420,19 @@
         const db = getFirestore(app);
         console.log('✅ Firestore 連接成功');
 
-        // 將全域變數掛載到 window
         window.db = db;
         window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit };
         window.COLLECTION_NAME = collectionName;
+        window.AGENT_API_URL = AGENT_API_URL;
 
         console.log('✅ Firebase 全域變數已設定');
 
-        // 驗證 collection 是否有效
         const serve = await loadAndValidateCollection(db);
-        if (!serve) {
-          return; // 驗證失敗，showError 已顯示錯誤訊息
-        }
+        if (!serve) return;
 
-        // 更新頁面標題
         updatePageTitle(serve);
 
-        // 載入主要應用程式（單一檔案 app.js）
+        // 載入應用程式
         import('./app.js').then(() => {
           console.log('✅ app.js 已載入');
         }).catch(error => {

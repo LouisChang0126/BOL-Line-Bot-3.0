@@ -723,36 +723,96 @@ async function deleteLastRow() {
 // ===========================
 // 服事項目管理
 // ===========================
-async function addServiceItem() {
-    const name = prompt('請輸入新的服事項目名稱：');
-    if (!name || name.trim() === '') return;
+// 通用：開啟自訂輸入 Modal
+function showAddColumnModal() {
+    const modal = document.getElementById('addColumnModal');
+    const input = document.getElementById('addColumnInput');
+    const confirmBtn = document.getElementById('addColumnConfirmBtn');
 
-    const trimmedName = name.trim();
+    // 重設為「服事項目」選項並更新樣式
+    document.getElementById('addColTypeService').checked = true;
+    updateAddColTypeUI();
 
-    if (trimmedName.includes('|')) {
-        alert('名稱不能包含 "|" 符號');
-        return;
-    }
+    input.value = '';
+    modal.classList.remove('hidden');
+    setTimeout(() => input.focus(), 50);
 
-    if (serviceItems.includes(trimmedName)) {
-        alert('此服事項目已存在');
-        return;
-    }
+    const onEnter = (e) => {
+        if (e.key === 'Enter') confirmBtn.click();
+    };
+    input.addEventListener('keydown', onEnter);
 
+    const onConfirm = () => {
+        const mode = document.querySelector('input[name="addColType"]:checked')?.value || 'service';
+        const name = input.value.trim();
+        input.removeEventListener('keydown', onEnter);
+        confirmBtn.removeEventListener('click', onConfirm);
+        modal.classList.add('hidden');
+
+        if (!name) return;
+
+        if (name.includes('|')) {
+            showModalAlert('名稱不能包含 "|" 符號');
+            return;
+        }
+
+        if (serviceItems.includes(name)) {
+            const msg = mode === 'service' ? '此服事項目已存在' : '此欄位名稱已存在';
+            showModalAlert(msg);
+            return;
+        }
+
+        if (mode === 'service') {
+            doAddServiceItem(name);
+        } else {
+            doAddInfoColumn(name);
+        }
+    };
+    confirmBtn.addEventListener('click', onConfirm);
+}
+
+// Radio 按鈕的 active 樣式同步
+function updateAddColTypeUI() {
+    const serviceLabel = document.getElementById('addColTypeServiceBtn');
+    const infoLabel = document.getElementById('addColTypeInfoBtn');
+    if (!serviceLabel || !infoLabel) return;
+    const isService = document.getElementById('addColTypeService').checked;
+    serviceLabel.classList.toggle('btn-primary', isService);
+    serviceLabel.classList.toggle('btn-secondary', !isService);
+    infoLabel.classList.toggle('btn-primary', !isService);
+    infoLabel.classList.toggle('btn-secondary', isService);
+}
+
+// 以 Modal 顯示錯誤訊息（取代 alert）
+function showModalAlert(message) {
+    const existing = document.getElementById('_agentAlertModal');
+    if (existing) existing.remove();
+
+    const el = document.createElement('div');
+    el.id = '_agentAlertModal';
+    el.className = 'modal-overlay';
+    el.innerHTML = `
+        <div class="modal" style="max-width: 340px;">
+            <div class="modal-body" style="padding: 24px; text-align: center; font-size: 14px;">
+                ⚠️ ${message}
+            </div>
+            <div class="modal-footer" style="justify-content: center;">
+                <button class="btn btn-primary" id="_agentAlertOkBtn">確定</button>
+            </div>
+        </div>`;
+    document.body.appendChild(el);
+    document.getElementById('_agentAlertOkBtn').addEventListener('click', () => el.remove());
+}
+
+async function doAddServiceItem(trimmedName) {
     updateStatus('新增服事項目中...');
-
     try {
         serviceItems.push(trimmedName);
-
         // 將新服事項目加入 displayConfig 的「未分組」群組
         if (displayConfig && displayConfig.groups) {
             const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
-            if (ungrouped) {
-                ungrouped.items.push(trimmedName);
-            }
+            if (ungrouped) ungrouped.items.push(trimmedName);
         }
-
-        // 為所有現有資料新增此欄位
         const updates = [];
         scheduleData.forEach(row => {
             row[trimmedName] = [];
@@ -760,57 +820,30 @@ async function addServiceItem() {
             delete data.date;
             updates.push(saveSchedule(row.date, data));
         });
-
         // 儲存 metadata（包含 displayConfig）
         updates.push(saveMetadata());
-
         await Promise.all(updates);
-
         pushHistory();
         updateEditDifference();
         renderTable();
         updateStatus('服事項目已新增');
-
     } catch (error) {
         console.error('新增服事項目失敗:', error);
-        alert('新增服事項目失敗');
-        serviceItems.pop(); // 還原
+        showModalAlert('新增服事項目失敗');
+        serviceItems.pop();
         updateStatus('就緒');
     }
 }
 
-// 新增資訊欄位（預設為 nonUserColumn）
-async function addInfoColumn() {
-    const name = prompt('請輸入新的資訊欄位名稱：');
-    if (!name || name.trim() === '') return;
-
-    const trimmedName = name.trim();
-
-    if (trimmedName.includes('|')) {
-        alert('名稱不能包含 "|" 符號');
-        return;
-    }
-
-    if (serviceItems.includes(trimmedName)) {
-        alert('此欄位名稱已存在');
-        return;
-    }
-
+async function doAddInfoColumn(trimmedName) {
     updateStatus('新增資訊欄位中...');
-
     try {
         serviceItems.push(trimmedName);
-        nonUserColumns.push(trimmedName); // 預設加入 nonUserColumns
-
-        // 將新欄位加入 displayConfig 的「未分組」群組
+        nonUserColumns.push(trimmedName);
         if (displayConfig && displayConfig.groups) {
             const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
-            if (ungrouped) {
-                ungrouped.items.push(trimmedName);
-            }
+            if (ungrouped) ungrouped.items.push(trimmedName);
         }
-
-        // 為所有現有資料新增此欄位
         const updates = [];
         scheduleData.forEach(row => {
             row[trimmedName] = [];
@@ -818,25 +851,24 @@ async function addInfoColumn() {
             delete data.date;
             updates.push(saveSchedule(row.date, data));
         });
-
-        // 儲存 metadata
         updates.push(saveMetadata());
-
         await Promise.all(updates);
-
         pushHistory();
         updateEditDifference();
         renderTable();
         updateStatus('資訊欄位已新增');
-
     } catch (error) {
         console.error('新增資訊欄位失敗:', error);
-        alert('新增資訊欄位失敗');
+        showModalAlert('新增資訊欄位失敗');
         serviceItems.pop();
         nonUserColumns.pop();
         updateStatus('就緒');
     }
 }
+
+function addServiceItem() { showAddColumnModal(); }
+function addInfoColumn() { showAddColumnModal(); }
+
 
 function openEditServiceModal(serviceName) {
     currentEditingServiceName = serviceName;
@@ -2240,10 +2272,7 @@ window.closeModal = function (modalId) {
 // 事件監聯器設定
 // ===========================
 function setupEventListeners() {
-    // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定
-    document.getElementById('addServiceBtn').addEventListener('click', addServiceItem);
-
-    // 按 ESC 關閉模態框
+    // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定    // 按 ESC 關閉模態框
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeModal('editDateModal');
@@ -2562,16 +2591,14 @@ function initDisplayConfigEditor() {
         saveBtn.addEventListener('click', saveDisplayConfig);
     }
 
-    // 新增服事按鈕
-    const addServiceBtn = document.getElementById('addServiceBtn');
-    if (addServiceBtn) {
-        addServiceBtn.addEventListener('click', addServiceItem);
-    }
-
-    // 新增資訊欄位按鈕
-    const addInfoColumnBtn = document.getElementById('addInfoColumnBtn');
-    if (addInfoColumnBtn) {
-        addInfoColumnBtn.addEventListener('click', addInfoColumn);
+    // 新增欄位按鈕（合併按鈕）
+    const addColumnBtn = document.getElementById('addColumnBtn');
+    if (addColumnBtn) {
+        addColumnBtn.addEventListener('click', () => showAddColumnModal());
+        // radio 切換 active 樣式
+        document.querySelectorAll('input[name="addColType"]').forEach(r => {
+            r.addEventListener('change', updateAddColTypeUI);
+        });
     }
 
     // 編輯記錄按鈕
@@ -3004,3 +3031,495 @@ function updateUserAlertBadge(show) {
         }
     }
 }
+
+// ===========================
+// Agent 排班副駕功能
+// ===========================
+
+// --- Agent 狀態 ---
+let pendingAgentChanges = null;
+let attachedCsvText = null;
+let agentIsLoading = false;
+
+// Cloud Function URL（從 firebase-config.js 載入）
+const AGENT_API_URL = window.AGENT_API_URL || '';
+
+// --- 側邊欄控制 ---
+function setupAgentSidebar() {
+    const sidebar = document.getElementById('agentSidebar');
+    const toggleBtn = document.getElementById('toggleSidebarBtn');
+    const closeBtn = document.getElementById('closeSidebarBtn');
+
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('collapsed');
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            sidebar.classList.add('collapsed');
+        });
+    }
+
+    // 送出按鈕
+    const sendBtn = document.getElementById('agentSendBtn');
+    const promptInput = document.getElementById('agentPromptInput');
+
+    if (sendBtn) {
+        sendBtn.addEventListener('click', () => sendAgentRequest());
+    }
+
+    if (promptInput) {
+        promptInput.addEventListener('input', () => {
+            promptInput.style.height = 'auto';
+            promptInput.style.height = Math.min(promptInput.scrollHeight, 100) + 'px';
+        });
+
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendAgentRequest();
+            }
+        });
+    }
+
+    // CSV 上傳
+    const csvInput = document.getElementById('csvFileInput');
+    const attachmentPreview = document.getElementById('attachmentPreview');
+    const attachmentName = document.getElementById('attachmentName');
+    const removeAttachmentBtn = document.getElementById('removeAttachmentBtn');
+
+    if (csvInput) {
+        csvInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                attachedCsvText = event.target.result;
+                attachmentName.textContent = `📄 ${file.name}`;
+                attachmentPreview.classList.remove('hidden');
+            };
+            reader.readAsText(file);
+        });
+    }
+
+    if (removeAttachmentBtn) {
+        removeAttachmentBtn.addEventListener('click', () => {
+            attachedCsvText = null;
+            attachmentPreview.classList.add('hidden');
+            csvInput.value = '';
+        });
+    }
+
+    // Accept/Reject 全部
+    const acceptAllBtn = document.getElementById('acceptAllBtn');
+    const rejectAllBtn = document.getElementById('rejectAllBtn');
+
+    if (acceptAllBtn) {
+        acceptAllBtn.addEventListener('click', () => acceptAllChanges());
+    }
+    if (rejectAllBtn) {
+        rejectAllBtn.addEventListener('click', () => rejectAllChanges());
+    }
+}
+
+// --- 聊天 UI ---
+function addChatMessage(text, role = 'user') {
+    const chatArea = document.getElementById('agentChatArea');
+    const welcome = chatArea.querySelector('.agent-chat-welcome');
+    if (welcome) welcome.remove();
+
+    const msg = document.createElement('div');
+    msg.className = `agent-msg ${role}`;
+    msg.textContent = text;
+    chatArea.appendChild(msg);
+    chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function showAgentLoading() {
+    const chatArea = document.getElementById('agentChatArea');
+    const loading = document.createElement('div');
+    loading.className = 'agent-loading';
+    loading.id = 'agentLoadingIndicator';
+    loading.innerHTML = `
+        <div class="agent-loading-dot"></div>
+        <div class="agent-loading-dot"></div>
+        <div class="agent-loading-dot"></div>
+    `;
+    chatArea.appendChild(loading);
+    chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function hideAgentLoading() {
+    const loading = document.getElementById('agentLoadingIndicator');
+    if (loading) loading.remove();
+}
+
+// --- ScheduleValidator ---
+class ScheduleValidator {
+    constructor() { this.rules = []; }
+    addRule(name, checkFn) { this.rules.push({ name, checkFn }); }
+    validate(scheduleData, serviceItems, nonUserColumns, activeRules) {
+        const warnings = [];
+        const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
+        for (const rule of this.rules) {
+            if (activeRules[rule.name]) {
+                warnings.push(...rule.checkFn(scheduleData, userServiceItems));
+            }
+        }
+        return { valid: warnings.length === 0, warnings };
+    }
+}
+
+const scheduleValidator = new ScheduleValidator();
+
+// 規則1: 連續兩週相同服事
+scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems) => {
+    const warnings = [];
+    for (let i = 1; i < scheduleData.length; i++) {
+        const prevRow = scheduleData[i - 1];
+        const currRow = scheduleData[i];
+        userServiceItems.forEach(service => {
+            const duplicates = (prevRow[service] || []).filter(n => (currRow[service] || []).includes(n));
+            duplicates.forEach(name => {
+                warnings.push({
+                    type: 'consecutive',
+                    message: `⚠️ ${name} 連續兩週擔任「${service}」（${prevRow.date} → ${currRow.date}）`,
+                    date: currRow.date, service, person: name
+                });
+            });
+        });
+    }
+    return warnings;
+});
+
+// 規則2: 單週最多 N 項服事
+scheduleValidator.addRule('maxRoles', (scheduleData, userServiceItems) => {
+    const MAX_ROLES = 3;
+    const warnings = [];
+    scheduleData.forEach(row => {
+        const counts = {};
+        userServiceItems.forEach(service => {
+            (row[service] || []).forEach(name => { counts[name] = (counts[name] || 0) + 1; });
+        });
+        Object.entries(counts).forEach(([name, count]) => {
+            if (count > MAX_ROLES) {
+                warnings.push({
+                    type: 'maxRoles',
+                    message: `⚠️ ${name} 在 ${row.date} 擔任了 ${count} 項服事（上限 ${MAX_ROLES}）`,
+                    date: row.date, person: name, count
+                });
+            }
+        });
+    });
+    return warnings;
+});
+
+// --- API 呼叫 ---
+async function sendAgentRequest() {
+    const promptInput = document.getElementById('agentPromptInput');
+    const prompt = promptInput.value.trim();
+    if (!prompt || agentIsLoading) return;
+
+    addChatMessage(prompt, 'user');
+    promptInput.value = '';
+    promptInput.style.height = 'auto';
+
+    const selectedModel = document.getElementById('modelSelect').value;
+    const activeRules = {
+        consecutive: document.getElementById('ruleConsecutive').checked,
+        maxRoles: document.getElementById('ruleMaxRoles').checked
+    };
+
+    const payload = {
+        prompt,
+        currentSchedule: JSON.stringify({ scheduleData, serviceItems, nonUserColumns }),
+        selectedModel,
+        activeRules
+    };
+
+    if (attachedCsvText) payload.attachedCsvText = attachedCsvText;
+
+    agentIsLoading = true;
+    document.getElementById('agentSendBtn').disabled = true;
+    showAgentLoading();
+
+    let retryCount = 0;
+    const MAX_RETRIES = 2;
+    let lastResult = null;
+
+    while (retryCount <= MAX_RETRIES) {
+        try {
+            const response = await fetch(AGENT_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(retryCount > 0 ? {
+                    ...payload,
+                    prompt: `${prompt}\n\n[系統提示] 上次產生的班表違反規則，請修正：\n${lastResult.warnings.map(w => w.message).join('\n')}`
+                } : payload)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API 錯誤 (${response.status}): ${errorText}`);
+            }
+
+            const result = await response.json();
+            const validation = scheduleValidator.validate(result.scheduleData, serviceItems, nonUserColumns, activeRules);
+
+            if (!validation.valid && retryCount < MAX_RETRIES) {
+                lastResult = validation;
+                retryCount++;
+                continue;
+            }
+
+            hideAgentLoading();
+
+            if (!validation.valid) {
+                addChatMessage(`已產生排班建議（但有 ${validation.warnings.length} 項規則警告）`, 'assistant');
+                validation.warnings.forEach(w => addChatMessage(w.message, 'error'));
+            } else {
+                addChatMessage('已產生排班建議，請檢視表格中的變更。', 'assistant');
+            }
+
+            setPendingChanges(result.scheduleData);
+            break;
+
+        } catch (error) {
+            hideAgentLoading();
+            console.error('Agent API 呼叫失敗:', error);
+            addChatMessage(`❌ 發生錯誤：${error.message}`, 'error');
+            break;
+        }
+    }
+
+    agentIsLoading = false;
+    document.getElementById('agentSendBtn').disabled = false;
+}
+
+// --- Pending Changes 管理 ---
+function setPendingChanges(newScheduleData) {
+    pendingAgentChanges = {};
+
+    scheduleData.forEach((row) => {
+        const date = row.date;
+        const newRow = newScheduleData.find(r => r.date === date);
+        if (!newRow) return;
+
+        serviceItems.forEach(service => {
+            if (nonUserColumns.includes(service)) return;
+
+            const oldValue = JSON.stringify(row[service] || []);
+            const newValue = JSON.stringify(newRow[service] || []);
+
+            if (oldValue !== newValue) {
+                if (!pendingAgentChanges[date]) pendingAgentChanges[date] = {};
+                pendingAgentChanges[date][service] = {
+                    old: row[service] || [],
+                    new: newRow[service] || []
+                };
+            }
+        });
+    });
+
+    const reviewBar = document.getElementById('agentReviewBar');
+    if (Object.keys(pendingAgentChanges).length > 0) {
+        reviewBar.classList.remove('hidden');
+        renderTable();
+    } else {
+        addChatMessage('沒有需要變更的內容。', 'assistant');
+    }
+}
+
+// Accept 單格
+window.acceptCellChange = function (date, service) {
+    if (!pendingAgentChanges || !pendingAgentChanges[date] || !pendingAgentChanges[date][service]) return;
+
+    const change = pendingAgentChanges[date][service];
+    const row = scheduleData.find(r => r.date === date);
+    if (row) {
+        row[service] = [...change.new];
+        const data = { ...row };
+        delete data.date;
+        saveSchedule(row.date, data);
+        pushHistory();
+        updateEditDifference();
+    }
+
+    delete pendingAgentChanges[date][service];
+    if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
+
+    checkPendingComplete();
+    renderTable();
+};
+
+// Reject 單格
+window.rejectCellChange = function (date, service) {
+    if (!pendingAgentChanges || !pendingAgentChanges[date] || !pendingAgentChanges[date][service]) return;
+
+    delete pendingAgentChanges[date][service];
+    if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
+
+    checkPendingComplete();
+    renderTable();
+};
+
+// Accept 全部
+async function acceptAllChanges() {
+    if (!pendingAgentChanges) return;
+
+    const updates = [];
+    Object.entries(pendingAgentChanges).forEach(([date, services]) => {
+        const row = scheduleData.find(r => r.date === date);
+        if (!row) return;
+        Object.entries(services).forEach(([service, change]) => { row[service] = [...change.new]; });
+        const data = { ...row };
+        delete data.date;
+        updates.push(saveSchedule(row.date, data));
+    });
+
+    await Promise.all(updates);
+    pushHistory();
+    updateEditDifference();
+
+    pendingAgentChanges = null;
+    document.getElementById('agentReviewBar').classList.add('hidden');
+    renderTable();
+    addChatMessage('✅ 已接受所有變更', 'assistant');
+    updateStatus('Agent 變更已套用');
+}
+
+// Reject 全部
+function rejectAllChanges() {
+    pendingAgentChanges = null;
+    document.getElementById('agentReviewBar').classList.add('hidden');
+    renderTable();
+    addChatMessage('❌ 已拒絕所有變更', 'assistant');
+    updateStatus('Agent 變更已取消');
+}
+
+function checkPendingComplete() {
+    if (!pendingAgentChanges || Object.keys(pendingAgentChanges).length === 0) {
+        pendingAgentChanges = null;
+        document.getElementById('agentReviewBar').classList.add('hidden');
+        addChatMessage('審核完成。', 'assistant');
+    }
+}
+
+// 注入差異高亮
+function injectPendingHighlights() {
+    if (!pendingAgentChanges || Object.keys(pendingAgentChanges).length === 0) return;
+
+    Object.entries(pendingAgentChanges).forEach(([date, services]) => {
+        Object.entries(services).forEach(([service, change]) => {
+            const cell = document.querySelector(
+                `.service-cell[data-date="${date}"][data-service="${service}"]`
+            );
+            if (!cell) return;
+
+            const hasOld = change.old.length > 0;
+            const hasNew = change.new.length > 0;
+
+            if (!hasOld && hasNew) {
+                cell.classList.add('pending-add');
+            } else if (hasOld && !hasNew) {
+                cell.classList.add('pending-remove');
+            } else {
+                cell.classList.add('pending-modify');
+            }
+
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'pending-preview';
+            previewDiv.style.cssText = 'font-size: 11px; color: #16a34a; margin-top: 4px; font-style: italic;';
+            previewDiv.textContent = hasNew ? `→ ${change.new.join('/')}` : '→ (清空)';
+            cell.appendChild(previewDiv);
+
+            const btnsDiv = document.createElement('div');
+            btnsDiv.className = 'cell-review-btns';
+            btnsDiv.innerHTML = `
+                <button class="cell-review-btn accept" onclick="acceptCellChange('${date}', '${service}')">✅</button>
+                <button class="cell-review-btn reject" onclick="rejectCellChange('${date}', '${service}')">❌</button>
+            `;
+            cell.appendChild(btnsDiv);
+        });
+    });
+}
+
+// 攔截 renderTable 以在渲染後注入差異高亮
+const _originalRenderTable = renderTable;
+renderTable = function () {
+    _originalRenderTable();
+    injectPendingHighlights();
+};
+window.renderTable = renderTable;
+
+// --- 可拖曳分隔線 ---
+function setupResizer() {
+    const resizer = document.getElementById('agentResizer');
+    const sidebar = document.getElementById('agentSidebar');
+    const layout = document.querySelector('.agent-layout');
+    if (!resizer || !sidebar || !layout) return;
+
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        if (sidebar.classList.contains('collapsed')) return;
+        isResizing = true;
+        startX = e.clientX;
+        startWidth = sidebar.getBoundingClientRect().width;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const delta = startX - e.clientX;
+        const rawWidth = startWidth + delta;
+
+        if (rawWidth < 200) {
+            isResizing = false;
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            sidebar.classList.add('collapsed');
+            resizer.classList.add('collapsed');
+            return;
+        }
+
+        const newWidth = Math.min(rawWidth, layout.getBoundingClientRect().width * 0.4);
+        sidebar.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!isResizing) return;
+        isResizing = false;
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+
+    const toggleBtn = document.getElementById('toggleSidebarBtn');
+    const closeBtn = document.getElementById('closeSidebarBtn');
+
+    function syncResizerVisibility() {
+        if (sidebar.classList.contains('collapsed')) {
+            resizer.classList.add('collapsed');
+        } else {
+            resizer.classList.remove('collapsed');
+        }
+    }
+
+    if (toggleBtn) toggleBtn.addEventListener('click', () => setTimeout(syncResizerVisibility, 350));
+    if (closeBtn) closeBtn.addEventListener('click', () => setTimeout(syncResizerVisibility, 350));
+}
+
+// --- 初始化 Agent 功能 ---
+setupAgentSidebar();
+setupResizer();
+console.log('✅ Agent 排班副駕已初始化');

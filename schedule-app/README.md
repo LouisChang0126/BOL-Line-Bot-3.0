@@ -10,6 +10,7 @@
 |------|------|------|
 | 📖 **班表查看** | `schedule-app/` | 只能查看班表，支援使用者 highlight |
 | ✏️ **班表編輯** | `edit-chart/` | 編輯班表、管理使用者，支援撤銷/重做 |
+| 🤖 **AI 排班** | `edit-chart/edit-chart-agent.html` | AI 輔助排班，Claude API 產生建議並逐格審核 |
 | 📊 **使用數據觀察** | `edit-chart/observation.html` | 查看 LINE Bot 使用統計與分析 |
 
 ### 📅 日期管理
@@ -91,6 +92,13 @@
 - 📋 **右鍵選單**：複製、剪下、貼上操作
 - 🔄 **即時同步**：所有變更自動儲存到 Firestore
 - 📱 **螢幕方向提示**（可選）：在行動裝置上建議橫向瀏覽（目前已停用）
+
+### 🤖 AI 排班助手 (`edit-chart-agent.html`)
+- 💬 **Agent 側邊欄**：與 AI 對話式排班，支援 Claude 4.6 Sonnet / Opus 模型選擇
+- 📎 **CSV 上傳**：上傳參考資料協助 AI 排班
+- ✅ **Rule Engine**：自動檢查連續排班、單週服事上限等規則，不合規時自動重試（最多 2 次）
+- 🔍 **Review UI**：差異高亮顯示（綠色新增、紅色移除、黃色修改），支援逐格或全部 Accept/Reject
+- 🔗 **後端 API**：透過 GCP Cloud Function 呼叫 Claude API，CORS 白名單保護
 
 ## 🚀 快速開始
 
