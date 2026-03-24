@@ -18,9 +18,7 @@ except ImportError:
 # CORS 白名單
 ALLOWED_ORIGINS = [
     'https://bol-line-bot-3.web.app',
-    'https://bol-line-bot-3.firebaseapp.com',
-    'http://localhost:5000',   # 本地開發
-    'http://127.0.0.1:5000',
+    'http://localhost:5500',   # 本地開發
 ]
 
 def cors_response(data=None, status=200):
@@ -109,6 +107,7 @@ def generate_agent_schedule(request):
     selected_model = data.get('selectedModel', 'claude-sonnet-4-6')
     active_rules = data.get('activeRules', {})
     attached_csv_text = data.get('attachedCsvText', '')
+    chat_history = data.get('chatHistory', [])
 
     if not prompt:
         response = cors_response({'error': 'Missing prompt'}, 400)
@@ -122,6 +121,20 @@ def generate_agent_schedule(request):
     # 建立 System Prompt
     system_prompt = build_system_prompt(current_schedule, active_rules, attached_csv_text)
 
+    # 組合對話紀錄
+    messages = []
+    for msg in chat_history:
+        # 只允許 user 和 assistant 角色
+        role = msg.get("role", "user")
+        if role not in ["user", "assistant"]:
+            role = "user"
+        messages.append({
+            "role": role,
+            "content": msg.get("content", "")
+        })
+    # 加入當前 prompt
+    messages.append({"role": "user", "content": prompt})
+
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -131,22 +144,37 @@ def generate_agent_schedule(request):
             max_tokens=8192,
             system=system_prompt,
             tools=[SCHEDULE_TOOL],
-            tool_choice={"type": "tool", "name": "update_schedule"},
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            tool_choice={"type": "auto"},
+            messages=messages
         )
 
         # 從 tool_use 回應中取出結果
         result = None
         explanation = ''
-        for content_block in message.content:
+        for content_block in message.content:   
             if content_block.type == 'tool_use' and content_block.name == 'update_schedule':
                 result = content_block.input.get('scheduleData', [])
                 explanation = content_block.input.get('explanation', '')
                 break
 
+        # 如果沒有呼叫工具（代表 Claude 只是進行一般文字對話回答問題）
         if result is None:
+            text_response = ''
+            for content_block in message.content:
+                if content_block.type == 'text':
+                    text_response += content_block.text + '\n'
+            
+            # 將原封不動的 current_schedule 還給前端，這樣前端比對就不會有異動
+            import json
+            try:
+                current_dict = json.loads(current_schedule)
+                result = current_dict.get('scheduleData', [])
+            except Exception:
+                result = []
+            
+            explanation = text_response.strip()
+
+        if not result:
             response = cors_response({'error': 'No schedule data in response'}, 500)
             return add_cors_headers(response, origin)
 

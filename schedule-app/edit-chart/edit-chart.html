@@ -271,9 +271,9 @@
       </div>
 
       <!-- 模型選擇 -->
-      <div class="agent-config-section">
-        <label class="agent-config-label">模型選擇</label>
-        <select class="agent-select" id="modelSelect">
+      <div class="agent-config-section" style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <label class="agent-config-label" style="margin-bottom: 0; white-space: nowrap;">模型選擇</label>
+        <select class="agent-select" id="modelSelect" style="flex: 1; margin: 0; padding: 6px 10px;">
           <option value="claude-sonnet-4-6">Claude 4.6 Sonnet</option>
           <option value="claude-opus-4-6">Claude 4.6 Opus</option>
         </select>
@@ -281,8 +281,11 @@
 
       <!-- 規則勾選區 -->
       <div class="agent-config-section">
-        <label class="agent-config-label">排班規則</label>
-        <div class="agent-rules">
+        <label class="agent-config-label" id="agentRulesToggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+          排班規則
+          <span id="agentRulesIcon" style="font-size: 10px; color: #64748b;">▼</span>
+        </label>
+        <div class="agent-rules" id="agentRulesContent">
           <label class="agent-rule-option">
             <input type="checkbox" id="ruleConsecutive" checked>
             <span>禁止連續 2 週相同服事</span>

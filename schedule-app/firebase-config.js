@@ -12,4 +12,4 @@ export const firebaseConfig = {
 export const RECAPTCHA_SITE_KEY = "6LcrTEgsAAAAALHsL8i7xFOrUM4t4q5j1gVftmAx";
 
 // Agent Schedule Generator Cloud Function URL
-export const AGENT_API_URL = "https://us-central1-bol-line-bot-3.cloudfunctions.net/generate_agent_schedule";
+export const AGENT_API_URL = "https://bol-scheduler-agnet-129834734368.asia-east1.run.app";

@@ -3084,6 +3084,23 @@ function setupAgentSidebar() {
         });
     }
 
+    // 排班規則收合/展開
+    const rulesToggle = document.getElementById('agentRulesToggle');
+    const rulesContent = document.getElementById('agentRulesContent');
+    const rulesIcon = document.getElementById('agentRulesIcon');
+
+    if (rulesToggle && rulesContent && rulesIcon) {
+        rulesToggle.addEventListener('click', () => {
+            if (rulesContent.style.display === 'none') {
+                rulesContent.style.display = 'block';
+                rulesIcon.textContent = '▼';
+            } else {
+                rulesContent.style.display = 'none';
+                rulesIcon.textContent = '▶';
+            }
+        });
+    }
+
     // CSV 上傳
     const csvInput = document.getElementById('csvFileInput');
     const attachmentPreview = document.getElementById('attachmentPreview');
@@ -3233,11 +3250,37 @@ async function sendAgentRequest() {
         maxRoles: document.getElementById('ruleMaxRoles').checked
     };
 
+    // 取得歷史訊息對話紀錄
+    const chatHistory = [];
+    document.querySelectorAll('#agentChatArea .agent-msg').forEach(msg => {
+        // 排除剛才由這次 input 觸發的 UI message，因為 prompt 已經傳了
+        if (msg.textContent !== prompt) {
+            chatHistory.push({
+                role: msg.classList.contains('user') ? 'user' : 'assistant',
+                content: msg.textContent
+            });
+        }
+    });
+
+    // 複製目前的 scheduleData，若有 pendingChanges 則先行合併，讓 LLM 基於最新的「草稿」繼續修改
+    let effectiveScheduleData = JSON.parse(JSON.stringify(scheduleData));
+    if (pendingAgentChanges) {
+        Object.entries(pendingAgentChanges).forEach(([date, services]) => {
+            const row = effectiveScheduleData.find(r => r.date === date);
+            if (row) {
+                Object.entries(services).forEach(([service, change]) => {
+                    row[service] = [...change.new];
+                });
+            }
+        });
+    }
+
     const payload = {
         prompt,
-        currentSchedule: JSON.stringify({ scheduleData, serviceItems, nonUserColumns }),
+        currentSchedule: JSON.stringify({ scheduleData: effectiveScheduleData, serviceItems, nonUserColumns }),
         selectedModel,
-        activeRules
+        activeRules,
+        chatHistory
     };
 
     if (attachedCsvText) payload.attachedCsvText = attachedCsvText;
@@ -3278,10 +3321,12 @@ async function sendAgentRequest() {
             hideAgentLoading();
 
             if (!validation.valid) {
-                addChatMessage(`已產生排班建議（但有 ${validation.warnings.length} 項規則警告）`, 'assistant');
+                // 如果有警告，優先顯示警告資訊
+                addChatMessage((result.explanation || '已產生排班建議') + `（但有 ${validation.warnings.length} 項規則警告）`, 'assistant');
                 validation.warnings.forEach(w => addChatMessage(w.message, 'error'));
             } else {
-                addChatMessage('已產生排班建議，請檢視表格中的變更。', 'assistant');
+                // 有 explanation 就顯示 explanation，否則顯示預設字眼
+                addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant');
             }
 
             setPendingChanges(result.scheduleData);
@@ -3419,28 +3464,54 @@ function injectPendingHighlights() {
             );
             if (!cell) return;
 
-            const hasOld = change.old.length > 0;
-            const hasNew = change.new.length > 0;
+            // 取得所有涉入的服事人員 (舊的 + 新的) 並去除重複
+            const allPersons = Array.from(new Set([...change.old, ...change.new]));
 
-            if (!hasOld && hasNew) {
-                cell.classList.add('pending-add');
-            } else if (hasOld && !hasNew) {
-                cell.classList.add('pending-remove');
-            } else {
-                cell.classList.add('pending-modify');
-            }
+            // 清空儲存格內容 (刪除原本的 chips 或 placeholder)
+            cell.innerHTML = '';
+            cell.classList.remove('empty');
+            // 加入 pending 統一的外框樣式（黃色底）
+            cell.classList.add('pending-modify');
 
-            const previewDiv = document.createElement('div');
-            previewDiv.className = 'pending-preview';
-            previewDiv.style.cssText = 'font-size: 11px; color: #16a34a; margin-top: 4px; font-style: italic;';
-            previewDiv.textContent = hasNew ? `→ ${change.new.join('/')}` : '→ (清空)';
-            cell.appendChild(previewDiv);
+            // 重建 person-chips 容器
+            const chipsContainer = document.createElement('div');
+            chipsContainer.className = 'person-chips';
 
+            allPersons.forEach(person => {
+                const isOld = change.old.includes(person);
+                const isNew = change.new.includes(person);
+
+                const chip = document.createElement('div');
+                chip.className = 'person-chip';
+                chip.textContent = person;
+
+                if (isOld && !isNew) {
+                    // 原本有但現在被刪除 -> 紅色背景
+                    chip.style.backgroundColor = '#ef4444';
+                    chip.style.textDecoration = 'line-through';
+                    chip.style.opacity = '0.9';
+                } else if (!isOld && isNew) {
+                    // 原本沒有但新增的 -> 綠色背景
+                    chip.style.backgroundColor = '#22c55e';
+                } else {
+                    // 沒變動的 -> 保持原本顏色
+                    chip.style.backgroundColor = personColorMap.get(person) || '#ccc';
+                }
+                
+                // 為了避免點擊 chip 還是會觸發 cell click，阻止冒泡
+                chip.addEventListener('click', (e) => e.stopPropagation());
+
+                chipsContainer.appendChild(chip);
+            });
+
+            cell.appendChild(chipsContainer);
+
+            // 加入 Accept / Reject 按鈕，並加上 event.stopPropagation()
             const btnsDiv = document.createElement('div');
             btnsDiv.className = 'cell-review-btns';
             btnsDiv.innerHTML = `
-                <button class="cell-review-btn accept" onclick="acceptCellChange('${date}', '${service}')">✅</button>
-                <button class="cell-review-btn reject" onclick="rejectCellChange('${date}', '${service}')">❌</button>
+                <button class="cell-review-btn accept" onclick="event.stopPropagation(); acceptCellChange('${date}', '${service}')">✅</button>
+                <button class="cell-review-btn reject" onclick="event.stopPropagation(); rejectCellChange('${date}', '${service}')">❌</button>
             `;
             cell.appendChild(btnsDiv);
         });
