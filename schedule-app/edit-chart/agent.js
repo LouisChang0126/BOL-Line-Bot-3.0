@@ -1,8 +1,10 @@
 import { 
     scheduleData, serviceItems, nonUserColumns, personColorMap,
     saveSchedule, addNewRow, deleteLastRow, doAddServiceItem, deleteServiceItem,
-    renderTable, pushHistory, updateEditDifference, updateStatus
+    pushHistory, updateEditDifference, updateStatus
 } from './app.js';
+
+import { renderTable } from './ui.js';
 
 // ===========================
 // Agent 排班副駕功能

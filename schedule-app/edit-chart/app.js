@@ -1,6 +1,17 @@
 // --- 引入 Agent 功能 ---
 import { initAgentFeature, injectPendingHighlights, showModalAlert } from './agent.js';
 
+// --- 引入 UI 渲染與彈窗 ---
+import {
+    renderTable, renderTableHead, renderTableBody,
+    showAddColumnModal, updateAddColTypeUI,
+    openEditServiceModal,
+    openEditPersonModal, renderPersonDropdown, renderCurrentPersonChips, renderInfoInputs,
+    renderDisplayConfigModal,
+    setUIContext,
+    showConfirm
+} from './ui.js';
+
 // ===========================
 // 全域變數
 // ===========================
@@ -11,8 +22,7 @@ let showingPast = false; // 是否顯示過去資料
 export let serviceItems = []; // 服事項目列表
 export let nonUserColumns = []; // 資訊欄位列表（不包含人名的欄位）
 let allPersonNames = new Set(); // 所有出現過的人名
-let currentEditingCell = null; // 目前編輯的儲存格
-let currentEditingServiceName = null; // 目前編輯的服事項目名稱
+let currentEditingCell = null; // 目前編輯的儲存格（ui.js 開啟 modal 時也透過 window.setCurrentEditingCell 同步）
 let displayConfig = null; // 服事項目分組顯示設定
 
 // 最大顯示/新增限制
@@ -106,6 +116,9 @@ async function initApp() {
     // 初始化分組編輯功能
     initDisplayConfigEditor();
     await loadDisplayConfig();
+
+    // 初始同步 UI 狀態
+    syncUIContext();
 
     updateStatus('就緒');
     console.log('應用程式初始化完成');
@@ -279,6 +292,7 @@ async function togglePastData() {
         await loadPastData();
     }
     showingPast = !showingPast;
+    syncUIContext();
     updateShowPastButton();
     renderTable();
 }
@@ -355,272 +369,9 @@ async function deleteSchedule(dateStr) {
 }
 
 // ===========================
-// 表格渲染
+// 表格渲染 — 已移至 ui.js，由此重新匯出
 // ===========================
-export function renderTable() {
-    renderTableHead();
-    renderTableBody();
-
-    // 注入 Agent 差異高亮（若有由 agent.js 匯入）
-    if (typeof injectPendingHighlights === 'function') {
-        injectPendingHighlights();
-    }
-}
-
-function renderTableHead() {
-    const thead = document.getElementById('tableHead');
-
-    let html = '<tr>';
-    html += '<th class="date-header">日期</th>';
-
-    serviceItems.forEach((item, index) => {
-        html += `<th class="service-header" 
-                    draggable="true" 
-                    data-service="${item}" 
-                    data-index="${index}">
-      <span class="service-header-text service-header-editable" data-service="${item}">${item}</span>
-    </th>`;
-    });
-
-    html += '</tr>';
-    thead.innerHTML = html;
-
-    // 設定服事項目名稱點擊編輯事件（類似日期）
-    document.querySelectorAll('.service-header-editable').forEach(span => {
-        span.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const serviceName = e.target.dataset.service;
-            openEditServiceModal(serviceName);
-        });
-    });
-
-    // 設定服事標題拖拉排序事件
-    setupServiceHeaderDragAndDrop();
-}
-
-// 服事標題拖拉排序
-function setupServiceHeaderDragAndDrop() {
-    const headers = document.querySelectorAll('.service-header[draggable="true"]');
-
-    let draggedHeader = null;
-    let draggedIndex = null;
-
-    headers.forEach(header => {
-        header.addEventListener('dragstart', (e) => {
-            // 如果是從編輯文字或刪除按鈕開始拖拉，不處理
-            if (e.target.closest('.service-header-editable') || e.target.closest('.delete-service-btn')) {
-                e.preventDefault();
-                return;
-            }
-            draggedHeader = header;
-            draggedIndex = parseInt(header.dataset.index);
-            header.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', header.dataset.service);
-        });
-
-        header.addEventListener('dragend', (e) => {
-            header.classList.remove('dragging');
-            headers.forEach(h => h.classList.remove('drag-over'));
-        });
-
-        header.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (header !== draggedHeader) {
-                header.classList.add('drag-over');
-            }
-        });
-
-        header.addEventListener('dragleave', (e) => {
-            header.classList.remove('drag-over');
-        });
-
-        header.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            header.classList.remove('drag-over');
-
-            if (!draggedHeader || draggedHeader === header) return;
-
-            const targetIndex = parseInt(header.dataset.index);
-
-            if (draggedIndex === targetIndex) return;
-
-            updateStatus('移動服事項目中...');
-
-            try {
-                // 重新排序 serviceItems
-                const draggedService = serviceItems[draggedIndex];
-                serviceItems.splice(draggedIndex, 1);
-                serviceItems.splice(targetIndex, 0, draggedService);
-
-                // 儲存新順序到 metadata
-                await saveMetadata();
-
-                pushHistory();
-                updateEditDifference();
-
-                // 重新渲染表格
-                renderTable();
-                updateStatus('服事項目順序已更新');
-
-            } catch (error) {
-                console.error('移動服事項目失敗:', error);
-                alert('移動服事項目失敗');
-                updateStatus('就緒');
-            }
-
-            draggedHeader = null;
-            draggedIndex = null;
-        });
-    });
-}
-
-function renderTableBody() {
-    const tbody = document.getElementById('tableBody');
-
-    // 決定要顯示的資料
-    let dataToRender = [];
-    if (showingPast && pastData.length > 0) {
-        dataToRender = [...pastData, ...scheduleData];
-    } else {
-        dataToRender = scheduleData;
-    }
-
-    let html = '';
-    dataToRender.forEach((row, rowIndex) => {
-        // 過去資料添加淡化樣式
-        const isPast = showingPast && rowIndex < pastData.length;
-        const rowClass = isPast ? 'style="opacity: 0.6; background: #f8fafc;"' : '';
-
-        html += `<tr ${rowClass}>`;
-
-        // 日期欄位（過去資料不可編輯）
-        if (isPast) {
-            html += `<td>
-              <div class="date-cell" style="cursor: default;">
-                ${row.date}
-              </div>
-            </td>`;
-        } else {
-            // 未來資料也暫時禁用編輯日期功能
-            html += `<td>
-              <div class="date-cell" style="cursor: default;">
-                ${row.date}
-              </div>
-            </td>`;
-            /* TODO: 編輯日期功能暫時註解
-            html += `<td>
-              <div class="date-cell date-cell-editable" data-index="${rowIndex}">
-                ${row.date}
-              </div>
-            </td>`;
-            */
-        }
-
-        // 服事項目欄位
-        serviceItems.forEach(item => {
-            const persons = row[item] || [];
-            const isEmpty = persons.length === 0;
-
-            // 過去資料不可編輯
-            if (isPast) {
-                html += `<td class="service-cell ${isEmpty ? 'empty' : ''}" style="cursor: default;">`;
-                if (!isEmpty) {
-                    html += '<div class="person-chips">';
-                    persons.forEach((person, personIndex) => {
-                        const chipColor = getPersonColor(person);
-                        html += `<div class="person-chip" style="background: ${chipColor}; cursor: default;">
-                             ${person}
-                           </div>`;
-                    });
-                    html += '</div>';
-                }
-                html += '</td>';
-            } else {
-                html += `<td class="service-cell ${isEmpty ? 'empty' : ''}" 
-                       data-date="${row.date}" 
-                       data-service="${item}"
-                       data-droppable="true">`;
-
-                if (isEmpty) {
-                    html += '<div class="add-person-placeholder">＋</div>';
-                } else {
-                    html += '<div class="person-chips">';
-                    persons.forEach((person, personIndex) => {
-                        const chipColor = getPersonColor(person);
-                        html += `<div class="person-chip" 
-                            draggable="true"
-                            data-date="${row.date}"
-                            data-service="${item}"
-                            data-person="${person}"
-                            data-index="${personIndex}"
-                            style="background: ${chipColor};">
-                         ${person}
-                       </div>`;
-                    });
-                    html += '</div>';
-                }
-
-                html += '</td>';
-            }
-        });
-
-        html += '</tr>';
-    });
-
-    // 在表格最後添加操作按鈕行
-    const colSpan = serviceItems.length + 1; // 日期欄 + 服事項目欄
-    html += `<tr class="table-action-row">
-        <td colspan="${colSpan}">
-            <div class="table-action-buttons">
-                <button class="btn btn-primary" id="addRowBtn">
-                    ➕ 新增一週
-                </button>
-                <button class="btn btn-danger" id="deleteLastRowBtn">
-                    ➖ 刪除最後一週
-                </button>
-            </div>
-        </td>
-    </tr>`;
-
-    tbody.innerHTML = html;
-
-    // 設定表格內操作按鈕事件
-    const addRowBtn = document.getElementById('addRowBtn');
-    const deleteLastRowBtn = document.getElementById('deleteLastRowBtn');
-    if (addRowBtn) {
-        addRowBtn.addEventListener('click', addNewRow);
-    }
-    if (deleteLastRowBtn) {
-        deleteLastRowBtn.addEventListener('click', deleteLastRow);
-    }
-
-    // 設定服事欄位點擊事件（只對未來資料）
-    document.querySelectorAll('.service-cell[data-date]').forEach(cell => {
-        cell.addEventListener('click', (e) => {
-            // 多格選取後不觸發編輯彈窗
-            if (multiSelectStarted || multiSelectedCells.length > 0) {
-                multiSelectStarted = false;
-                return;
-            }
-            if (!e.target.closest('.person-chip')) {
-                const date = cell.dataset.date;
-                const service = cell.dataset.service;
-                openEditPersonModal(date, service);
-            }
-        });
-    });
-
-    // 設定拖拉事件
-    setupDragAndDrop();
-
-    // 設定右鍵選單事件
-    setupContextMenu();
-
-    // 設定多格選取事件
-    setupMultiCellSelection();
-}
+export { renderTable, renderTableHead, renderTableBody };
 
 // ===========================
 // 日期管理
@@ -681,8 +432,8 @@ export async function deleteLastRow(skipConfirm = false) {
     }
 
     if (!skipConfirm) {
-        const confirm = window.confirm('確定要刪除最後一週的資料嗎？');
-        if (!confirm) return;
+        const confirmResult = await showConfirm('確定要刪除最後一週的資料嗎？');
+        if (!confirmResult) return;
     }
 
     updateStatus('刪除中...');
@@ -707,65 +458,6 @@ export async function deleteLastRow(skipConfirm = false) {
 // ===========================
 // 服事項目管理
 // ===========================
-// 通用：開啟自訂輸入 Modal
-function showAddColumnModal() {
-    const modal = document.getElementById('addColumnModal');
-    const input = document.getElementById('addColumnInput');
-    const confirmBtn = document.getElementById('addColumnConfirmBtn');
-
-    // 重設為「服事項目」選項並更新樣式
-    document.getElementById('addColTypeService').checked = true;
-    updateAddColTypeUI();
-
-    input.value = '';
-    modal.classList.remove('hidden');
-    setTimeout(() => input.focus(), 50);
-
-    const onEnter = (e) => {
-        if (e.key === 'Enter') confirmBtn.click();
-    };
-    input.addEventListener('keydown', onEnter);
-
-    const onConfirm = () => {
-        const mode = document.querySelector('input[name="addColType"]:checked')?.value || 'service';
-        const name = input.value.trim();
-        input.removeEventListener('keydown', onEnter);
-        confirmBtn.removeEventListener('click', onConfirm);
-        modal.classList.add('hidden');
-
-        if (!name) return;
-
-        if (name.includes('|')) {
-            showModalAlert('名稱不能包含 "|" 符號');
-            return;
-        }
-
-        if (serviceItems.includes(name)) {
-            const msg = mode === 'service' ? '此服事項目已存在' : '此欄位名稱已存在';
-            showModalAlert(msg);
-            return;
-        }
-
-        if (mode === 'service') {
-            doAddServiceItem(name);
-        } else {
-            doAddInfoColumn(name);
-        }
-    };
-    confirmBtn.addEventListener('click', onConfirm);
-}
-
-// Radio 按鈕的 active 樣式同步
-function updateAddColTypeUI() {
-    const serviceLabel = document.getElementById('addColTypeServiceBtn');
-    const infoLabel = document.getElementById('addColTypeInfoBtn');
-    if (!serviceLabel || !infoLabel) return;
-    const isService = document.getElementById('addColTypeService').checked;
-    serviceLabel.classList.toggle('btn-primary', isService);
-    serviceLabel.classList.toggle('btn-secondary', !isService);
-    infoLabel.classList.toggle('btn-primary', !isService);
-    infoLabel.classList.toggle('btn-secondary', isService);
-}
 
 
 
@@ -831,164 +523,11 @@ async function doAddInfoColumn(trimmedName) {
     }
 }
 
-function addServiceItem() { showAddColumnModal(); }
-function addInfoColumn() { showAddColumnModal(); }
-
-
-function openEditServiceModal(serviceName) {
-    currentEditingServiceName = serviceName;
-    document.getElementById('serviceNameInput').value = serviceName;
-    // 設定 checkbox 狀態
-    const isInfoColumn = nonUserColumns.includes(serviceName);
-    document.getElementById('isInfoColumnCheckbox').checked = isInfoColumn;
-    document.getElementById('editServiceModal').classList.remove('hidden');
-}
-
-document.getElementById('saveServiceBtn').addEventListener('click', async () => {
-    const newName = document.getElementById('serviceNameInput').value.trim();
-    const isInfoColumn = document.getElementById('isInfoColumnCheckbox').checked;
-
-    if (!newName) {
-        alert('請輸入服事項目名稱');
-        return;
-    }
-
-    if (newName.includes('|')) {
-        alert('名稱不能包含 "|" 符號');
-        return;
-    }
-
-    const nameChanged = newName !== currentEditingServiceName;
-
-    if (nameChanged && serviceItems.includes(newName)) {
-        alert('此服事項目名稱已存在');
-        return;
-    }
-
-    updateStatus('更新服事項目中...');
-
-    try {
-        const oldName = currentEditingServiceName;
-
-        // 更新 nonUserColumns
-        const wasInfoColumn = nonUserColumns.includes(oldName);
-        if (isInfoColumn && !wasInfoColumn) {
-            // 新增到 nonUserColumns
-            nonUserColumns.push(nameChanged ? newName : oldName);
-        } else if (!isInfoColumn && wasInfoColumn) {
-            // 從 nonUserColumns 移除
-            const idx = nonUserColumns.indexOf(oldName);
-            if (idx > -1) nonUserColumns.splice(idx, 1);
-        } else if (nameChanged && wasInfoColumn) {
-            // 名稱改變，更新 nonUserColumns 中的名稱
-            const idx = nonUserColumns.indexOf(oldName);
-            if (idx > -1) nonUserColumns[idx] = newName;
-        }
-
-        if (nameChanged) {
-            // 更新服事項目列表
-            const index = serviceItems.indexOf(oldName);
-            serviceItems[index] = newName;
-
-            // 同步更新 displayConfig 中的項目名稱
-            if (displayConfig && displayConfig.groups) {
-                // 更新所有群組中的項目
-                displayConfig.groups.forEach(group => {
-                    if (group.items && Array.isArray(group.items)) {
-                        const itemIndex = group.items.indexOf(oldName);
-                        if (itemIndex > -1) {
-                            group.items[itemIndex] = newName;
-                        }
-                    }
-                });
-
-                // 更新隱藏列表中的項目
-                if (displayConfig.hidden && Array.isArray(displayConfig.hidden)) {
-                    const hiddenIndex = displayConfig.hidden.indexOf(oldName);
-                    if (hiddenIndex > -1) {
-                        displayConfig.hidden[hiddenIndex] = newName;
-                    }
-                }
-            }
-
-            // 更新所有資料
-            const updates = [];
-            scheduleData.forEach(row => {
-                row[newName] = row[oldName] || [];
-                delete row[oldName];
-
-                const data = { ...row };
-                delete data.date;
-                updates.push(saveSchedule(row.date, data));
-            });
-
-            // 儲存 metadata
-            updates.push(saveMetadata());
-
-            // 同步更新 users collection 的 serve_types
-            try {
-                const { collection, getDocs, query, where, doc, setDoc } = window.firestore;
-                const db = window.db;
-                const COLLECTION_NAME = window.COLLECTION_NAME;
-
-                // 只撈出有該崇拜 serve_types 的 users
-                const usersQuery = query(
-                    collection(db, 'users'),
-                    where(`serve_types.${COLLECTION_NAME}`, '!=', null)
-                );
-                const usersSnapshot = await getDocs(usersQuery);
-                usersSnapshot.forEach(docRef => {
-                    const userData = docRef.data();
-                    console.log(userData);
-
-                    const serveTypes = userData.serve_types;
-                    const arr = serveTypes[COLLECTION_NAME];
-                    if (!Array.isArray(arr) || !arr.includes(oldName)) return;
-
-                    // 有此服事名稱，替換為新名稱
-                    updates.push(setDoc(doc(db, 'users', docRef.id), {
-                        ...userData,
-                        serve_types: {
-                            ...serveTypes,
-                            [COLLECTION_NAME]: arr.map(s => s === oldName ? newName : s)
-                        }
-                    }));
-                });
-            } catch (err) {
-                console.warn('更新 users serve_types 失敗:', err);
-            }
-
-            await Promise.all(updates);
-        } else {
-            // 只有 checkbox 變更，只需儲存 metadata
-            await saveMetadata();
-
-            // 刷新管理使用者按鈕警示
-            checkMissingUsers();
-        }
-
-        renderTable();
-        closeModal('editServiceModal');
-        updateStatus('服事項目已更新');
-
-    } catch (error) {
-        console.error('更新服事項目失敗:', error);
-        alert('更新服事項目失敗');
-        updateStatus('就緒');
-    }
-});
-
-// 刪除服事項目按鈕事件
-document.getElementById('deleteServiceBtn').addEventListener('click', () => {
-    if (currentEditingServiceName) {
-        deleteServiceItem(currentEditingServiceName);
-    }
-});
 
 export async function deleteServiceItem(serviceName, skipConfirm = false) {
     if (!skipConfirm) {
-        const confirm = window.confirm(`確定要刪除服事項目「${serviceName}」嗎？這將刪除所有相關資料。`);
-        if (!confirm) return;
+        const confirmResult = await showConfirm(`確定要刪除服事項目「${serviceName}」嗎？這將刪除所有相關資料。`);
+        if (!confirmResult) return;
     }
 
     updateStatus('刪除服事項目中...');
@@ -1055,250 +594,10 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
 // ===========================
 // 人員管理
 // ===========================
-function openEditPersonModal(date, service) {
-    currentEditingCell = { date, service };
+// openEditPersonModal / renderPersonDropdown / renderCurrentPersonChips / renderInfoInputs
+// 已移至 ui.js，此處保留資料操作函式並透過 window 橋接供 ui.js 呼叫
 
-    // 判斷是否為資訊欄位
-    const isInfoColumn = nonUserColumns.includes(service);
 
-    // 顯示目前編輯的日期與服事項目
-    document.getElementById('editPersonModalSubtitle').textContent = `${date} - ${service}`;
-
-    // 取得 modal 內的兩個 label 元素
-    const formGroups = document.getElementById('editPersonModal').querySelectorAll('.form-group');
-    const firstLabel = formGroups[0]?.querySelector('label');
-    const secondLabel = formGroups[1]?.querySelector('label');
-
-    if (isInfoColumn) {
-        // 資訊欄位模式：隱藏人員選擇區域
-        document.getElementById('personSelectContainer').style.display = 'none';
-        if (firstLabel) firstLabel.textContent = '資訊內容';
-        if (secondLabel) secondLabel.style.display = 'none';
-
-        // 渲染資訊欄位的輸入框
-        renderInfoInputs();
-    } else {
-        // 服事項目模式：顯示人員選擇區域
-        document.getElementById('personSelectContainer').style.display = 'block';
-        if (firstLabel) firstLabel.textContent = '選擇現有人員或輸入新人員';
-        if (secondLabel) {
-            secondLabel.style.display = 'block';
-            secondLabel.textContent = '目前服事人員';
-        }
-
-        // 顯示所有人名下拉選單
-        renderPersonDropdown();
-
-        // 顯示目前人員
-        renderCurrentPersonChips();
-
-        document.getElementById('newPersonInput').value = '';
-    }
-
-    document.getElementById('editPersonModal').classList.remove('hidden');
-}
-
-function renderPersonDropdown() {
-    const dropdown = document.getElementById('personDropdown');
-
-    // 取得目前服事的人員列表
-    const { date, service } = currentEditingCell;
-    const row = scheduleData.find(r => r.date === date);
-    const currentPersons = row[service] || [];
-
-    // 收集在其他週有出現在該服事項目過的人
-    const serviceVeterans = new Set();
-    scheduleData.forEach(r => {
-        if (r.date !== date && r[service]) {
-            r[service].forEach(name => serviceVeterans.add(name));
-        }
-    });
-
-    // 過濾條件：
-    // 1. 不在目前服事的人
-    const availableNames = Array.from(allPersonNames)
-        .filter(name => !currentPersons.includes(name));
-
-    // 排序：在該服事項目出現過的人排前面，其餘按字母排序
-    availableNames.sort((a, b) => {
-        const aIsVeteran = serviceVeterans.has(a);
-        const bIsVeteran = serviceVeterans.has(b);
-
-        if (aIsVeteran && !bIsVeteran) return -1;
-        if (!aIsVeteran && bIsVeteran) return 1;
-        return a.localeCompare(b, 'zh-TW');
-    });
-
-    if (availableNames.length === 0) {
-        if (allPersonNames.size === 0) {
-            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">尚無人員記錄，請輸入新人員</div>';
-        } else {
-            dropdown.innerHTML = '<div class="text-muted text-center" style="padding: 8px;">無可用人員，請輸入新人員</div>';
-        }
-        return;
-    }
-
-    let html = '';
-    availableNames.forEach(name => {
-        const chipColor = getPersonColor(name);
-        const isVeteran = serviceVeterans.has(name);
-        html += `<div class="person-chip-selectable${isVeteran ? ' veteran' : ''}" data-person="${name}" style="background: ${chipColor};">${name}</div>`;
-    });
-
-    dropdown.innerHTML = html;
-
-    // 設定點擊事件
-    dropdown.querySelectorAll('.person-chip-selectable').forEach(item => {
-        item.addEventListener('click', (e) => {
-            const person = e.target.dataset.person;
-            if (person) {
-                addPersonToCell(currentEditingCell.date, currentEditingCell.service, person);
-            }
-        });
-    });
-}
-
-function renderCurrentPersonChips() {
-    const { date, service } = currentEditingCell;
-    const row = scheduleData.find(r => r.date === date);
-    const persons = row[service] || [];
-
-    const container = document.getElementById('currentPersonChips');
-
-    if (persons.length === 0) {
-        container.innerHTML = '<div class="text-muted">尚未指派人員</div>';
-        return;
-    }
-
-    let html = '';
-    persons.forEach(person => {
-        const chipColor = getPersonColor(person);
-        html += `<div class="person-chip" style="background: ${chipColor};">
-               ${person}
-               <button class="remove-btn" data-person="${person}">×</button>
-             </div>`;
-    });
-
-    container.innerHTML = html;
-
-    // 設定刪除事件
-    container.querySelectorAll('.remove-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const person = e.target.dataset.person;
-            removePerson(date, service, person);
-            renderCurrentPersonChips();
-        });
-    });
-}
-
-// 渲染資訊欄位的輸入框（適用於非人員欄位）
-function renderInfoInputs() {
-    const { date, service } = currentEditingCell;
-    const row = scheduleData.find(r => r.date === date);
-    const items = row[service] || [];
-
-    const container = document.getElementById('currentPersonChips');
-
-    let html = '';
-
-    // 為每個現有項目創建輸入框和刪除按鈕
-    items.forEach((item, index) => {
-        html += `
-            <div class="info-input-row">
-                <input type="text" 
-                       class="info-text-input" 
-                       data-index="${index}" 
-                       value="${item}" 
-                       placeholder="輸入資訊...">
-                <button class="remove-info-btn" data-index="${index}">×</button>
-            </div>
-        `;
-    });
-
-    // 新增一個空的輸入框和「+」按鈕
-    html += `
-        <div class="info-input-row">
-            <input type="text" 
-                   class="info-text-input" 
-                   id="newInfoInput" 
-                   placeholder="輸入新資訊...">
-            <button class="add-info-btn" id="addInfoBtn">+</button>
-        </div>
-    `;
-
-    container.innerHTML = html;
-
-    // 為現有項目的輸入框設定事件（實時更新）
-    container.querySelectorAll('.info-text-input:not(#newInfoInput)').forEach(input => {
-        input.addEventListener('change', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            const newValue = e.target.value.trim();
-
-            if (newValue === '') {
-                // 如果清空，則刪除該項
-                removeInfoItem(date, service, index);
-                renderInfoInputs();
-            } else {
-                // 更新項目
-                updateInfoItem(date, service, index, newValue);
-            }
-        });
-    });
-
-    // 設定刪除按鈕事件
-    container.querySelectorAll('.remove-info-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const index = parseInt(e.target.dataset.index);
-            removeInfoItem(date, service, index);
-            renderInfoInputs();
-        });
-    });
-
-    // 設定新增按鈕事件
-    const addBtn = document.getElementById('addInfoBtn');
-    if (addBtn) {
-        addBtn.addEventListener('click', () => {
-            const newInput = document.getElementById('newInfoInput');
-            const value = newInput.value.trim();
-
-            if (!value) {
-                alert('請輸入資訊');
-                return;
-            }
-
-            addInfoItem(date, service, value);
-            renderInfoInputs();
-        });
-    }
-
-    // 為新資訊輸入框設定 Enter 鍵快捷鍵
-    const newInput = document.getElementById('newInfoInput');
-    if (newInput) {
-        newInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                document.getElementById('addInfoBtn').click();
-            }
-        });
-    }
-}
-
-document.getElementById('addPersonChipBtn').addEventListener('click', () => {
-    const name = document.getElementById('newPersonInput').value.trim();
-    if (!name) {
-        alert('請輸入姓名');
-        return;
-    }
-
-    if (name.includes('|')) {
-        alert('姓名不能包含 "|" 符號');
-        return;
-    }
-
-    const { date, service } = currentEditingCell;
-    addPersonToCell(date, service, name);
-
-    document.getElementById('newPersonInput').value = '';
-});
 
 // 新增資訊項目
 async function addInfoItem(date, service, value) {
@@ -1392,8 +691,8 @@ export async function addPersonToCell(date, service, person) {
 
     // 更新顯示（只在編輯模態框開啟時才更新）
     if (currentEditingCell) {
-        renderCurrentPersonChips();
-        renderPersonDropdown();
+        renderCurrentPersonChips(currentEditingCell.date, currentEditingCell.service);
+        renderPersonDropdown(currentEditingCell.date, currentEditingCell.service);
     }
     renderTable();
 
@@ -2193,7 +1492,7 @@ function formatDateString(date) {
 }
 
 // 根據人名取得對應顏色
-function getPersonColor(personName) {
+export function getPersonColor(personName) {
     // 如果已經有快取的顏色，直接回傳
     if (personColorMap.has(personName)) {
         return personColorMap.get(personName);
@@ -2221,15 +1520,46 @@ export function updateStatus(text) {
     document.getElementById('statusText').textContent = text;
 }
 
-// 將需要被外部 debug 模組存取的函式掛到全域 window
+// ===========================
+// syncUIContext：每次可變狀態改變時，同步給 ui.js 的 setUIContext
+// ===========================
+function syncUIContext() {
+    setUIContext({
+        showingPast,
+        pastData,
+        currentEditingCell,
+        allPersonNames,
+        multiSelectStarted,
+        multiSelectedCells,
+        tempDisplayConfig
+    });
+}
+
+// 將需要被外部 debug 模組或 ui.js 存取的函式掛到全域 window
 window.updateStatus = updateStatus;
 window.setupEventListeners = typeof setupEventListeners !== 'undefined' ? setupEventListeners : undefined;
 window.setupPasteHandler = typeof setupPasteHandler !== 'undefined' ? setupPasteHandler : undefined;
-window.saveMetadata = typeof saveMetadata !== 'undefined' ? saveMetadata : undefined;
-window.createInitialData = typeof createInitialData !== 'undefined' ? createInitialData : undefined;
-window.parseDateString = typeof parseDateString !== 'undefined' ? parseDateString : undefined;
-window.renderTable = typeof renderTable !== 'undefined' ? renderTable : undefined;
+window.saveMetadata = saveMetadata;
+window.createInitialData = createInitialData;
+window.parseDateString = parseDateString;
+window.renderTable = renderTable;
 window.togglePastData = togglePastData;
+
+// ui.js 呼叫的資料操作橋接
+window.doAddInfoColumn = doAddInfoColumn;
+window.addInfoItem = addInfoItem;
+window.updateInfoItem = updateInfoItem;
+window.removeInfoItem = removeInfoItem;
+
+// ui.js 的 openEditPersonModal 需要同步 currentEditingCell 到 app.js
+window.setCurrentEditingCell = function (cell) {
+    currentEditingCell = cell;
+};
+
+// 設定服事標題拖拉排序橋接（供 ui.js renderTableBody 呼叫）
+window.setupDragAndDrop = setupDragAndDrop;
+window.setupContextMenu = setupContextMenu;
+window.setupMultiCellSelection = setupMultiCellSelection;
 
 window.closeModal = function (modalId) {
     document.getElementById(modalId).classList.add('hidden');
@@ -2257,6 +1587,173 @@ function setupEventListeners() {
             }
         });
     });
+
+    // --- 編輯服事項目 Modal 事件 ---
+    const saveServiceBtn = document.getElementById('saveServiceBtn');
+    if (saveServiceBtn) {
+        saveServiceBtn.addEventListener('click', async () => {
+            const newName = document.getElementById('serviceNameInput').value.trim();
+            const isInfoColumn = document.getElementById('isInfoColumnCheckbox').checked;
+
+            if (!newName) {
+                alert('請輸入服事項目名稱');
+                return;
+            }
+
+            if (newName.includes('|')) {
+                alert('名稱不能包含 "|" 符號');
+                return;
+            }
+
+            const nameChanged = newName !== window._currentEditingServiceName;
+
+            if (nameChanged && serviceItems.includes(newName)) {
+                alert('此服事項目名稱已存在');
+                return;
+            }
+
+            updateStatus('更新服事項目中...');
+
+            try {
+                const oldName = window._currentEditingServiceName;
+
+                // 更新 nonUserColumns
+                const wasInfoColumn = nonUserColumns.includes(oldName);
+                if (isInfoColumn && !wasInfoColumn) {
+                    // 新增到 nonUserColumns
+                    nonUserColumns.push(nameChanged ? newName : oldName);
+                } else if (!isInfoColumn && wasInfoColumn) {
+                    // 從 nonUserColumns 移除
+                    const idx = nonUserColumns.indexOf(oldName);
+                    if (idx > -1) nonUserColumns.splice(idx, 1);
+                } else if (nameChanged && wasInfoColumn) {
+                    // 名稱改變，更新 nonUserColumns 中的名稱
+                    const idx = nonUserColumns.indexOf(oldName);
+                    if (idx > -1) nonUserColumns[idx] = newName;
+                }
+
+                if (nameChanged) {
+                    // 更新服事項目列表
+                    const index = serviceItems.indexOf(oldName);
+                    serviceItems[index] = newName;
+
+                    // 同步更新 displayConfig 中的項目名稱
+                    if (displayConfig && displayConfig.groups) {
+                        // 更新所有群組中的項目
+                        displayConfig.groups.forEach(group => {
+                            if (group.items && Array.isArray(group.items)) {
+                                const itemIndex = group.items.indexOf(oldName);
+                                if (itemIndex > -1) {
+                                    group.items[itemIndex] = newName;
+                                }
+                            }
+                        });
+
+                        // 更新隱藏列表中的項目
+                        if (displayConfig.hidden && Array.isArray(displayConfig.hidden)) {
+                            const hiddenIndex = displayConfig.hidden.indexOf(oldName);
+                            if (hiddenIndex > -1) {
+                                displayConfig.hidden[hiddenIndex] = newName;
+                            }
+                        }
+                    }
+
+                    // 更新所有資料
+                    const updates = [];
+                    scheduleData.forEach(row => {
+                        row[newName] = row[oldName] || [];
+                        delete row[oldName];
+
+                        const data = { ...row };
+                        delete data.date;
+                        updates.push(saveSchedule(row.date, data));
+                    });
+
+                    // 儲存 metadata
+                    updates.push(saveMetadata());
+
+                    // 同步更新 users collection 的 serve_types
+                    try {
+                        const { collection, getDocs, query, where, doc, setDoc } = window.firestore;
+                        const db = window.db;
+                        const COLLECTION_NAME = window.COLLECTION_NAME;
+
+                        // 只撈出有該崇拜 serve_types 的 users
+                        const usersQuery = query(
+                            collection(db, 'users'),
+                            where(`serve_types.${COLLECTION_NAME}`, '!=', null)
+                        );
+                        const usersSnapshot = await getDocs(usersQuery);
+                        usersSnapshot.forEach(docRef => {
+                            const userData = docRef.data();
+                            const serveTypes = userData.serve_types;
+                            const arr = serveTypes[COLLECTION_NAME];
+                            if (!Array.isArray(arr) || !arr.includes(oldName)) return;
+
+                            // 有此服事名稱，替換為新名稱
+                            updates.push(setDoc(doc(db, 'users', docRef.id), {
+                                ...userData,
+                                serve_types: {
+                                    ...serveTypes,
+                                    [COLLECTION_NAME]: arr.map(s => s === oldName ? newName : s)
+                                }
+                            }));
+                        });
+                    } catch (err) {
+                        console.warn('更新 users serve_types 失敗:', err);
+                    }
+
+                    await Promise.all(updates);
+                } else {
+                    // 只有 checkbox 變更，只需儲存 metadata
+                    await saveMetadata();
+
+                    // 刷新管理使用者按鈕警示
+                    checkMissingUsers();
+                }
+
+                renderTable();
+                closeModal('editServiceModal');
+                updateStatus('服事項目已更新');
+
+            } catch (error) {
+                console.error('更新服事項目失敗:', error);
+                alert('更新服事項目失敗');
+                updateStatus('就緒');
+            }
+        });
+    }
+
+    const deleteServiceBtn = document.getElementById('deleteServiceBtn');
+    if (deleteServiceBtn) {
+        deleteServiceBtn.addEventListener('click', () => {
+            if (window._currentEditingServiceName) {
+                deleteServiceItem(window._currentEditingServiceName);
+            }
+        });
+    }
+
+    // --- 編輯人員 Modal 事件 ---
+    const addPersonChipBtn = document.getElementById('addPersonChipBtn');
+    if (addPersonChipBtn) {
+        addPersonChipBtn.addEventListener('click', () => {
+            const name = document.getElementById('newPersonInput').value.trim();
+            if (!name) {
+                alert('請輸入姓名');
+                return;
+            }
+
+            if (name.includes('|')) {
+                alert('姓名不能包含 "|" 符號');
+                return;
+            }
+
+            const cell = currentEditingCell;
+            if (cell) addPersonToCell(cell.date, cell.service, name);
+
+            document.getElementById('newPersonInput').value = '';
+        });
+    }
 }
 
 // ===========================
@@ -2592,11 +2089,9 @@ function initDisplayConfigEditor() {
 
 // 開啟編輯顯示欄位 Modal
 function openDisplayConfigModal() {
-    // 複製現有設定或建立預設設定
     if (displayConfig) {
         tempDisplayConfig = JSON.parse(JSON.stringify(displayConfig));
     } else {
-        // 預設：所有項目放入 ungrouped 組別
         tempDisplayConfig = {
             groups: [{
                 id: 'ungrouped',
@@ -2608,199 +2103,11 @@ function openDisplayConfigModal() {
         };
     }
 
+    // 同步 tempDisplayConfig 到 ui.js
+    syncUIContext();
+
     renderDisplayConfigModal();
     document.getElementById('displayConfigModal').classList.remove('hidden');
-}
-
-// 渲染分組編輯 Modal 內容
-function renderDisplayConfigModal() {
-    const groupsContainer = document.getElementById('displayConfigGroups');
-    const hiddenZoneItems = document.getElementById('hiddenZoneItems');
-
-    // 渲染群組
-    let groupsHtml = '';
-    tempDisplayConfig.groups.forEach((group, index) => {
-        const isUngrouped = group.id === 'ungrouped';
-        groupsHtml += `
-            <div class="group-container" data-group-id="${group.id}">
-                <div class="group-header">
-                    <input type="text" class="group-name-input" value="${group.name}" 
-                           onchange="updateGroupName('${group.id}', this.value)"
-                           ${isUngrouped ? 'disabled readonly style="background: #e5e7eb; cursor: not-allowed;"' : ''}>
-                    <label class="group-visibility-toggle" ${isUngrouped ? 'style="opacity: 0.5; pointer-events: none;"' : ''}>
-                        <input type="checkbox" ${group.defaultVisible ? 'checked' : ''} 
-                               onchange="toggleGroupVisibility('${group.id}', this.checked)"
-                               ${isUngrouped ? 'disabled' : ''}>
-                        預設顯示
-                    </label>
-                    ${!isUngrouped ? `<button class="group-delete-btn" onclick="deleteGroup('${group.id}')">🗑️</button>` : ''}
-                </div>
-                <div class="group-items" data-group-id="${group.id}"
-                     ondragover="handleDragOver(event)" 
-                     ondragleave="handleDragLeave(event)"
-                     ondrop="handleDrop(event, '${group.id}')">
-                    ${group.items.map(item => `
-                        <div class="draggable-service" draggable="true" 
-                             data-service="${item}"
-                             ondragstart="handleDragStart(event)"
-                             ondragend="handleDragEnd(event)">
-                            ${item}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    });
-    groupsContainer.innerHTML = groupsHtml;
-
-    // 渲染隱藏區域
-    let hiddenHtml = '';
-    tempDisplayConfig.hidden.forEach(item => {
-        hiddenHtml += `
-            <div class="draggable-service" draggable="true" 
-                 data-service="${item}"
-                 ondragstart="handleDragStart(event)"
-                 ondragend="handleDragEnd(event)">
-                ${item}
-            </div>
-        `;
-    });
-    hiddenZoneItems.innerHTML = hiddenHtml || '<div style="color: #94a3b8; font-size: 13px;">拖入不想顯示的服事項目</div>';
-
-    // 設定隱藏區域的拖放事件
-    hiddenZoneItems.ondragover = window.handleDragOver;
-    hiddenZoneItems.ondragleave = window.handleDragLeave;
-    hiddenZoneItems.ondrop = (e) => window.handleDrop(e, 'hidden');
-}
-
-// 拖拉開始
-window.handleDragStart = function (event) {
-    event.target.classList.add('dragging');
-    event.dataTransfer.setData('text/plain', event.target.dataset.service);
-    event.dataTransfer.effectAllowed = 'move';
-    // 記錄拖拉中的元素
-    window.draggingElement = event.target;
-}
-
-// 拖拉結束
-window.handleDragEnd = function (event) {
-    event.target.classList.remove('dragging');
-    window.draggingElement = null;
-    // 移除所有插入指示器
-    document.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
-}
-
-// 拖拉經過容器
-window.handleDragOver = function (event) {
-    event.preventDefault();
-    const container = event.currentTarget;
-    container.classList.add('drag-over');
-
-    // 移除此容器中的舊指示器
-    container.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
-
-    // 計算插入位置並顯示指示器
-    const draggables = Array.from(container.querySelectorAll('.draggable-service:not(.dragging)'));
-    const dropY = event.clientY;
-    const dropX = event.clientX;
-
-    let insertBefore = null;
-    let minDistance = Infinity;
-
-    for (const draggable of draggables) {
-        const rect = draggable.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        const distance = Math.abs(dropX - centerX) + Math.abs(dropY - centerY) * 0.5;
-
-        // 找到最近且在滑鼠右側的元素
-        if (dropX < centerX && distance < minDistance) {
-            minDistance = distance;
-            insertBefore = draggable;
-        }
-    }
-
-    // 創建插入指示器
-    const indicator = document.createElement('div');
-    indicator.className = 'drag-insert-indicator';
-
-    if (insertBefore) {
-        container.insertBefore(indicator, insertBefore);
-    } else {
-        container.appendChild(indicator);
-    }
-
-    // 記錄插入位置
-    container.insertBeforeElement = insertBefore;
-}
-
-// 拖拉離開
-window.handleDragLeave = function (event) {
-    event.currentTarget.classList.remove('drag-over');
-    event.currentTarget.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
-}
-
-// 放下處理
-window.handleDrop = function (event, targetGroupId) {
-    event.preventDefault();
-    const container = event.currentTarget;
-    container.classList.remove('drag-over');
-
-    // 移除指示器
-    container.querySelectorAll('.drag-insert-indicator').forEach(el => el.remove());
-
-    const serviceName = event.dataTransfer.getData('text/plain');
-    if (!serviceName) return;
-
-    // 取得插入位置
-    const insertBeforeElement = container.insertBeforeElement;
-    const insertBeforeService = insertBeforeElement ? insertBeforeElement.dataset.service : null;
-
-    // 從所有群組和隱藏區域移除此項目
-    tempDisplayConfig.groups.forEach(group => {
-        const index = group.items.indexOf(serviceName);
-        if (index > -1) {
-            group.items.splice(index, 1);
-        }
-    });
-    const hiddenIndex = tempDisplayConfig.hidden.indexOf(serviceName);
-    if (hiddenIndex > -1) {
-        tempDisplayConfig.hidden.splice(hiddenIndex, 1);
-    }
-
-    // 新增到目標群組的指定位置
-    if (targetGroupId === 'hidden') {
-        if (insertBeforeService) {
-            const idx = tempDisplayConfig.hidden.indexOf(insertBeforeService);
-            if (idx > -1) {
-                tempDisplayConfig.hidden.splice(idx, 0, serviceName);
-            } else {
-                tempDisplayConfig.hidden.push(serviceName);
-            }
-        } else {
-            tempDisplayConfig.hidden.push(serviceName);
-        }
-    } else {
-        const targetGroup = tempDisplayConfig.groups.find(g => g.id === targetGroupId);
-        if (targetGroup) {
-            if (insertBeforeService) {
-                const idx = targetGroup.items.indexOf(insertBeforeService);
-                if (idx > -1) {
-                    targetGroup.items.splice(idx, 0, serviceName);
-                } else {
-                    targetGroup.items.push(serviceName);
-                }
-            } else {
-                targetGroup.items.push(serviceName);
-            }
-        }
-    }
-
-    // 清除記錄
-    container.insertBeforeElement = null;
-
-    // 重新渲染
-    renderDisplayConfigModal();
 }
 
 // 新增群組
@@ -2814,42 +2121,6 @@ function addNewGroup() {
         items: [],
         defaultVisible: true
     });
-
-    renderDisplayConfigModal();
-}
-
-// 更新群組名稱
-window.updateGroupName = function (groupId, newName) {
-    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
-    if (group) {
-        group.name = newName;
-    }
-}
-
-// 切換群組預設顯示
-window.toggleGroupVisibility = function (groupId, visible) {
-    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
-    if (group) {
-        group.defaultVisible = visible;
-    }
-}
-
-// 刪除群組
-window.deleteGroup = function (groupId) {
-    const group = tempDisplayConfig.groups.find(g => g.id === groupId);
-    if (!group || group.id === 'ungrouped') return;
-
-    // 將此群組的項目移回 ungrouped
-    const ungrouped = tempDisplayConfig.groups.find(g => g.id === 'ungrouped');
-    if (ungrouped) {
-        ungrouped.items.push(...group.items);
-    }
-
-    // 移除群組
-    const index = tempDisplayConfig.groups.findIndex(g => g.id === groupId);
-    if (index > -1) {
-        tempDisplayConfig.groups.splice(index, 1);
-    }
 
     renderDisplayConfigModal();
 }

@@ -1200,7 +1200,7 @@
             }
             message += '\n\n確定要執行嗎？';
 
-            if (!confirm(message)) {
+            if (!await showConfirm(message)) {
                 return;
             }
 
@@ -1292,7 +1292,7 @@
         async function deleteUser() {
             if (!currentEditUser) return;
 
-            if (!confirm(`確定要刪除使用者「${currentEditUser}」嗎？`)) {
+            if (!await showConfirm(`確定要刪除使用者「${currentEditUser}」嗎？`)) {
                 return;
             }
 
@@ -1309,9 +1309,65 @@
             }
         }
 
+        /**
+         * 通用確認對話框
+         */
+        function showConfirm(message, title = '確認操作') {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                const titleEl = document.getElementById('confirmModalTitle');
+                const messageEl = document.getElementById('confirmModalMessage');
+                const confirmBtn = document.getElementById('confirmModalBtn');
+                const cancelBtn = modal.querySelector('.btn-secondary');
+                const closeBtn = modal.querySelector('.modal-close');
+
+                titleEl.textContent = title;
+                messageEl.textContent = message;
+                modal.classList.remove('hidden');
+
+                const onConfirm = () => {
+                    cleanup();
+                    resolve(true);
+                };
+
+                const onCancel = () => {
+                    cleanup();
+                    resolve(false);
+                };
+
+                const cleanup = () => {
+                    confirmBtn.removeEventListener('click', onConfirm);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    closeBtn.removeEventListener('click', onCancel);
+                    modal.classList.add('hidden');
+                };
+
+                confirmBtn.addEventListener('click', onConfirm);
+                cancelBtn.addEventListener('click', onCancel);
+                closeBtn.addEventListener('click', onCancel);
+            });
+        }
+
         init();
     </script>
 
+    <!-- 通用確認 Modal -->
+    <div class="modal-overlay hidden" id="confirmModal">
+        <div class="modal" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2 id="confirmModalTitle">確認操作</h2>
+                <button class="modal-close" onclick="closeModal('confirmModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmModalMessage" style="margin: 0; line-height: 1.5;"></p>
+            </div>
+            <div class="modal-footer"
+                style="padding-top: 12px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px;">
+                <button class="btn btn-secondary" onclick="closeModal('confirmModal')">取消</button>
+                <button class="btn btn-danger" id="confirmModalBtn">確認</button>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
