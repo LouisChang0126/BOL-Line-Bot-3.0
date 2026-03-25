@@ -332,112 +332,208 @@ export function hideAgentLoading() {
     if (loading) loading.remove();
 }
 
-// --- ScheduleValidator ---
-class ScheduleValidator {
-    constructor() { this.rules = []; }
-    addRule(name, checkFn) { this.rules.push({ name, checkFn }); }
-    validate(scheduleData, serviceItems, nonUserColumns, activeRules) {
-        const warnings = [];
-        const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
-        for (const rule of this.rules) {
-            if (activeRules[rule.name]) {
-                warnings.push(...rule.checkFn(scheduleData, userServiceItems, activeRules));
-            }
-        }
-        return { valid: warnings.length === 0, warnings };
-    }
+function buildScheduleIndex(rows) {
+    const index = new Map();
+    rows.forEach(row => {
+        if (row?.date) index.set(row.date, row);
+    });
+    return index;
 }
 
-const scheduleValidator = new ScheduleValidator();
+function buildChangedCellSet(baseScheduleData, nextScheduleData, userServiceItems) {
+    const changedCells = new Set();
+    const baseIndex = buildScheduleIndex(baseScheduleData);
+    const nextIndex = buildScheduleIndex(nextScheduleData);
+    const allDates = new Set([...baseIndex.keys(), ...nextIndex.keys()]);
 
-// 規則1: 連續兩週相同服事
-scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems, activeRules) => {
-    const warnings = [];
-    const consecutiveWeeks = Math.max(2, parseInt(activeRules?.consecutiveWeeks, 10) || 2);
-    if (scheduleData.length < consecutiveWeeks) return warnings;
-
-    for (let i = consecutiveWeeks - 1; i < scheduleData.length; i++) {
-        const windowRows = scheduleData.slice(i - consecutiveWeeks + 1, i + 1);
-        const startDate = windowRows[0].date;
-        const endDate = windowRows[windowRows.length - 1].date;
-
+    allDates.forEach(date => {
+        const baseRow = baseIndex.get(date) || {};
+        const nextRow = nextIndex.get(date) || {};
         userServiceItems.forEach(service => {
-            let common = new Set(windowRows[0][service] || []);
-            for (let w = 1; w < windowRows.length; w++) {
-                const currentSet = new Set(windowRows[w][service] || []);
-                common = new Set([...common].filter(name => currentSet.has(name)));
-                if (common.size === 0) break;
+            const baseValue = JSON.stringify(baseRow[service] || []);
+            const nextValue = JSON.stringify(nextRow[service] || []);
+            if (baseValue !== nextValue) {
+                changedCells.add(`${date}|${service}`);
             }
-
-            common.forEach(name => {
-                warnings.push({
-                    type: 'consecutive',
-                    message: `⚠️ ${name} 連續${consecutiveWeeks}週擔任「${service}」（${startDate} → ${endDate}）`,
-                    date: endDate,
-                    service,
-                    person: name
-                });
-            });
         });
+    });
+
+    return changedCells;
+}
+
+function toSortedArray(setObj) {
+    return Array.from(setObj || []).sort((a, b) => a.localeCompare(b));
+}
+
+function validateScopedChanges({
+    baseScheduleData,
+    nextScheduleData,
+    serviceItems,
+    nonUserColumns,
+    activeRules,
+    changedCells
+}) {
+    const warnings = [];
+    const validatedCellsByRule = {
+        consecutive: new Set(),
+        maxRoles: new Set(),
+        serviceKnownPeople: new Set()
+    };
+    const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
+    if (!changedCells || changedCells.size === 0) {
+        return {
+            valid: true,
+            warnings: [],
+            debug: {
+                changedCells: [],
+                validatedCells: {
+                    consecutive: [],
+                    maxRoles: [],
+                    serviceKnownPeople: []
+                }
+            }
+        };
     }
 
-    return warnings;
-});
-
-// 規則2: 單週最多 N 項服事
-scheduleValidator.addRule('maxRoles', (scheduleData, userServiceItems, activeRules) => {
-    const MAX_ROLES = Math.max(1, parseInt(activeRules?.maxRolesLimit, 10) || 3);
-    const warnings = [];
-    scheduleData.forEach(row => {
-        const counts = {};
-        userServiceItems.forEach(service => {
-            (row[service] || []).forEach(name => { counts[name] = (counts[name] || 0) + 1; });
-        });
-        Object.entries(counts).forEach(([name, count]) => {
-            if (count > MAX_ROLES) {
-                warnings.push({
-                    type: 'maxRoles',
-                    message: `⚠️ ${name} 在 ${row.date} 擔任了 ${count} 項服事（上限 ${MAX_ROLES}）`,
-                    date: row.date, person: name, count
-                });
-            }
-        });
-    });
-    return warnings;
-});
-
-// 規則3: 僅使用該服事歷史人員
-scheduleValidator.addRule('serviceKnownPeople', (nextScheduleData, userServiceItems) => {
-    const warnings = [];
-    const allowedByService = {};
-    userServiceItems.forEach(service => {
-        allowedByService[service] = new Set();
+    const nextIndex = buildScheduleIndex(nextScheduleData);
+    const changedByDate = new Map(); // date -> Set(service)
+    changedCells.forEach(key => {
+        const [date, service] = key.split('|');
+        if (!date || !service) return;
+        if (!changedByDate.has(date)) changedByDate.set(date, new Set());
+        changedByDate.get(date).add(service);
     });
 
-    scheduleData.forEach(row => {
-        userServiceItems.forEach(service => {
-            (row[service] || []).forEach(name => allowedByService[service].add(name));
-        });
-    });
+    // 規則1: 禁止連續 N 週同服事（只檢查包含變更格的視窗）
+    if (activeRules?.consecutive) {
+        const consecutiveWeeks = Math.max(2, parseInt(activeRules?.consecutiveWeeks, 10) || 2);
+        const rows = nextScheduleData;
+        const dateToIndex = new Map();
+        rows.forEach((row, idx) => dateToIndex.set(row.date, idx));
+        const seenConsecutive = new Set();
 
-    nextScheduleData.forEach(row => {
-        userServiceItems.forEach(service => {
-            (row[service] || []).forEach(name => {
-                if (!allowedByService[service].has(name)) {
-                    warnings.push({
-                        type: 'serviceKnownPeople',
-                        message: `⚠️ ${name} 不在 ${service} 的歷史名單`,
-                        date: row.date,
-                        service,
-                        person: name
+        changedByDate.forEach((services, date) => {
+            const changedIdx = dateToIndex.get(date);
+            if (changedIdx === undefined) return;
+
+            services.forEach(service => {
+                if (!userServiceItems.includes(service)) return;
+
+                const startMin = Math.max(0, changedIdx - consecutiveWeeks + 1);
+                const startMax = Math.min(changedIdx, rows.length - consecutiveWeeks);
+                for (let start = startMin; start <= startMax; start++) {
+                    const windowRows = rows.slice(start, start + consecutiveWeeks);
+                    windowRows.forEach(r => validatedCellsByRule.consecutive.add(`${r.date}|${service}`));
+                    let common = new Set(windowRows[0][service] || []);
+
+                    for (let w = 1; w < windowRows.length; w++) {
+                        const currentSet = new Set(windowRows[w][service] || []);
+                        common = new Set([...common].filter(name => currentSet.has(name)));
+                        if (common.size === 0) break;
+                    }
+
+                    const startDate = windowRows[0].date;
+                    const endDate = windowRows[windowRows.length - 1].date;
+                    common.forEach(name => {
+                        const dedupeKey = `${service}|${name}|${startDate}|${endDate}`;
+                        if (seenConsecutive.has(dedupeKey)) return;
+                        seenConsecutive.add(dedupeKey);
+
+                        warnings.push({
+                            type: 'consecutive',
+                            message: `⚠️ ${name} 連續${consecutiveWeeks}週擔任「${service}」（${startDate} → ${endDate}）`,
+                            date: endDate,
+                            service,
+                            person: name
+                        });
                     });
                 }
             });
         });
-    });
+    }
 
-    return warnings;
-});
+    // 規則2: 每人每週最多 N 項（只檢查有變更的日期）
+    if (activeRules?.maxRoles) {
+        const maxRoles = Math.max(1, parseInt(activeRules?.maxRolesLimit, 10) || 3);
+        changedByDate.forEach((_services, date) => {
+            const row = nextIndex.get(date);
+            if (!row) return;
+            userServiceItems.forEach(service => {
+                validatedCellsByRule.maxRoles.add(`${date}|${service}`);
+            });
+
+            const counts = {};
+            userServiceItems.forEach(service => {
+                (row[service] || []).forEach(name => {
+                    counts[name] = (counts[name] || 0) + 1;
+                });
+            });
+
+            Object.entries(counts).forEach(([name, count]) => {
+                if (count > maxRoles) {
+                    warnings.push({
+                        type: 'maxRoles',
+                        message: `⚠️ ${name} 在 ${date} 擔任了 ${count} 項服事（上限 ${maxRoles}）`,
+                        date,
+                        person: name,
+                        count
+                    });
+                }
+            });
+        });
+    }
+
+    // 規則3: 只使用該服事歷史人員（只檢查變更格）
+    if (activeRules?.serviceKnownPeople) {
+        const allowedByService = {};
+        userServiceItems.forEach(service => {
+            allowedByService[service] = new Set();
+        });
+
+        baseScheduleData.forEach(row => {
+            userServiceItems.forEach(service => {
+                (row[service] || []).forEach(name => allowedByService[service].add(name));
+            });
+        });
+
+        const seenKnownPeople = new Set();
+        changedByDate.forEach((services, date) => {
+            const row = nextIndex.get(date);
+            if (!row) return;
+
+            services.forEach(service => {
+                if (!userServiceItems.includes(service)) return;
+                validatedCellsByRule.serviceKnownPeople.add(`${date}|${service}`);
+                (row[service] || []).forEach(name => {
+                    if (allowedByService[service].has(name)) return;
+                    const dedupeKey = `${date}|${service}|${name}`;
+                    if (seenKnownPeople.has(dedupeKey)) return;
+                    seenKnownPeople.add(dedupeKey);
+                    warnings.push({
+                        type: 'serviceKnownPeople',
+                        message: `⚠️ ${name} 不在 ${service} 的歷史名單`,
+                        date,
+                        service,
+                        person: name
+                    });
+                });
+            });
+        });
+    }
+
+    return {
+        valid: warnings.length === 0,
+        warnings,
+        debug: {
+            changedCells: toSortedArray(changedCells),
+            validatedCells: {
+                consecutive: toSortedArray(validatedCellsByRule.consecutive),
+                maxRoles: toSortedArray(validatedCellsByRule.maxRoles),
+                serviceKnownPeople: toSortedArray(validatedCellsByRule.serviceKnownPeople)
+            }
+        }
+    };
+}
 
 // --- API 呼叫 ---
 export async function sendAgentRequest() {
@@ -550,7 +646,21 @@ export async function sendAgentRequest() {
                 break;
             }
 
-            const validation = scheduleValidator.validate(result.scheduleData, serviceItems, nonUserColumns, activeRules);
+            const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
+            const changedCells = buildChangedCellSet(effectiveScheduleData, result.scheduleData, userServiceItems);
+            const validation = validateScopedChanges({
+                baseScheduleData: effectiveScheduleData,
+                nextScheduleData: result.scheduleData,
+                serviceItems,
+                nonUserColumns,
+                activeRules,
+                changedCells
+            });
+            console.log('[Agent Validation] changedCells:', validation.debug?.changedCells || []);
+            console.log('[Agent Validation] validatedCells.consecutive:', validation.debug?.validatedCells?.consecutive || []);
+            console.log('[Agent Validation] validatedCells.maxRoles:', validation.debug?.validatedCells?.maxRoles || []);
+            console.log('[Agent Validation] validatedCells.serviceKnownPeople:', validation.debug?.validatedCells?.serviceKnownPeople || []);
+            console.log('[Agent Validation] warningsCount:', validation.warnings.length);
 
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
