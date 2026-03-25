@@ -311,6 +311,15 @@
         let deleteTargetId = null;
         let deleteTargetName = null; // 用於刪除確認
 
+        function escapeHtml(value = '') {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         async function init() {
             try {
                 const app = initializeApp(firebaseConfig);
@@ -362,14 +371,17 @@
 
             // 現有崇拜卡片
             serveList.forEach(serve => {
+                const safeId = escapeHtml(serve.id);
+                const safeEmoji = escapeHtml(serve.emoji);
+                const safeName = escapeHtml(serve.name);
                 html += `
-                    <div class="collection-card" data-id="${serve.id}">
+                    <div class="collection-card" data-id="${safeId}">
                         <div class="card-actions">
-                            <button class="card-action-btn edit" data-id="${serve.id}" title="編輯">✏️</button>
-                            <button class="card-action-btn delete" data-id="${serve.id}" title="刪除">🗑️</button>
+                            <button class="card-action-btn edit" data-id="${safeId}" title="編輯">✏️</button>
+                            <button class="card-action-btn delete" data-id="${safeId}" title="刪除">🗑️</button>
                         </div>
-                        <div class="icon">${serve.emoji}</div>
-                        <div class="name">${serve.name}</div>
+                        <div class="icon">${safeEmoji}</div>
+                        <div class="name">${safeName}</div>
                     </div>
                 `;
             });

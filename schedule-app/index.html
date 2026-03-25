@@ -139,13 +139,22 @@
         let serveList = [];
         let userServeTypes = {}; // 使用者有服事的崇拜
 
+        function escapeHtml(value = '') {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // 顯示錯誤頁面
         function showError(title, message) {
             document.getElementById('mainPage').innerHTML = `
                 <div class="error-page">
                     <div class="error-icon">⚠️</div>
-                    <h2>${title}</h2>
-                    <p>${message}</p>
+                    <h2>${escapeHtml(title)}</h2>
+                    <p>${escapeHtml(message)}</p>
                 </div>
             `;
         }
@@ -235,10 +244,12 @@
             serveList.forEach(serve => {
                 // 傳遞 service（崇拜名稱）和 user 參數到 view.html
                 const viewUrl = `view.html?service=${encodeURIComponent(serve.name)}&user=${encodeURIComponent(userName)}`;
+                const safeEmoji = escapeHtml(serve.emoji);
+                const safeName = escapeHtml(serve.name);
                 html += `
                     <div class="collection-card" onclick="window.location.href='${viewUrl}'">
-                        <div class="icon">${serve.emoji}</div>
-                        <div class="name">${serve.name}</div>
+                        <div class="icon">${safeEmoji}</div>
+                        <div class="name">${safeName}</div>
                     </div>
                 `;
             });

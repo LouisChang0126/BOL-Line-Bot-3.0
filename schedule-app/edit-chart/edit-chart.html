@@ -374,12 +374,21 @@
     const collectionName = urlParams.get('collection') || '';
 
     // 顯示錯誤頁面
+    function escapeHtml(value = '') {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     function showError(title, message) {
       document.querySelector('.agent-main-area .app-container').innerHTML = `
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
           <h1 style="color: #ef4444; font-size: 48px; margin-bottom: 16px;">⚠️</h1>
-          <h2 style="color: #ef4444; margin-bottom: 8px;">${title}</h2>
-          <p style="color: #64748b;">${message}</p>
+          <h2 style="color: #ef4444; margin-bottom: 8px;">${escapeHtml(title)}</h2>
+          <p style="color: #64748b;">${escapeHtml(message)}</p>
           <a href="index.html" class="btn btn-primary" style="margin-top: 24px;">返回選擇頁面</a>
         </div>
       `;

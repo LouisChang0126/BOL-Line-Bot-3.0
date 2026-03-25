@@ -78,11 +78,20 @@
             document.querySelector('.app-container').innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
                     <h1 style="color: #ef4444; font-size: 48px; margin-bottom: 16px;">⚠️</h1>
-                    <h2 style="color: #ef4444; margin-bottom: 8px;">${title}</h2>
-                    <p style="color: #64748b;">${message}</p>
+                    <h2 style="color: #ef4444; margin-bottom: 8px;">${escapeHtml(title)}</h2>
+                    <p style="color: #64748b;">${escapeHtml(message)}</p>
                     <a href="index.html${userParam}" class="btn btn-primary" style="margin-top: 24px;">返回選擇頁面</a>
                 </div>
             `;
+        }
+
+        function escapeHtml(value = '') {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         // 顏色陣列
@@ -337,10 +346,12 @@
                     // 渲染分組 checkbox
                     nonUngroupedGroups.forEach(group => {
                         const checked = visibleGroups[group.id] ? 'checked' : '';
+                        const escapedGroupId = escapeHtml(group.id);
+                        const escapedGroupName = escapeHtml(group.name);
                         html += `
                             <label class="group-filter-item">
-                                <input type="checkbox" ${checked} data-group-id="${group.id}" onchange="window.handleGroupFilterChange(this)">
-                                ${group.name}
+                                <input type="checkbox" ${checked} data-group-id="${escapedGroupId}" onchange="window.handleGroupFilterChange(this)">
+                                ${escapedGroupName}
                             </label>
                         `;
                     });
@@ -416,7 +427,7 @@
 
             let html = '<tr><th class="date-header">日期</th>';
             visibleItems.forEach(item => {
-                html += `<th class="service-header">${item}</th>`;
+                html += `<th class="service-header">${escapeHtml(item)}</th>`;
             });
             html += '</tr>';
             thead.innerHTML = html;
@@ -444,7 +455,7 @@
                 const rowStyle = isPast ? 'opacity: 0.6; background: #f8fafc;' : '';
 
                 html += `<tr style="${rowStyle}">`;
-                html += `<td><div class="date-cell">${row.date}</div></td>`;
+                html += `<td><div class="date-cell">${escapeHtml(row.date)}</div></td>`;
 
                 visibleItems.forEach(item => {
                     const persons = row[item] || [];
@@ -459,7 +470,7 @@
                     html += `<td class="service-cell" style="${cellStyle}">`;
                     if (persons.length > 0) {
                         // 簡化顯示：文字用 / 連接
-                        html += `<span style="font-weight: 550">${personText}</span>`;
+                        html += `<span style="font-weight: 550">${escapeHtml(personText)}</span>`;
                     }
                     html += '</td>';
                 });

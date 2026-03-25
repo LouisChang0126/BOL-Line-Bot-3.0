@@ -354,21 +354,33 @@ const scheduleValidator = new ScheduleValidator();
 scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems, activeRules) => {
     const warnings = [];
     const consecutiveWeeks = Math.max(2, parseInt(activeRules?.consecutiveWeeks, 10) || 2);
-    if (consecutiveWeeks !== 2) return warnings;
-    for (let i = 1; i < scheduleData.length; i++) {
-        const prevRow = scheduleData[i - 1];
-        const currRow = scheduleData[i];
+    if (scheduleData.length < consecutiveWeeks) return warnings;
+
+    for (let i = consecutiveWeeks - 1; i < scheduleData.length; i++) {
+        const windowRows = scheduleData.slice(i - consecutiveWeeks + 1, i + 1);
+        const startDate = windowRows[0].date;
+        const endDate = windowRows[windowRows.length - 1].date;
+
         userServiceItems.forEach(service => {
-            const duplicates = (prevRow[service] || []).filter(n => (currRow[service] || []).includes(n));
-            duplicates.forEach(name => {
+            let common = new Set(windowRows[0][service] || []);
+            for (let w = 1; w < windowRows.length; w++) {
+                const currentSet = new Set(windowRows[w][service] || []);
+                common = new Set([...common].filter(name => currentSet.has(name)));
+                if (common.size === 0) break;
+            }
+
+            common.forEach(name => {
                 warnings.push({
                     type: 'consecutive',
-                    message: `⚠️ ${name} 連續兩週擔任「${service}」（${prevRow.date} → ${currRow.date}）`,
-                    date: currRow.date, service, person: name
+                    message: `⚠️ ${name} 連續${consecutiveWeeks}週擔任「${service}」（${startDate} → ${endDate}）`,
+                    date: endDate,
+                    service,
+                    person: name
                 });
             });
         });
     }
+
     return warnings;
 });
 
@@ -507,6 +519,8 @@ export async function sendAgentRequest() {
 
     let retryCount = 0;
     const MAX_RETRIES = 2;
+    let apiErrorRetryCount = 0;
+    const MAX_API_ERROR_RETRIES = 1;
     let lastResult = null;
 
     while (retryCount <= MAX_RETRIES) {
@@ -522,7 +536,9 @@ export async function sendAgentRequest() {
 
             if (!response.ok) {
                 const errorText = await response.text();
-                throw new Error(`API 錯誤 (${response.status}): ${errorText}`);
+                const apiError = new Error(`API 錯誤 (${response.status}): ${errorText}`);
+                apiError.status = response.status;
+                throw apiError;
             }
 
             const result = await response.json();
@@ -570,6 +586,21 @@ export async function sendAgentRequest() {
             break;
 
         } catch (error) {
+            const status = Number(error?.status || 0);
+            const message = String(error?.message || '');
+            const isRetryableApiError = [502, 503, 504].includes(status) ||
+                /Claude API error: Error code: 500|Internal server error/i.test(message);
+
+            if (isRetryableApiError && apiErrorRetryCount < MAX_API_ERROR_RETRIES) {
+                apiErrorRetryCount++;
+                addChatMessage('伺服器暫時忙碌，正在自動重試一次...', 'assistant', {
+                    mode: selectedMode,
+                    persist: false
+                });
+                await new Promise(resolve => setTimeout(resolve, 1200 * apiErrorRetryCount));
+                continue;
+            }
+
             hideAgentLoading();
             console.error('Agent API 呼叫失敗:', error);
             addChatMessage(`❌ 發生錯誤：${error.message}`, 'error', { mode: selectedMode });

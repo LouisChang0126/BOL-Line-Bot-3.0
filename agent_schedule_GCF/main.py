@@ -7,6 +7,8 @@ Supports mode-based provider routing:
 
 import json
 import os
+import random
+import time
 
 import anthropic
 import functions_framework
@@ -122,14 +124,40 @@ def _build_messages(chat_history, prompt):
 
 def _anthropic_chat(api_key, model, system_prompt, messages):
     client = anthropic.Anthropic(api_key=api_key)
-    message = client.messages.create(
-        model=model,
-        max_tokens=8192,
-        system=system_prompt,
-        tools=[SCHEDULE_TOOL],
-        tool_choice={"type": "auto"},
-        messages=messages,
-    )
+    max_retries = 3
+    retryable_status_codes = {429, 500, 502, 503, 504, 529}
+    last_error = None
+    message = None
+
+    for attempt in range(max_retries):
+        try:
+            message = client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                tools=[SCHEDULE_TOOL],
+                tool_choice={"type": "auto"},
+                messages=messages,
+            )
+            break
+        except anthropic.APIError as err:
+            last_error = err
+            status_code = getattr(err, "status_code", None)
+            message_text = str(err).lower()
+            is_retryable = (
+                status_code in retryable_status_codes
+                or "internal server error" in message_text
+                or "temporarily unavailable" in message_text
+                or "overloaded" in message_text
+            )
+            if (not is_retryable) or attempt == max_retries - 1:
+                raise
+
+            backoff_seconds = (1.2 * (2 ** attempt)) + random.uniform(0, 0.4)
+            time.sleep(backoff_seconds)
+
+    if message is None:
+        raise last_error
 
     tool_input = None
     text_parts = []
