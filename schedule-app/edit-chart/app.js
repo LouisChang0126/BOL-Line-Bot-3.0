@@ -4,9 +4,8 @@ import { initAgentFeature, showModalAlert } from './agent.js';
 // --- 引入 UI 渲染與彈窗 ---
 import {
     renderTable, renderTableHead, renderTableBody,
-    showAddColumnModal, updateAddColTypeUI,
+    initDisplayConfigEditor,
     openEditPersonModal, renderPersonDropdown, renderCurrentPersonChips, renderInfoInputs,
-    renderDisplayConfigModal,
     setUIContext, showConfirm
 } from './ui.js';
 
@@ -158,10 +157,7 @@ async function loadData() {
             serviceItems = metadataDoc.data().serviceItems || [];
             nonUserColumns = metadataDoc.data().nonUserColumns || [];
         } else {
-            // 如果沒有 metadata，使用預設值
-            serviceItems = ['主領', '副主領', '助唱', '司琴', '鼓手', '貝斯', '吉他', '彩排', '提醒人', '音控', '字幕', '司會', '奉獻', '招待', '先知性'];
-            nonUserColumns = [];
-            await saveMetadata();
+            throw new Error('沒有 metadata');
         }
 
         // 取得當前週日字串
@@ -1578,12 +1574,6 @@ function syncUIContext() {
 }
 
 // 將需要被外部 debug 模組或 ui.js 存取的函式掛到全域 window
-window.updateStatus = updateStatus;
-window.setupEventListeners = typeof setupEventListeners !== 'undefined' ? setupEventListeners : undefined;
-window.setupPasteHandler = typeof setupPasteHandler !== 'undefined' ? setupPasteHandler : undefined;
-window.createInitialData = createInitialData;
-window.parseDateString = parseDateString;
-window.renderTable = renderTable;
 window.togglePastData = togglePastData;
 
 // ui.js 呼叫的資料操作橋接
@@ -2076,56 +2066,7 @@ function setupUndoRedoHandler() {
 let tempDisplayConfig = null;
 
 // 初始化分組編輯功能
-function initDisplayConfigEditor() {
-    const editBtn = document.getElementById('editDisplayConfigBtn');
-    if (editBtn) {
-        editBtn.addEventListener('click', openDisplayConfigModal);
-    }
-
-    const addGroupBtn = document.getElementById('addGroupBtn');
-    if (addGroupBtn) {
-        addGroupBtn.addEventListener('click', addNewGroup);
-    }
-
-    const saveBtn = document.getElementById('saveDisplayConfigBtn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', saveDisplayConfig);
-    }
-
-    // 新增欄位按鈕（合併按鈕）
-    const addColumnBtn = document.getElementById('addColumnBtn');
-    if (addColumnBtn) {
-        addColumnBtn.addEventListener('click', () => showAddColumnModal());
-        // radio 切換 active 樣式
-        document.querySelectorAll('input[name="addColType"]').forEach(r => {
-            r.addEventListener('change', updateAddColTypeUI);
-        });
-    }
-
-    // 編輯記錄按鈕
-    const viewLogsBtn = document.getElementById('viewLogsBtn');
-    if (viewLogsBtn) {
-        viewLogsBtn.addEventListener('click', () => {
-            const collectionName = window.COLLECTION_NAME;
-            window.location.href = `./difference.html?collection=${collectionName}`;
-        });
-    }
-
-    // 管理使用者按鈕
-    const manageUsersBtn = document.getElementById('manageUsersBtn');
-    if (manageUsersBtn) {
-        manageUsersBtn.addEventListener('click', () => {
-            const collectionName = window.COLLECTION_NAME;
-            window.location.href = `edit-user.html?collection=${collectionName}`;
-        });
-    }
-
-    // 檢查是否有未註冊的使用者
-    checkMissingUsers();
-}
-
-// 開啟編輯顯示欄位 Modal
-function openDisplayConfigModal() {
+export function prepareDisplayConfigEditorState() {
     if (displayConfig) {
         tempDisplayConfig = JSON.parse(JSON.stringify(displayConfig));
     } else {
@@ -2139,31 +2080,11 @@ function openDisplayConfigModal() {
             hidden: []
         };
     }
-
-    // 同步 tempDisplayConfig 到 ui.js
     syncUIContext();
-
-    renderDisplayConfigModal();
-    document.getElementById('displayConfigModal').classList.remove('hidden');
-}
-
-// 新增群組
-function addNewGroup() {
-    const newGroupId = 'group-' + Date.now();
-    const groupCount = tempDisplayConfig.groups.filter(g => g.id !== 'ungrouped').length + 1;
-
-    tempDisplayConfig.groups.push({
-        id: newGroupId,
-        name: `群組 ${groupCount}`,
-        items: [],
-        defaultVisible: true
-    });
-
-    renderDisplayConfigModal();
 }
 
 // 儲存分組設定
-async function saveDisplayConfig() {
+export async function saveDisplayConfig() {
     try {
         updateStatus('儲存分組設定中...');
 
@@ -2233,7 +2154,7 @@ async function loadDisplayConfig() {
 // ===========================
 // 使用者管理 - 檢查未註冊使用者或服事項目不完整
 // ===========================
-async function checkMissingUsers() {
+export async function checkMissingUsers() {
     try {
         const { collection, getDocs, doc, getDoc } = window.firestore;
         const db = window.db;

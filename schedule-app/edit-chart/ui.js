@@ -16,6 +16,7 @@ import {
     setCurrentEditingCell,
     saveMetadata,
     setupDragAndDrop, setupContextMenu, setupMultiCellSelection,
+    prepareDisplayConfigEditorState, saveDisplayConfig, checkMissingUsers,
     updateStatus,
     pushHistory, updateEditDifference
 } from './app.js';
@@ -81,6 +82,7 @@ function injectPendingHighlights() {
                 if (isOld && !isNew) {
                     chip.style.backgroundColor = '#ef4444';
                     chip.style.textDecoration = 'line-through';
+                    chip.style.textDecorationThickness = '5px';
                     chip.style.opacity = '0.9';
                 } else if (!isOld && isNew) {
                     chip.style.backgroundColor = '#22c55e';
@@ -579,6 +581,72 @@ export function renderInfoInputs(date, service) {
 // ===========================
 // Modal：群組顯示設定（renderDisplayConfigModal）
 // ===========================
+export function initDisplayConfigEditor() {
+    const editBtn = document.getElementById('editDisplayConfigBtn');
+    if (editBtn) {
+        editBtn.addEventListener('click', openDisplayConfigModal);
+    }
+
+    const addGroupBtn = document.getElementById('addGroupBtn');
+    if (addGroupBtn) {
+        addGroupBtn.addEventListener('click', addNewGroup);
+    }
+
+    const saveBtn = document.getElementById('saveDisplayConfigBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveDisplayConfig);
+    }
+
+    const addColumnBtn = document.getElementById('addColumnBtn');
+    if (addColumnBtn) {
+        addColumnBtn.addEventListener('click', () => showAddColumnModal());
+        document.querySelectorAll('input[name="addColType"]').forEach(r => {
+            r.addEventListener('change', updateAddColTypeUI);
+        });
+    }
+
+    const viewLogsBtn = document.getElementById('viewLogsBtn');
+    if (viewLogsBtn) {
+        viewLogsBtn.addEventListener('click', () => {
+            const collectionName = window.COLLECTION_NAME;
+            window.location.href = `./difference.html?collection=${collectionName}`;
+        });
+    }
+
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    if (manageUsersBtn) {
+        manageUsersBtn.addEventListener('click', () => {
+            const collectionName = window.COLLECTION_NAME;
+            window.location.href = `edit-user.html?collection=${collectionName}`;
+        });
+    }
+
+    checkMissingUsers();
+}
+
+function openDisplayConfigModal() {
+    prepareDisplayConfigEditorState();
+    renderDisplayConfigModal();
+    document.getElementById('displayConfigModal').classList.remove('hidden');
+}
+
+function addNewGroup() {
+    const tempDisplayConfig = _ctx.tempDisplayConfig;
+    if (!tempDisplayConfig) return;
+
+    const newGroupId = 'group-' + Date.now();
+    const groupCount = tempDisplayConfig.groups.filter(g => g.id !== 'ungrouped').length + 1;
+
+    tempDisplayConfig.groups.push({
+        id: newGroupId,
+        name: `群組 ${groupCount}`,
+        items: [],
+        defaultVisible: true
+    });
+
+    renderDisplayConfigModal();
+}
+
 export function renderDisplayConfigModal() {
     const tempDisplayConfig = _ctx.tempDisplayConfig;
     if (!tempDisplayConfig) return;
