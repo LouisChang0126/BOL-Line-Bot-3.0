@@ -8,15 +8,19 @@
 
 import {
     scheduleData, serviceItems, nonUserColumns,
-    personColorMap, getPersonColor,
+    getPersonColor,
     addPersonToCell, removePerson,
     addNewRow, deleteLastRow,
-    doAddServiceItem,
+    doAddServiceItem, doAddInfoColumn,
+    addInfoItem, updateInfoItem, removeInfoItem,
+    setCurrentEditingCell,
+    saveMetadata,
+    setupDragAndDrop, setupContextMenu, setupMultiCellSelection,
     updateStatus,
     pushHistory, updateEditDifference
 } from './app.js';
 
-import { injectPendingHighlights, showModalAlert } from './agent.js';
+import { pendingAgentChanges, showModalAlert } from './agent.js';
 
 // ===========================
 // 外部注入 — 由 app.js 呼叫 setUIContext() 傳入無法直接 import 的可變狀態
@@ -43,9 +47,79 @@ export function renderTable() {
     renderTableHead();
     renderTableBody();
 
-    if (typeof injectPendingHighlights === 'function') {
-        injectPendingHighlights();
-    }
+    injectPendingHighlights();
+}
+
+// 注入差異高亮
+function injectPendingHighlights() {
+    if (!pendingAgentChanges || Object.keys(pendingAgentChanges).length === 0) return;
+
+    Object.entries(pendingAgentChanges).forEach(([date, services]) => {
+        Object.entries(services).forEach(([service, change]) => {
+            const cell = document.querySelector(
+                `.service-cell[data-date="${date}"][data-service="${service}"]`
+            );
+            if (!cell) return;
+
+            const allPersons = Array.from(new Set([...(change.old || []), ...(change.new || [])]));
+
+            cell.innerHTML = '';
+            cell.classList.remove('empty');
+            cell.classList.add('pending-modify');
+
+            const chipsContainer = document.createElement('div');
+            chipsContainer.className = 'person-chips';
+
+            allPersons.forEach(person => {
+                const isOld = change.old.includes(person);
+                const isNew = change.new.includes(person);
+
+                const chip = document.createElement('div');
+                chip.className = 'person-chip';
+                chip.textContent = person;
+
+                if (isOld && !isNew) {
+                    chip.style.backgroundColor = '#ef4444';
+                    chip.style.textDecoration = 'line-through';
+                    chip.style.opacity = '0.9';
+                } else if (!isOld && isNew) {
+                    chip.style.backgroundColor = '#22c55e';
+                } else {
+                    chip.style.backgroundColor = getPersonColor(person);
+                }
+
+                chip.addEventListener('click', (e) => e.stopPropagation());
+                chipsContainer.appendChild(chip);
+            });
+
+            cell.appendChild(chipsContainer);
+
+            const btnsDiv = document.createElement('div');
+            btnsDiv.className = 'cell-review-btns';
+
+            const acceptBtn = document.createElement('button');
+            acceptBtn.className = 'cell-review-btn accept';
+            acceptBtn.type = 'button';
+            acceptBtn.textContent = '✅';
+            acceptBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.acceptCellChange(date, service);
+            });
+
+            const rejectBtn = document.createElement('button');
+            rejectBtn.className = 'cell-review-btn reject';
+            rejectBtn.type = 'button';
+            rejectBtn.textContent = '❌';
+            rejectBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                window.rejectCellChange(date, service);
+            });
+
+            btnsDiv.appendChild(acceptBtn);
+            btnsDiv.appendChild(rejectBtn);
+            cell.appendChild(btnsDiv);
+        });
+    });
 }
 
 export function renderTableHead() {
@@ -127,8 +201,7 @@ function setupServiceHeaderDragAndDrop() {
                 serviceItems.splice(draggedIndex, 1);
                 serviceItems.splice(targetIndex, 0, draggedService);
 
-                // saveMetadata 由 app.js 透過 window 掛載
-                if (typeof window.saveMetadata === 'function') await window.saveMetadata();
+                await saveMetadata();
 
                 pushHistory();
                 updateEditDifference();
@@ -249,9 +322,9 @@ export function renderTableBody() {
     });
 
     // 拖拉、右鍵選單、多格選取事件由 app.js 負責設定
-    if (typeof window.setupDragAndDrop === 'function') window.setupDragAndDrop();
-    if (typeof window.setupContextMenu === 'function') window.setupContextMenu();
-    if (typeof window.setupMultiCellSelection === 'function') window.setupMultiCellSelection();
+    setupDragAndDrop();
+    setupContextMenu();
+    setupMultiCellSelection();
 }
 
 // 顏色工具與其他 Modal 邏輯
@@ -297,8 +370,7 @@ export function showAddColumnModal() {
         if (mode === 'service') {
             doAddServiceItem(name);
         } else {
-            // doAddInfoColumn 由 app.js 透過 window 掛載
-            if (typeof window.doAddInfoColumn === 'function') window.doAddInfoColumn(name);
+            doAddInfoColumn(name);
         }
     };
     confirmBtn.addEventListener('click', onConfirm);
@@ -333,10 +405,7 @@ export function openEditServiceModal(serviceName) {
 // ===========================
 export function openEditPersonModal(date, service) {
     _ctx.currentEditingCell = { date, service };
-    // 同步回 app.js
-    if (typeof window.setCurrentEditingCell === 'function') {
-        window.setCurrentEditingCell({ date, service });
-    }
+    setCurrentEditingCell({ date, service });
 
     const isInfoColumn = nonUserColumns.includes(service);
 
@@ -472,10 +541,10 @@ export function renderInfoInputs(date, service) {
             const index = parseInt(e.target.dataset.index);
             const newValue = e.target.value.trim();
             if (newValue === '') {
-                if (typeof window.removeInfoItem === 'function') window.removeInfoItem(date, service, index);
+                removeInfoItem(date, service, index);
                 renderInfoInputs(date, service);
             } else {
-                if (typeof window.updateInfoItem === 'function') window.updateInfoItem(date, service, index, newValue);
+                updateInfoItem(date, service, index, newValue);
             }
         });
     });
@@ -483,7 +552,7 @@ export function renderInfoInputs(date, service) {
     container.querySelectorAll('.remove-info-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             const index = parseInt(e.target.dataset.index);
-            if (typeof window.removeInfoItem === 'function') window.removeInfoItem(date, service, index);
+            removeInfoItem(date, service, index);
             renderInfoInputs(date, service);
         });
     });
@@ -494,7 +563,7 @@ export function renderInfoInputs(date, service) {
             const newInput = document.getElementById('newInfoInput');
             const value = newInput.value.trim();
             if (!value) { alert('請輸入資訊'); return; }
-            if (typeof window.addInfoItem === 'function') window.addInfoItem(date, service, value);
+            addInfoItem(date, service, value);
             renderInfoInputs(date, service);
         });
     }

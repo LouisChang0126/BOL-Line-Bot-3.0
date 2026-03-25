@@ -294,7 +294,7 @@ export async function sendAgentRequest() {
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
                 retryCount++;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 500));
                 continue;
             }
 
@@ -485,86 +485,6 @@ export function checkPendingComplete() {
     }
 }
 
-// 注入差異高亮
-export function injectPendingHighlights() {
-    if (!pendingAgentChanges || Object.keys(pendingAgentChanges).length === 0) return;
-
-    Object.entries(pendingAgentChanges).forEach(([date, services]) => {
-        Object.entries(services).forEach(([service, change]) => {
-            const cell = document.querySelector(
-                `.service-cell[data-date="${date}"][data-service="${service}"]`
-            );
-            if (!cell) return;
-
-            // 取得所有涉入的服事人員 (舊的 + 新的) 並去除重複
-            const allPersons = Array.from(new Set([...change.old, ...change.new]));
-
-            // 清空儲存格內容 (刪除原本的 chips 或 placeholder)
-            cell.innerHTML = '';
-            cell.classList.remove('empty');
-            // 加入 pending 統一的外框樣式（黃色底）
-            cell.classList.add('pending-modify');
-
-            // 重建 person-chips 容器
-            const chipsContainer = document.createElement('div');
-            chipsContainer.className = 'person-chips';
-
-            allPersons.forEach(person => {
-                const isOld = change.old.includes(person);
-                const isNew = change.new.includes(person);
-
-                const chip = document.createElement('div');
-                chip.className = 'person-chip';
-                chip.textContent = person;
-
-                if (isOld && !isNew) {
-                    // 原本有但現在被刪除 -> 紅色背景
-                    chip.style.backgroundColor = '#ef4444';
-                    chip.style.textDecoration = 'line-through';
-                    chip.style.opacity = '0.9';
-                } else if (!isOld && isNew) {
-                    // 原本沒有但新增的 -> 綠色背景
-                    chip.style.backgroundColor = '#22c55e';
-                } else {
-                    // 沒變動的 -> 保持原本顏色
-                    chip.style.backgroundColor = personColorMap.get(person) || '#ccc';
-                }
-
-                // 為了避免點擊 chip 還是會觸發 cell click，阻止冒泡
-                chip.addEventListener('click', (e) => e.stopPropagation());
-
-                chipsContainer.appendChild(chip);
-            });
-
-            cell.appendChild(chipsContainer);
-
-            // 加入 Accept / Reject 按鈕，並加上 event.stopPropagation()
-            const btnsDiv = document.createElement('div');
-            btnsDiv.className = 'cell-review-btns';
-            const acceptBtn = document.createElement('button');
-            acceptBtn.className = 'cell-review-btn accept';
-            acceptBtn.type = 'button';
-            acceptBtn.textContent = '✅';
-            acceptBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                window.acceptCellChange(date, service);
-            });
-
-            const rejectBtn = document.createElement('button');
-            rejectBtn.className = 'cell-review-btn reject';
-            rejectBtn.type = 'button';
-            rejectBtn.textContent = '❌';
-            rejectBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                window.rejectCellChange(date, service);
-            });
-
-            btnsDiv.appendChild(acceptBtn);
-            btnsDiv.appendChild(rejectBtn);
-            cell.appendChild(btnsDiv);
-        });
-    });
-}
 
 // --- 可拖曳分隔線 ---
 export function setupResizer() {

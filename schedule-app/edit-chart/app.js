@@ -1,5 +1,5 @@
 // --- 引入 Agent 功能 ---
-import { initAgentFeature, injectPendingHighlights, showModalAlert } from './agent.js';
+import { initAgentFeature, showModalAlert } from './agent.js';
 
 // --- 引入 UI 渲染與彈窗 ---
 import {
@@ -20,7 +20,7 @@ let showingPast = false; // 是否顯示過去資料
 export let serviceItems = []; // 服事項目列表
 export let nonUserColumns = []; // 資訊欄位列表（不包含人名的欄位）
 let allPersonNames = new Set(); // 所有出現過的人名
-let currentEditingCell = null; // 目前編輯的儲存格（ui.js 開啟 modal 時也透過 window.setCurrentEditingCell 同步）
+let currentEditingCell = null; // 目前編輯的儲存格（ui.js 開啟 modal 時透過 setCurrentEditingCell 同步）
 let displayConfig = null; // 服事項目分組顯示設定
 
 // 最大顯示/新增限制
@@ -326,7 +326,7 @@ async function createInitialData() {
 }
 
 // 儲存 metadata
-async function saveMetadata() {
+export async function saveMetadata() {
     const { doc, setDoc } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
@@ -503,7 +503,7 @@ export async function doAddServiceItem(trimmedName) {
     }
 }
 
-async function doAddInfoColumn(trimmedName) {
+export async function doAddInfoColumn(trimmedName) {
     updateStatus('新增資訊欄位中...');
     try {
         serviceItems.push(trimmedName);
@@ -616,7 +616,7 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
 // ===========================
 
 // 新增資訊項目
-async function addInfoItem(date, service, value) {
+export async function addInfoItem(date, service, value) {
     const row = scheduleData.find(r => r.date === date);
     if (!row) return;
 
@@ -640,7 +640,7 @@ async function addInfoItem(date, service, value) {
 }
 
 // 更新資訊項目
-async function updateInfoItem(date, service, index, newValue) {
+export async function updateInfoItem(date, service, index, newValue) {
     const row = scheduleData.find(r => r.date === date);
     if (!row || !row[service]) return;
 
@@ -659,7 +659,7 @@ async function updateInfoItem(date, service, index, newValue) {
 }
 
 // 刪除資訊項目
-async function removeInfoItem(date, service, index) {
+export async function removeInfoItem(date, service, index) {
     const row = scheduleData.find(r => r.date === date);
     if (!row || !row[service]) return;
 
@@ -744,7 +744,7 @@ export async function removePerson(date, service, person) {
 // ===========================
 // 拖拉功能
 // ===========================
-function setupDragAndDrop() {
+export function setupDragAndDrop() {
     const chips = document.querySelectorAll('.person-chip[draggable="true"]');
     const cells = document.querySelectorAll('.service-cell[data-droppable="true"]');
 
@@ -917,7 +917,7 @@ function getCellsInRange(anchor, current) {
 // 新增一個變數來追蹤是否已經綁定過全域事件，避免 Memory Leak
 let isGlobalMultiSelectBound = false;
 // 設定多格選取事件（在 renderTableBody 中呼叫）
-function setupMultiCellSelection() {
+export function setupMultiCellSelection() {
     const cells = document.querySelectorAll('.service-cell[data-droppable="true"]');
 
     cells.forEach(cell => {
@@ -1258,7 +1258,7 @@ function setupPasteHandler() {
 }
 
 // 設定右鍵選單事件（在 renderTableBody 中呼叫）
-function setupContextMenu() {
+export function setupContextMenu() {
     const contextMenu = document.getElementById('contextMenu');
     const contextMenuCopy = document.getElementById('contextMenuCopy');
     const contextMenuCut = document.getElementById('contextMenuCut');
@@ -1581,27 +1581,19 @@ function syncUIContext() {
 window.updateStatus = updateStatus;
 window.setupEventListeners = typeof setupEventListeners !== 'undefined' ? setupEventListeners : undefined;
 window.setupPasteHandler = typeof setupPasteHandler !== 'undefined' ? setupPasteHandler : undefined;
-window.saveMetadata = saveMetadata;
 window.createInitialData = createInitialData;
 window.parseDateString = parseDateString;
 window.renderTable = renderTable;
 window.togglePastData = togglePastData;
 
 // ui.js 呼叫的資料操作橋接
-window.doAddInfoColumn = doAddInfoColumn;
-window.addInfoItem = addInfoItem;
-window.updateInfoItem = updateInfoItem;
-window.removeInfoItem = removeInfoItem;
 
 // ui.js 的 openEditPersonModal 需要同步 currentEditingCell 到 app.js
-window.setCurrentEditingCell = function (cell) {
+export function setCurrentEditingCell(cell) {
     currentEditingCell = cell;
-};
+}
 
 // 設定服事標題拖拉排序橋接（供 ui.js renderTableBody 呼叫）
-window.setupDragAndDrop = setupDragAndDrop;
-window.setupContextMenu = setupContextMenu;
-window.setupMultiCellSelection = setupMultiCellSelection;
 
 window.closeModal = function (modalId) {
     document.getElementById(modalId).classList.add('hidden');
