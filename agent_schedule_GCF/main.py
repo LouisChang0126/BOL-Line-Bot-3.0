@@ -14,7 +14,7 @@ import requests
 from flask import jsonify, make_response
 
 try:
-    from agentConfig import MODE_CONFIG, DEFAULT_MODE
+    from agentConfig import MODE_CONFIG, DEFAULT_MODE, ALLOWED_ORIGINS
 except ImportError:
     MODE_CONFIG = {
         "edit_qa": {
@@ -31,13 +31,7 @@ except ImportError:
         },
     }
     DEFAULT_MODE = "edit_qa"
-
-
-ALLOWED_ORIGINS = [
-    "https://bol-line-bot-3.web.app",
-    "http://localhost:5500",
-]
-
+    ALLOWED_ORIGINS = ["https://bol-line-bot-3.web.app"]
 
 SCHEDULE_TOOL = {
     "name": "update_schedule",
@@ -310,10 +304,17 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
 
     rules = []
     if is_scheduling:
+        consecutive_weeks = max(2, int(active_rules.get("consecutiveWeeks", 2) or 2))
+        max_roles_limit = max(1, int(active_rules.get("maxRolesLimit", 3) or 3))
+
         if active_rules.get("consecutive"):
-            rules.append("- Avoid assigning the same person in the same service for consecutive weeks.")
+            rules.append(
+                f"- Do not assign the same person in the same service for {consecutive_weeks} consecutive weeks."
+            )
         if active_rules.get("maxRoles"):
-            rules.append("- Each person should not exceed 3 service roles per week.")
+            rules.append(f"- Each person should not exceed {max_roles_limit} service roles per week.")
+        if active_rules.get("serviceKnownPeople"):
+            rules.append("- For each service, only use people who have appeared in that service historically.")
         if not rules:
             rules.append("- No extra scheduling rules are enabled.")
     else:

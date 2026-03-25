@@ -306,11 +306,21 @@
         <div class="agent-rules" id="agentRulesContent">
           <label class="agent-rule-option">
             <input type="checkbox" id="ruleConsecutive" checked>
-            <span>禁止連續 2 週相同服事</span>
+            <span>禁止連續同服事</span>
+            <input type="number" id="ruleConsecutiveWeeks" min="2" value="2" max="3"
+              style="width: 64px; margin-left: 8px; padding: 2px 6px;">
+            <span>週</span>
           </label>
           <label class="agent-rule-option">
             <input type="checkbox" id="ruleMaxRoles" checked>
-            <span>同工單週最多 3 項服事</span>
+            <span>同工單週最多</span>
+            <input type="number" id="ruleMaxRolesLimit" min="1" value="2" max="3"
+              style="width: 64px; margin-left: 8px; padding: 2px 6px;">
+            <span>項服事</span>
+          </label>
+          <label class="agent-rule-option">
+            <input type="checkbox" id="ruleServiceKnownPeople" checked>
+            <span>僅使用該服事歷史人員</span>
           </label>
         </div>
       </div>

@@ -341,7 +341,7 @@ class ScheduleValidator {
         const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
         for (const rule of this.rules) {
             if (activeRules[rule.name]) {
-                warnings.push(...rule.checkFn(scheduleData, userServiceItems));
+                warnings.push(...rule.checkFn(scheduleData, userServiceItems, activeRules));
             }
         }
         return { valid: warnings.length === 0, warnings };
@@ -351,8 +351,10 @@ class ScheduleValidator {
 const scheduleValidator = new ScheduleValidator();
 
 // 規則1: 連續兩週相同服事
-scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems) => {
+scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems, activeRules) => {
     const warnings = [];
+    const consecutiveWeeks = Math.max(2, parseInt(activeRules?.consecutiveWeeks, 10) || 2);
+    if (consecutiveWeeks !== 2) return warnings;
     for (let i = 1; i < scheduleData.length; i++) {
         const prevRow = scheduleData[i - 1];
         const currRow = scheduleData[i];
@@ -371,8 +373,8 @@ scheduleValidator.addRule('consecutive', (scheduleData, userServiceItems) => {
 });
 
 // 規則2: 單週最多 N 項服事
-scheduleValidator.addRule('maxRoles', (scheduleData, userServiceItems) => {
-    const MAX_ROLES = 3;
+scheduleValidator.addRule('maxRoles', (scheduleData, userServiceItems, activeRules) => {
+    const MAX_ROLES = Math.max(1, parseInt(activeRules?.maxRolesLimit, 10) || 3);
     const warnings = [];
     scheduleData.forEach(row => {
         const counts = {};
@@ -392,6 +394,39 @@ scheduleValidator.addRule('maxRoles', (scheduleData, userServiceItems) => {
     return warnings;
 });
 
+// 規則3: 僅使用該服事歷史人員
+scheduleValidator.addRule('serviceKnownPeople', (nextScheduleData, userServiceItems) => {
+    const warnings = [];
+    const allowedByService = {};
+    userServiceItems.forEach(service => {
+        allowedByService[service] = new Set();
+    });
+
+    scheduleData.forEach(row => {
+        userServiceItems.forEach(service => {
+            (row[service] || []).forEach(name => allowedByService[service].add(name));
+        });
+    });
+
+    nextScheduleData.forEach(row => {
+        userServiceItems.forEach(service => {
+            (row[service] || []).forEach(name => {
+                if (!allowedByService[service].has(name)) {
+                    warnings.push({
+                        type: 'serviceKnownPeople',
+                        message: `⚠️ ${name} 不在 ${service} 的歷史名單`,
+                        date: row.date,
+                        service,
+                        person: name
+                    });
+                }
+            });
+        });
+    });
+
+    return warnings;
+});
+
 // --- API 呼叫 ---
 export async function sendAgentRequest() {
     const promptInput = document.getElementById('agentPromptInput');
@@ -407,11 +442,6 @@ export async function sendAgentRequest() {
     const scheduling = selectedMode === MODE_SCHEDULING;
     const csvTextToSend = (!scheduling && attachedCsvText) ? attachedCsvText : '';
     const csvFileNameToSend = attachedCsvFileName || 'uploaded.csv';
-    const priorChatHistory = getModeHistory(selectedMode).map(msg => ({
-        role: msg.role,
-        content: msg.content
-    }));
-
     if (csvTextToSend) {
         addChatMessage(`[CSV] ${csvFileNameToSend}`, 'user', { mode: selectedMode });
         attachedCsvText = null;
@@ -429,15 +459,18 @@ export async function sendAgentRequest() {
     const activeRules = scheduling
         ? {
             consecutive: document.getElementById('ruleConsecutive')?.checked ?? false,
-            maxRoles: document.getElementById('ruleMaxRoles')?.checked ?? false
+            consecutiveWeeks: Math.max(2, parseInt(document.getElementById('ruleConsecutiveWeeks')?.value, 10) || 2),
+            maxRoles: document.getElementById('ruleMaxRoles')?.checked ?? false,
+            maxRolesLimit: Math.max(1, parseInt(document.getElementById('ruleMaxRolesLimit')?.value, 10) || 2),
+            serviceKnownPeople: document.getElementById('ruleServiceKnownPeople')?.checked ?? true
         }
         : {};
 
     // 取得歷史訊息對話紀錄
-    const chatHistory = priorChatHistory;
+    const chatHistory = [];
     document.querySelectorAll('#agentChatArea .agent-msg').forEach(msg => {
         // 排除剛才由這次 input 觸發的 UI message，因為 prompt 已經傳了
-        if (false) {
+        if (msg.textContent !== prompt) {
             chatHistory.push({
                 role: msg.classList.contains('user') ? 'user' : 'assistant',
                 content: msg.textContent
@@ -463,7 +496,7 @@ export async function sendAgentRequest() {
         currentSchedule: JSON.stringify({ scheduleData: effectiveScheduleData, serviceItems, nonUserColumns }),
         selectedMode,
         activeRules,
-        chatHistory: priorChatHistory
+        chatHistory
     };
 
     if (csvTextToSend) payload.attachedCsvText = csvTextToSend;
