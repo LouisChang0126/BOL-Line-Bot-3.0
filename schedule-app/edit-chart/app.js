@@ -21,6 +21,10 @@ export let nonUserColumns = []; // 資訊欄位列表（不包含人名的欄位
 let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格（ui.js 開啟 modal 時透過 setCurrentEditingCell 同步）
 let displayConfig = null; // 服事項目分組顯示設定
+let registeredUsersCache = {};
+let usersCacheReady = false;
+let usersCacheInitPromise = null;
+let usersUnsubscribe = null;
 
 // 最大顯示/新增限制
 const MAX_FUTURE_ROWS = 52; // 未來資料最多52筆
@@ -612,6 +616,117 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
 // ===========================
 
 // 新增資訊項目
+export async function applyAgentStructuralChanges({
+    addWeeks = 0,
+    removeWeeks = 0,
+    addServiceColumns = [],
+    removeServiceColumns = []
+} = {}) {
+    const normalizedAddWeeks = Math.max(0, Number(addWeeks) || 0);
+    const normalizedRemoveWeeks = Math.max(0, Number(removeWeeks) || 0);
+    const normalizedAddCols = Array.isArray(addServiceColumns) ? addServiceColumns : [];
+    const normalizedRemoveCols = Array.isArray(removeServiceColumns) ? removeServiceColumns : [];
+
+    if (
+        normalizedAddWeeks === 0 &&
+        normalizedRemoveWeeks === 0 &&
+        normalizedAddCols.length === 0 &&
+        normalizedRemoveCols.length === 0
+    ) {
+        return;
+    }
+
+    const { writeBatch, doc } = window.firestore;
+    const db = window.db;
+    const COLLECTION_NAME = window.COLLECTION_NAME;
+    const batch = writeBatch(db);
+    const removedDates = [];
+
+    const removable = Math.min(normalizedRemoveWeeks, scheduleData.length);
+    for (let i = 0; i < removable; i++) {
+        const removed = scheduleData.pop();
+        if (removed?.date) removedDates.push(removed.date);
+    }
+
+    const addable = Math.min(normalizedAddWeeks, Math.max(0, MAX_FUTURE_ROWS - scheduleData.length));
+    for (let i = 0; i < addable; i++) {
+        if (scheduleData.length === 0) break;
+
+        const lastDate = parseDateString(scheduleData[scheduleData.length - 1].date);
+        const newDate = new Date(lastDate);
+        newDate.setDate(newDate.getDate() + 7);
+        const newDateStr = formatDateString(newDate);
+
+        const rowData = {};
+        serviceItems.forEach(item => { rowData[item] = []; });
+        scheduleData.push({ date: newDateStr, ...rowData });
+    }
+
+    for (const colName of normalizedRemoveCols) {
+        if (!serviceItems.includes(colName)) continue;
+
+        const idx = serviceItems.indexOf(colName);
+        if (idx > -1) serviceItems.splice(idx, 1);
+
+        const nIdx = nonUserColumns.indexOf(colName);
+        if (nIdx > -1) nonUserColumns.splice(nIdx, 1);
+
+        if (displayConfig) {
+            if (displayConfig.groups) {
+                displayConfig.groups.forEach(group => {
+                    const itemIndex = group.items.indexOf(colName);
+                    if (itemIndex > -1) group.items.splice(itemIndex, 1);
+                });
+            }
+            if (displayConfig.hidden) {
+                const hiddenIndex = displayConfig.hidden.indexOf(colName);
+                if (hiddenIndex > -1) displayConfig.hidden.splice(hiddenIndex, 1);
+            }
+        }
+
+        scheduleData.forEach(row => {
+            delete row[colName];
+        });
+    }
+
+    for (const colName of normalizedAddCols) {
+        if (!colName || serviceItems.includes(colName)) continue;
+
+        serviceItems.push(colName);
+        scheduleData.forEach(row => {
+            row[colName] = [];
+        });
+
+        if (displayConfig && displayConfig.groups) {
+            const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
+            if (ungrouped && !ungrouped.items.includes(colName)) {
+                ungrouped.items.push(colName);
+            }
+        }
+    }
+
+    removedDates.forEach(date => {
+        batch.delete(doc(db, COLLECTION_NAME, date));
+    });
+
+    scheduleData.forEach(row => {
+        const data = { ...row };
+        delete data.date;
+        batch.set(doc(db, COLLECTION_NAME, row.date), data);
+    });
+
+    const metadata = { serviceItems, nonUserColumns };
+    if (displayConfig) metadata.displayConfig = displayConfig;
+    batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+
+    await batch.commit();
+
+    pushHistory();
+    updateEditDifference();
+    renderTable();
+    checkMissingUsers();
+}
+
 export async function addInfoItem(date, service, value) {
     const row = scheduleData.find(r => r.date === date);
     if (!row) return;
@@ -1895,6 +2010,10 @@ function setupBeforeUnloadHandler() {
         if (hasEdited) {
             saveEditLog();
         }
+        if (typeof usersUnsubscribe === 'function') {
+            usersUnsubscribe();
+            usersUnsubscribe = null;
+        }
     });
 }
 
@@ -2154,63 +2273,94 @@ async function loadDisplayConfig() {
 // ===========================
 // 使用者管理 - 檢查未註冊使用者或服事項目不完整
 // ===========================
+function evaluateMissingUsers(registeredUsers) {
+    const COLLECTION_NAME = window.COLLECTION_NAME;
+    const userServiceItems = serviceItems.filter(item => !nonUserColumns.includes(item));
+
+    const personServeItems = {};
+    scheduleData.forEach(row => {
+        userServiceItems.forEach(item => {
+            if (row[item] && Array.isArray(row[item])) {
+                row[item].forEach(name => {
+                    if (!personServeItems[name]) {
+                        personServeItems[name] = new Set();
+                    }
+                    personServeItems[name].add(item);
+                });
+            }
+        });
+    });
+
+    for (const name of Object.keys(personServeItems)) {
+        const userData = registeredUsers[name];
+        if (!userData) return true;
+
+        const registeredServes = userData.serve_types?.[COLLECTION_NAME] || [];
+        const scheduleServes = personServeItems[name];
+        for (const serve of scheduleServes) {
+            if (!registeredServes.includes(serve)) return true;
+        }
+    }
+    return false;
+}
+
+async function ensureUsersCache() {
+    if (usersCacheReady) return;
+    if (usersCacheInitPromise) return usersCacheInitPromise;
+
+    usersCacheInitPromise = new Promise(async (resolve, reject) => {
+        try {
+            const { collection, getDocs, onSnapshot } = window.firestore;
+            const db = window.db;
+
+            if (typeof onSnapshot === 'function') {
+                let firstResolved = false;
+                usersUnsubscribe = onSnapshot(
+                    collection(db, 'users'),
+                    (snapshot) => {
+                        const nextCache = {};
+                        snapshot.forEach(docRef => {
+                            nextCache[docRef.id] = docRef.data();
+                        });
+                        registeredUsersCache = nextCache;
+                        usersCacheReady = true;
+                        updateUserAlertBadge(evaluateMissingUsers(registeredUsersCache));
+
+                        if (!firstResolved) {
+                            firstResolved = true;
+                            resolve();
+                        }
+                    },
+                    (error) => {
+                        console.error('監聽 users 失敗:', error);
+                        if (!firstResolved) {
+                            firstResolved = true;
+                            reject(error);
+                        }
+                    }
+                );
+            } else {
+                const usersSnapshot = await getDocs(collection(db, 'users'));
+                const nextCache = {};
+                usersSnapshot.forEach(docRef => {
+                    nextCache[docRef.id] = docRef.data();
+                });
+                registeredUsersCache = nextCache;
+                usersCacheReady = true;
+                resolve();
+            }
+        } catch (error) {
+            reject(error);
+        }
+    });
+
+    return usersCacheInitPromise;
+}
+
 export async function checkMissingUsers() {
     try {
-        const { collection, getDocs, doc, getDoc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-
-        // 取得所有 users collection 中的使用者資料
-        const usersSnapshot = await getDocs(collection(db, 'users'));
-        const registeredUsers = {};
-        usersSnapshot.forEach(docRef => {
-            registeredUsers[docRef.id] = docRef.data();
-        });
-
-        // 取得非資訊欄位的服事項目（排除 nonUserColumns）
-        const userServiceItems = serviceItems.filter(item => !nonUserColumns.includes(item));
-
-        // 收集班表中每個人的服事項目（只統計非資訊欄位）
-        const personServeItems = {};
-        scheduleData.forEach(row => {
-            userServiceItems.forEach(item => {
-                if (row[item] && Array.isArray(row[item])) {
-                    row[item].forEach(name => {
-                        if (!personServeItems[name]) {
-                            personServeItems[name] = new Set();
-                        }
-                        personServeItems[name].add(item);
-                    });
-                }
-            });
-        });
-
-        // 檢查是否有問題
-        let hasIssues = false;
-        for (const name of Object.keys(personServeItems)) {
-            const userData = registeredUsers[name];
-
-            // 1. 使用者未註冊
-            if (!userData) {
-                hasIssues = true;
-                break;
-            }
-
-            // 2. 使用者已註冊但服事項目不完整
-            const registeredServes = userData.serve_types?.[COLLECTION_NAME] || [];
-            const scheduleServes = personServeItems[name];
-            for (const serve of scheduleServes) {
-                if (!registeredServes.includes(serve)) {
-                    hasIssues = true;
-                    break;
-                }
-            }
-            if (hasIssues) break;
-        }
-
-        // 更新警示符號
-        updateUserAlertBadge(hasIssues);
-
+        await ensureUsersCache();
+        updateUserAlertBadge(evaluateMissingUsers(registeredUsersCache));
     } catch (error) {
         console.error('檢查未註冊使用者失敗:', error);
     }

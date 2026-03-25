@@ -1,6 +1,6 @@
 import {
-    scheduleData, serviceItems, nonUserColumns, personColorMap,
-    saveSchedule, addNewRow, deleteLastRow, doAddServiceItem, deleteServiceItem,
+    scheduleData, serviceItems, nonUserColumns,
+    saveSchedule, applyAgentStructuralChanges,
     pushHistory, updateEditDifference, updateStatus
 } from './app.js';
 
@@ -312,34 +312,12 @@ export async function sendAgentRequest() {
             // --- 處理結構變更 (Structural Changes) ---
             // 必須先處理結構變更，表格中有了對應的日期列/服事欄後，setPendingChanges 才能正確比對出差異
 
-            // 1. 處理新增週數
-            if (result.addWeeks > 0) {
-                for (let i = 0; i < result.addWeeks; i++) {
-                    await addNewRow(true); // skipConfirm
-                }
-            }
-            // 2. 處理刪除週數
-            if (result.removeWeeks > 0) {
-                for (let i = 0; i < result.removeWeeks; i++) {
-                    await deleteLastRow(true); // skipConfirm
-                }
-            }
-            // 3. 處理新增服事/資訊欄位
-            if (result.addServiceColumns && result.addServiceColumns.length > 0) {
-                for (const colName of result.addServiceColumns) {
-                    if (!serviceItems.includes(colName)) {
-                        await doAddServiceItem(colName);
-                    }
-                }
-            }
-            // 4. 處理刪除服事/資訊欄位
-            if (result.removeServiceColumns && result.removeServiceColumns.length > 0) {
-                for (const colName of result.removeServiceColumns) {
-                    if (serviceItems.includes(colName)) {
-                        await deleteServiceItem(colName, true); // skipConfirm
-                    }
-                }
-            }
+            await applyAgentStructuralChanges({
+                addWeeks: result.addWeeks || 0,
+                removeWeeks: result.removeWeeks || 0,
+                addServiceColumns: result.addServiceColumns || [],
+                removeServiceColumns: result.removeServiceColumns || []
+            });
 
             // 最後才計算內容差異，此時 scheduleData 已經是擴充後的狀態
             setPendingChanges(result.scheduleData);
