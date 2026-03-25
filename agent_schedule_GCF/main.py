@@ -1,268 +1,349 @@
 """
 Agent Schedule Generator - Google Cloud Function
-Claude API Proxy for AI-powered scheduling
+Supports mode-based provider routing:
+- anthropic
+- openai_compatible
 """
 
-import os
 import json
-import functions_framework
-from flask import jsonify, make_response
+import os
+
 import anthropic
+import functions_framework
+import requests
+from flask import jsonify, make_response
 
-# 讀取 API Key（優先從 agentConfig.py，fallback 到環境變數）
 try:
-    from agentConfig import ANTHROPIC_API_KEY
+    from agentConfig import MODE_CONFIG, DEFAULT_MODE
 except ImportError:
-    ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+    MODE_CONFIG = {
+        "edit_qa": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "api_base_url": "",
+            "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+        },
+        "scheduling": {
+            "provider": "anthropic",
+            "model": "claude-opus-4-6",
+            "api_base_url": "",
+            "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+        },
+    }
+    DEFAULT_MODE = "edit_qa"
 
-# CORS 白名單
+
 ALLOWED_ORIGINS = [
-    'https://bol-line-bot-3.web.app',
-    'http://localhost:5500',   # 本地開發
+    "https://bol-line-bot-3.web.app",
+    "http://localhost:5500",
 ]
 
-def cors_response(data=None, status=200):
-    """建立帶 CORS header 的回應"""
-    if isinstance(data, dict):
-        response = make_response(jsonify(data), status)
-    else:
-        response = make_response(data or '', status)
-    return response
 
-def add_cors_headers(response, origin):
-    """加入 CORS headers"""
-    if origin in ALLOWED_ORIGINS:
-        response.headers['Access-Control-Allow-Origin'] = origin
-    response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    response.headers['Access-Control-Max-Age'] = '3600'
-    return response
-
-
-# Claude Tool 定義：限制回傳 scheduleData 格式
 SCHEDULE_TOOL = {
     "name": "update_schedule",
-    "description": "更新排班表。請使用此工具回傳新的排班資料。每個日期的每個服事項目都是一個人名的陣列。",
+    "description": "Update schedule JSON. If user only asks a question, respond normally without tool call.",
     "input_schema": {
         "type": "object",
         "properties": {
             "scheduleData": {
                 "type": "array",
-                "description": "排班資料陣列，每個元素代表一週",
+                "description": "Full schedule rows after modification.",
                 "items": {
                     "type": "object",
                     "properties": {
                         "date": {
                             "type": "string",
-                            "description": "日期字串，格式如 '2026-03-29'"
+                            "description": "Date string, e.g. 2026-03-29",
                         }
                     },
                     "additionalProperties": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "服事項目對應的人名陣列"
                     },
-                    "required": ["date"]
-                }
+                    "required": ["date"],
+                },
             },
             "addWeeks": {
                 "type": "integer",
-                "description": "要在班表最後面新增幾週？(例如 1 代表新增一週)。注意：新增的週會自動延續最後一週的日期。如果不需新增請填 0。"
+                "description": "How many weeks to append structurally.",
             },
             "removeWeeks": {
                 "type": "integer",
-                "description": "要從班表最後面刪除幾週？(例如 1 代表刪除最後一週)。如果不需刪除請填 0。"
+                "description": "How many weeks to remove structurally.",
             },
             "addServiceColumns": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "要新增的服事或資訊欄位名稱清單。例如 ['音控', '注意事項']。不需新增請保持空陣列。"
+                "description": "Service columns to add structurally.",
             },
             "removeServiceColumns": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "要刪除的服事或資訊欄位名稱清單。不需刪除請保持空陣列。"
+                "description": "Service columns to remove structurally.",
             },
             "explanation": {
                 "type": "string",
-                "description": "簡短說明排班邏輯和考量"
-            }
+                "description": "Short explanation for the user.",
+            },
         },
-        "required": ["scheduleData", "explanation"]
-    }
+        "required": ["scheduleData", "explanation"],
+    },
 }
+
+
+def cors_response(data=None, status=200):
+    if isinstance(data, dict):
+        return make_response(jsonify(data), status)
+    return make_response(data or "", status)
+
+
+def add_cors_headers(response, origin):
+    if origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Max-Age"] = "3600"
+    return response
+
+
+def _resolve_mode_config(selected_mode):
+    mode = selected_mode or DEFAULT_MODE
+    cfg = MODE_CONFIG.get(mode) or MODE_CONFIG.get(DEFAULT_MODE, {})
+    return mode, cfg
+
+
+def _build_messages(chat_history, prompt):
+    messages = []
+    for msg in chat_history:
+        role = msg.get("role", "user")
+        if role not in ("user", "assistant"):
+            role = "user"
+        messages.append({
+            "role": role,
+            "content": msg.get("content", ""),
+        })
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+def _anthropic_chat(api_key, model, system_prompt, messages):
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model=model,
+        max_tokens=8192,
+        system=system_prompt,
+        tools=[SCHEDULE_TOOL],
+        tool_choice={"type": "auto"},
+        messages=messages,
+    )
+
+    tool_input = None
+    text_parts = []
+    for block in message.content:
+        block_type = getattr(block, "type", None)
+        if block_type == "tool_use" and getattr(block, "name", "") == "update_schedule":
+            tool_input = getattr(block, "input", None) or {}
+            break
+        if block_type == "text":
+            text_parts.append(getattr(block, "text", ""))
+
+    usage = {
+        "input_tokens": getattr(getattr(message, "usage", None), "input_tokens", 0),
+        "output_tokens": getattr(getattr(message, "usage", None), "output_tokens", 0),
+    }
+    return tool_input, "\n".join([t for t in text_parts if t]).strip(), usage
+
+
+def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages):
+    if not api_base_url:
+        raise ValueError("api_base_url is required for openai_compatible provider")
+
+    endpoint = f"{api_base_url.rstrip('/')}/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    oa_messages = [{"role": "system", "content": system_prompt}] + messages
+    payload = {
+        "model": model,
+        "messages": oa_messages,
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": SCHEDULE_TOOL["name"],
+                "description": SCHEDULE_TOOL["description"],
+                "parameters": SCHEDULE_TOOL["input_schema"],
+            },
+        }],
+        "tool_choice": "auto",
+    }
+
+    response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenAI-compatible API error ({response.status_code}): {response.text}")
+
+    data = response.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise RuntimeError("OpenAI-compatible API returned no choices")
+
+    message = (choices[0] or {}).get("message", {})
+    tool_calls = message.get("tool_calls") or []
+    tool_input = None
+    for call in tool_calls:
+        fn = (call or {}).get("function") or {}
+        if fn.get("name") != "update_schedule":
+            continue
+        raw_args = fn.get("arguments", "{}")
+        if isinstance(raw_args, str):
+            try:
+                tool_input = json.loads(raw_args or "{}")
+            except json.JSONDecodeError:
+                tool_input = {}
+        elif isinstance(raw_args, dict):
+            tool_input = raw_args
+        else:
+            tool_input = {}
+        break
+
+    usage_raw = data.get("usage") or {}
+    usage = {
+        "input_tokens": usage_raw.get("prompt_tokens", 0),
+        "output_tokens": usage_raw.get("completion_tokens", 0),
+    }
+    return tool_input, (message.get("content") or "").strip(), usage
 
 
 @functions_framework.http
 def generate_agent_schedule(request):
-    """HTTP Cloud Function 入口"""
-    origin = request.headers.get('Origin', '')
+    origin = request.headers.get("Origin", "")
 
-    # 處理 CORS preflight
-    if request.method == 'OPTIONS':
-        response = cors_response('', 204)
-        return add_cors_headers(response, origin)
+    if request.method == "OPTIONS":
+        return add_cors_headers(cors_response("", 204), origin)
 
-    # 檢查來源
     if origin and origin not in ALLOWED_ORIGINS:
-        response = cors_response({'error': 'Forbidden origin'}, 403)
-        return add_cors_headers(response, origin)
+        return add_cors_headers(cors_response({"error": "Forbidden origin"}, 403), origin)
 
-    # 只接受 POST
-    if request.method != 'POST':
-        response = cors_response({'error': 'Method not allowed'}, 405)
-        return add_cors_headers(response, origin)
+    if request.method != "POST":
+        return add_cors_headers(cors_response({"error": "Method not allowed"}, 405), origin)
 
     try:
         data = request.get_json(force=True)
     except Exception:
-        response = cors_response({'error': 'Invalid JSON'}, 400)
-        return add_cors_headers(response, origin)
+        return add_cors_headers(cors_response({"error": "Invalid JSON"}, 400), origin)
 
-    # 取得參數
-    prompt = data.get('prompt', '')
-    current_schedule = data.get('currentSchedule', '{}')
-    selected_model = data.get('selectedModel', 'claude-sonnet-4-6')
-    active_rules = data.get('activeRules', {})
-    attached_csv_text = data.get('attachedCsvText', '')
-    chat_history = data.get('chatHistory', [])
+    prompt = data.get("prompt", "")
+    current_schedule = data.get("currentSchedule", "{}")
+    selected_mode = data.get("selectedMode", DEFAULT_MODE)
+    active_rules = data.get("activeRules", {})
+    attached_csv_text = data.get("attachedCsvText", "")
+    chat_history = data.get("chatHistory", [])
 
     if not prompt:
-        response = cors_response({'error': 'Missing prompt'}, 400)
-        return add_cors_headers(response, origin)
+        return add_cors_headers(cors_response({"error": "Missing prompt"}, 400), origin)
 
-    # 取得 API Key
-    if not ANTHROPIC_API_KEY:
-        response = cors_response({'error': 'API key not configured'}, 500)
-        return add_cors_headers(response, origin)
+    mode, mode_cfg = _resolve_mode_config(selected_mode)
+    provider = mode_cfg.get("provider", "anthropic")
+    model = mode_cfg.get("model", "claude-sonnet-4-6")
+    api_base_url = mode_cfg.get("api_base_url", "")
+    api_key = mode_cfg.get("api_key", "")
 
-    # 建立 System Prompt
-    system_prompt = build_system_prompt(current_schedule, active_rules, attached_csv_text)
-
-    # 組合對話紀錄
-    messages = []
-    for msg in chat_history:
-        # 只允許 user 和 assistant 角色
-        role = msg.get("role", "user")
-        if role not in ["user", "assistant"]:
-            role = "user"
-        messages.append({
-            "role": role,
-            "content": msg.get("content", "")
-        })
-    # 加入當前 prompt
-    messages.append({"role": "user", "content": prompt})
+    system_prompt = build_system_prompt(
+        current_schedule,
+        active_rules,
+        attached_csv_text,
+        selected_mode=mode,
+    )
+    messages = _build_messages(chat_history, prompt)
 
     try:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        if provider == "anthropic":
+            if not api_key:
+                return add_cors_headers(cors_response({"error": "API key not configured for anthropic mode"}, 500), origin)
+            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages)
+        elif provider == "openai_compatible":
+            tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages)
+        else:
+            return add_cors_headers(cors_response({"error": f"Unsupported provider: {provider}"}, 500), origin)
 
-        # 呼叫 Claude API
-        message = client.messages.create(
-            model=selected_model,
-            max_tokens=8192,
-            system=system_prompt,
-            tools=[SCHEDULE_TOOL],
-            tool_choice={"type": "auto"},
-            messages=messages
-        )
-
-        # 從 tool_use 回應中取出結果
-        result = None
-        explanation = ''
-        tool_input = None
-        for content_block in message.content:   
-            if content_block.type == 'tool_use' and content_block.name == 'update_schedule':
-                tool_input = content_block.input or {}
-                result = tool_input.get('scheduleData', [])
-                explanation = tool_input.get('explanation', '')
-                break
-
-        # 如果沒有呼叫工具（代表 Claude 只是進行一般文字對話回答問題）
-        if result is None:
-            text_response = ''
-            for content_block in message.content:
-                if content_block.type == 'text':
-                    text_response += content_block.text + '\n'
-            
-            # 將原封不動的 current_schedule 還給前端，這樣前端比對就不會有異動
-            answer_text = text_response.strip() or '目前沒有可回覆的內容。'
+        if not tool_input:
+            answer_text = text_response or "目前無需修改排班，這題以問答模式回覆。"
             response = cors_response({
-                'mode': 'answer_only',
-                'answerOnly': True,
-                'answer': answer_text,
-                'explanation': answer_text,
-                'model': selected_model,
-                'usage': {
-                    'input_tokens': message.usage.input_tokens,
-                    'output_tokens': message.usage.output_tokens
-                }
+                "mode": "answer_only",
+                "answerOnly": True,
+                "answer": answer_text,
+                "explanation": answer_text,
+                "modeKey": mode,
+                "provider": provider,
+                "model": model,
+                "usage": usage,
             })
             return add_cors_headers(response, origin)
 
+        result = tool_input.get("scheduleData", [])
+        explanation = tool_input.get("explanation", "")
         if not result:
-            response = cors_response({'error': 'No schedule data in response'}, 500)
-            return add_cors_headers(response, origin)
+            return add_cors_headers(cors_response({"error": "No schedule data in response"}, 500), origin)
 
         response = cors_response({
-            'scheduleData': result,
-            'explanation': explanation,
-            'addWeeks': tool_input.get('addWeeks', 0) if tool_input else 0,
-            'removeWeeks': tool_input.get('removeWeeks', 0) if tool_input else 0,
-            'addServiceColumns': tool_input.get('addServiceColumns', []) if tool_input else [],
-            'removeServiceColumns': tool_input.get('removeServiceColumns', []) if tool_input else [],
-            'model': selected_model,
-            'usage': {
-                'input_tokens': message.usage.input_tokens,
-                'output_tokens': message.usage.output_tokens
-            }
+            "scheduleData": result,
+            "explanation": explanation,
+            "addWeeks": tool_input.get("addWeeks", 0),
+            "removeWeeks": tool_input.get("removeWeeks", 0),
+            "addServiceColumns": tool_input.get("addServiceColumns", []),
+            "removeServiceColumns": tool_input.get("removeServiceColumns", []),
+            "modeKey": mode,
+            "provider": provider,
+            "model": model,
+            "usage": usage,
         })
         return add_cors_headers(response, origin)
 
     except anthropic.APIError as e:
-        response = cors_response({'error': f'Claude API error: {str(e)}'}, 502)
-        return add_cors_headers(response, origin)
+        return add_cors_headers(cors_response({"error": f"Claude API error: {str(e)}"}, 502), origin)
     except Exception as e:
-        response = cors_response({'error': f'Internal error: {str(e)}'}, 500)
-        return add_cors_headers(response, origin)
+        return add_cors_headers(cors_response({"error": f"Internal error: {str(e)}"}, 500), origin)
 
 
-def build_system_prompt(current_schedule, active_rules, attached_csv_text):
-    """建立給 Claude 的 System Prompt"""
-    rules_text = ''
-    if active_rules.get('consecutive'):
-        rules_text += '\n- 禁止同一人連續兩週（相鄰日期）擔任相同服事項目'
-    if active_rules.get('maxRoles'):
-        rules_text += '\n- 單一使用者在同一週內最多擔任 3 項服事'
+def build_system_prompt(current_schedule, active_rules, attached_csv_text, selected_mode):
+    is_scheduling = selected_mode == "scheduling"
 
-    csv_section = ''
-    if attached_csv_text:
-        csv_section = f"""
+    rules = []
+    if is_scheduling:
+        if active_rules.get("consecutive"):
+            rules.append("- Avoid assigning the same person in the same service for consecutive weeks.")
+        if active_rules.get("maxRoles"):
+            rules.append("- Each person should not exceed 3 service roles per week.")
+        if not rules:
+            rules.append("- No extra scheduling rules are enabled.")
+    else:
+        rules.append("- Rule checks are disabled in edit/qa mode.")
 
-## 使用者提供的參考資料 (CSV)
-以下是使用者上傳的 CSV 資料，請參考此資料來排班：
-<csv_data>
-{attached_csv_text}
-</csv_data>
-"""
+    csv_section = ""
+    if (not is_scheduling) and attached_csv_text:
+        csv_section = (
+            "\n\n## CSV Availability Data\n"
+            "Use this data as constraints/reference when editing the schedule.\n"
+            "<csv_data>\n"
+            f"{attached_csv_text}\n"
+            "</csv_data>\n"
+        )
 
-    rules_section = rules_text if rules_text else '\n- (無特定規則限制)'
-
-    return f"""你是一個教會排班助手 AI。你的工作是根據使用者的指示，修改或產生排班表資料。
-
-## 當前排班表（JSON 格式）
-```json
-{current_schedule}
-```
-
-## 排班規則
-以下是必須遵守的排班規則：{rules_section}
-{csv_section}
-## 重要提示
-1. 如需修改排班表，請必須使用 `update_schedule` 工具回傳完整的排班資料。如果使用者只是在聊天確認資訊，請不要呼叫工具，直接用文字回覆。
-2. 若要求「新增週數」，請在 `addWeeks` 填入數量，且**必須在 `scheduleData` 陣列中直接加入對應的新週數物件**（日期自動加 7 天），如果你有安排人員請一併寫入新週數中。
-3. 若要求「刪除週數」，請在 `removeWeeks` 填入數量，並將 `scheduleData` 中最後的週數物件移除。
-4. 若要求「新增/刪除服事欄位」，請將名稱放入 `addServiceColumns` / `removeServiceColumns` 陣列中，並同步更新 `scheduleData` 每週物件中的鍵值。
-5. 若要求「新增/編輯/刪除服事項目」，回傳的 `scheduleData` 中的每個物件必須包含 `date` 欄位和各服事項目欄位。
-6. 服事項目的值必須是人名字串陣列（例如 ["小明", "小華"]）。
-7. 請仔細遵守排班規則，不要讓任何人違反規則。
-8. 如果使用者只要求修改部分內容，請保持其他部分不變。在 `explanation` 中簡短說明你的排班邏輯。"""
+    return (
+        "You are a schedule editing assistant.\n"
+        "If the user asks for scheduling changes, call tool `update_schedule`.\n"
+        "If the user asks a pure question, answer directly without tool call.\n\n"
+        "## Current Schedule JSON\n"
+        "```json\n"
+        f"{current_schedule}\n"
+        "```\n\n"
+        "## Active Rules\n"
+        f"{os.linesep.join(rules)}"
+        f"{csv_section}\n"
+        "## Tool Requirements\n"
+        "1. Always return complete `scheduleData` when calling the tool.\n"
+        "2. Use `addWeeks`/`removeWeeks` only for structural week changes.\n"
+        "3. Use `addServiceColumns`/`removeServiceColumns` for structural service changes.\n"
+        "4. Keep each row with a `date` field and service arrays of names.\n"
+        "5. Include a concise `explanation`.\n"
+    )

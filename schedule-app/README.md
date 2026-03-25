@@ -10,7 +10,7 @@
 |------|------|------|
 | 📖 **班表查看** | `schedule-app/` | 只能查看班表，支援使用者 highlight |
 | ✏️ **班表編輯** | `edit-chart/` | 編輯班表、管理使用者，支援撤銷/重做 |
-| 🤖 **AI 排班** | `edit-chart/edit-chart-agent.html` | AI 輔助排班，Claude API 產生建議並逐格審核 |
+| 🤖 **AI 排班** | `edit-chart/edit-chart.html` | AI 輔助排班，Claude API 產生建議並逐格審核 |
 | 📊 **使用數據觀察** | `edit-chart/observation.html` | 查看 LINE Bot 使用統計與分析 |
 
 ### 📅 日期管理

@@ -286,18 +286,18 @@
         <button class="agent-sidebar-close" id="closeSidebarBtn">&times;</button>
       </div>
 
-      <!-- 模型選擇 -->
+      <!-- 模式選擇 -->
       <div class="agent-config-section"
         style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-        <label class="agent-config-label" style="margin-bottom: 0; white-space: nowrap;">模型選擇</label>
-        <select class="agent-select" id="modelSelect" style="flex: 1; margin: 0; padding: 6px 10px;">
-          <option value="claude-sonnet-4-6">Claude 4.6 Sonnet</option>
-          <option value="claude-opus-4-6">Claude 4.6 Opus</option>
+        <label class="agent-config-label" style="margin-bottom: 0; white-space: nowrap;">模式選擇</label>
+        <select class="agent-select" id="modeSelect" style="flex: 1; margin: 0; padding: 6px 10px;">
+          <option value="edit_qa" selected>編輯 / 問答</option>
+          <option value="scheduling">排班</option>
         </select>
       </div>
 
       <!-- 規則勾選區 -->
-      <div class="agent-config-section">
+      <div class="agent-config-section" id="agentRulesSection">
         <label class="agent-config-label" id="agentRulesToggle"
           style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
           排班規則
@@ -319,9 +319,9 @@
       <div class="agent-chat-area" id="agentChatArea">
         <div class="agent-chat-welcome">
           <div class="agent-chat-welcome-icon">🤖</div>
-          <p>嗨！我是 AI 排班助手。</p>
+          <p>嗨！我是 AI 助手。</p>
           <p>請告訴我你想如何排班，我會產生建議供你審核。</p>
-          <p class="agent-chat-hint">💡 你可以上傳 CSV 檔案作為排班參考資料。</p>
+          <p class="agent-chat-hint" id="agentChatHint">💡 你可以上傳 CSV 檔案作為排班參考資料。</p>
         </div>
       </div>
 
@@ -334,7 +334,7 @@
         </div>
         <!-- 輸入框和按鈕 -->
         <div class="agent-input-row">
-          <label class="agent-attach-btn" title="上傳 CSV 檔案">
+          <label class="agent-attach-btn" id="csvAttachBtn" title="上傳 CSV 檔案">
             📎
             <input type="file" accept=".csv" id="csvFileInput" style="display: none;">
           </label>

@@ -1725,6 +1725,36 @@ body.multi-selecting-active {
   word-break: break-word;
 }
 
+.agent-msg > div {
+  margin: 0 0 4px 0;
+}
+
+.agent-msg > div:last-child {
+  margin-bottom: 0;
+}
+
+.agent-msg-break {
+  height: 8px;
+}
+
+.agent-msg-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.agent-msg-table th,
+.agent-msg-table td {
+  border: 1px solid var(--border-color);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.agent-msg-table th {
+  background: var(--gray-50);
+}
+
 .agent-msg.user {
   align-self: flex-end;
   background: var(--primary-color);

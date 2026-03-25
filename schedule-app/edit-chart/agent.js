@@ -13,10 +13,106 @@ import { renderTable } from './ui.js';
 // --- Agent 狀態 ---
 export let pendingAgentChanges = null;
 let attachedCsvText = null;
+let attachedCsvFileName = '';
 let agentIsLoading = false;
 
 // Cloud Function URL（從 firebase-config.js 載入）
 const AGENT_API_URL = window.AGENT_API_URL || '';
+
+const MODE_EDIT_QA = 'edit_qa';
+const MODE_SCHEDULING = 'scheduling';
+
+const modeChatHistory = {
+    [MODE_EDIT_QA]: [],
+    [MODE_SCHEDULING]: []
+};
+
+function getSelectedMode() {
+    return document.getElementById('modeSelect')?.value || MODE_EDIT_QA;
+}
+
+function getModeHistory(mode = getSelectedMode()) {
+    if (!modeChatHistory[mode]) {
+        modeChatHistory[mode] = [];
+    }
+    return modeChatHistory[mode];
+}
+
+function isSchedulingMode() {
+    return getSelectedMode() === MODE_SCHEDULING;
+}
+
+function syncAgentModeUI() {
+    const scheduling = isSchedulingMode();
+    const rulesSection = document.getElementById('agentRulesSection');
+    const rulesContent = document.getElementById('agentRulesContent');
+    const csvAttachBtn = document.getElementById('csvAttachBtn');
+    const attachmentPreview = document.getElementById('attachmentPreview');
+    const csvInput = document.getElementById('csvFileInput');
+    const chatHint = document.getElementById('agentChatHint');
+
+    if (rulesSection) {
+        rulesSection.style.display = scheduling ? '' : 'none';
+    }
+
+    if (!scheduling) {
+        if (rulesContent) rulesContent.style.display = 'none';
+    } else {
+        if (rulesContent) rulesContent.style.display = 'block';
+    }
+
+    if (csvAttachBtn) {
+        csvAttachBtn.style.display = scheduling ? 'none' : '';
+    }
+
+    if (chatHint) {
+        chatHint.textContent = scheduling
+            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
+            : '💡 你可以上傳 CSV 檔案作為排班參考資料。';
+    }
+
+    if (scheduling) {
+        attachedCsvText = null;
+        attachedCsvFileName = '';
+        if (attachmentPreview) attachmentPreview.classList.add('hidden');
+        if (csvInput) csvInput.value = '';
+    }
+
+    if (chatHint) {
+        chatHint.textContent = scheduling
+            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
+            : '💡 你可以上傳 CSV 檔案作為參考資料。';
+    }
+}
+
+function createWelcomeNode(mode = getSelectedMode()) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'agent-chat-welcome';
+    wrapper.innerHTML = `
+        <div class="agent-chat-welcome-icon">🤖</div>
+        <p>歡迎使用 AI 助手。</p>
+        <p>你可以直接輸入需求，系統會協助你調整排班。</p>
+        <p class="agent-chat-hint" id="agentChatHint">${mode === MODE_SCHEDULING
+            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
+            : '💡 你可以上傳 CSV 檔案作為參考資料。'
+        }</p>
+    `;
+    return wrapper;
+}
+
+function renderChatHistory(mode = getSelectedMode()) {
+    const chatArea = document.getElementById('agentChatArea');
+    if (!chatArea) return;
+
+    chatArea.innerHTML = '';
+    const history = getModeHistory(mode);
+    if (!history.length) {
+        chatArea.appendChild(createWelcomeNode(mode));
+        return;
+    }
+
+    history.forEach(({ content, role }) => appendChatMessageNode(content, role));
+}
 
 // --- 側邊欄控制 ---
 export function setupAgentSidebar() {
@@ -39,6 +135,7 @@ export function setupAgentSidebar() {
     // 送出按鈕
     const sendBtn = document.getElementById('agentSendBtn');
     const promptInput = document.getElementById('agentPromptInput');
+    const modeSelect = document.getElementById('modeSelect');
 
     if (sendBtn) {
         sendBtn.addEventListener('click', () => sendAgentRequest());
@@ -55,6 +152,13 @@ export function setupAgentSidebar() {
                 e.preventDefault();
                 sendAgentRequest();
             }
+        });
+    }
+
+    if (modeSelect) {
+        modeSelect.addEventListener('change', () => {
+            renderChatHistory(getSelectedMode());
+            syncAgentModeUI();
         });
     }
 
@@ -89,6 +193,7 @@ export function setupAgentSidebar() {
             const reader = new FileReader();
             reader.onload = (event) => {
                 attachedCsvText = event.target.result;
+                attachedCsvFileName = file.name;
                 attachmentName.textContent = `📄 ${file.name}`;
                 attachmentPreview.classList.remove('hidden');
             };
@@ -99,10 +204,14 @@ export function setupAgentSidebar() {
     if (removeAttachmentBtn) {
         removeAttachmentBtn.addEventListener('click', () => {
             attachedCsvText = null;
+            attachedCsvFileName = '';
             attachmentPreview.classList.add('hidden');
             csvInput.value = '';
         });
     }
+
+    renderChatHistory(getSelectedMode());
+    syncAgentModeUI();
 
     // Accept/Reject 全部
     const acceptAllBtn = document.getElementById('acceptAllBtn');
@@ -117,16 +226,91 @@ export function setupAgentSidebar() {
 }
 
 // --- 聊天 UI ---
-export function addChatMessage(text, role = 'user') {
+function escapeHtml(text = '') {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatInlineMarkdown(text = '') {
+    return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+function parseTableRow(line = '') {
+    let row = line.trim();
+    if (row.startsWith('|')) row = row.slice(1);
+    if (row.endsWith('|')) row = row.slice(0, -1);
+    return row.split('|').map(cell => cell.trim());
+}
+
+function isMarkdownTableSeparator(line = '') {
+    const t = line.trim();
+    return /^[:\-|\s]+$/.test(t) && t.includes('-');
+}
+
+function markdownToHtml(text = '') {
+    const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    const html = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const current = lines[i];
+        const next = i + 1 < lines.length ? lines[i + 1] : '';
+
+        if (current.includes('|') && isMarkdownTableSeparator(next)) {
+            const headers = parseTableRow(current);
+            const rows = [];
+            i += 2;
+            while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+                rows.push(parseTableRow(lines[i]));
+                i++;
+            }
+            i--;
+
+            const thead = `<thead><tr>${headers.map(h => `<th>${formatInlineMarkdown(h)}</th>`).join('')}</tr></thead>`;
+            const tbody = `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${formatInlineMarkdown(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+            html.push(`<table class="agent-msg-table">${thead}${tbody}</table>`);
+            continue;
+        }
+
+        if (current.trim() === '') {
+            html.push('<div class="agent-msg-break"></div>');
+            continue;
+        }
+
+        html.push(`<div>${formatInlineMarkdown(current)}</div>`);
+    }
+
+    return html.join('');
+}
+
+function appendChatMessageNode(text, role) {
     const chatArea = document.getElementById('agentChatArea');
+    if (!chatArea) return;
     const welcome = chatArea.querySelector('.agent-chat-welcome');
     if (welcome) welcome.remove();
 
     const msg = document.createElement('div');
     msg.className = `agent-msg ${role}`;
-    msg.textContent = text;
+    if (role === 'assistant') {
+        msg.innerHTML = markdownToHtml(text);
+    } else {
+        msg.textContent = text;
+    }
     chatArea.appendChild(msg);
     chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+export function addChatMessage(text, role = 'user', options = {}) {
+    const mode = options.mode || getSelectedMode();
+    if (options.persist !== false) {
+        getModeHistory(mode).push({ role, content: text });
+    }
+    if (mode === getSelectedMode()) {
+        appendChatMessageNode(text, role);
+    }
 }
 
 export function showAgentLoading() {
@@ -219,21 +403,41 @@ export async function sendAgentRequest() {
         return;
     }
 
-    addChatMessage(prompt, 'user');
+    const selectedMode = getSelectedMode();
+    const scheduling = selectedMode === MODE_SCHEDULING;
+    const csvTextToSend = (!scheduling && attachedCsvText) ? attachedCsvText : '';
+    const csvFileNameToSend = attachedCsvFileName || 'uploaded.csv';
+    const priorChatHistory = getModeHistory(selectedMode).map(msg => ({
+        role: msg.role,
+        content: msg.content
+    }));
+
+    if (csvTextToSend) {
+        addChatMessage(`[CSV] ${csvFileNameToSend}`, 'user', { mode: selectedMode });
+        attachedCsvText = null;
+        attachedCsvFileName = '';
+        const attachmentPreview = document.getElementById('attachmentPreview');
+        const csvInput = document.getElementById('csvFileInput');
+        if (attachmentPreview) attachmentPreview.classList.add('hidden');
+        if (csvInput) csvInput.value = '';
+    }
+
+    addChatMessage(prompt, 'user', { mode: selectedMode });
     promptInput.value = '';
     promptInput.style.height = 'auto';
 
-    const selectedModel = document.getElementById('modelSelect').value;
-    const activeRules = {
-        consecutive: document.getElementById('ruleConsecutive').checked,
-        maxRoles: document.getElementById('ruleMaxRoles').checked
-    };
+    const activeRules = scheduling
+        ? {
+            consecutive: document.getElementById('ruleConsecutive')?.checked ?? false,
+            maxRoles: document.getElementById('ruleMaxRoles')?.checked ?? false
+        }
+        : {};
 
     // 取得歷史訊息對話紀錄
-    const chatHistory = [];
+    const chatHistory = priorChatHistory;
     document.querySelectorAll('#agentChatArea .agent-msg').forEach(msg => {
         // 排除剛才由這次 input 觸發的 UI message，因為 prompt 已經傳了
-        if (msg.textContent !== prompt) {
+        if (false) {
             chatHistory.push({
                 role: msg.classList.contains('user') ? 'user' : 'assistant',
                 content: msg.textContent
@@ -257,12 +461,12 @@ export async function sendAgentRequest() {
     const payload = {
         prompt,
         currentSchedule: JSON.stringify({ scheduleData: effectiveScheduleData, serviceItems, nonUserColumns }),
-        selectedModel,
+        selectedMode,
         activeRules,
-        chatHistory
+        chatHistory: priorChatHistory
     };
 
-    if (attachedCsvText) payload.attachedCsvText = attachedCsvText;
+    if (csvTextToSend) payload.attachedCsvText = csvTextToSend;
 
     agentIsLoading = true;
     document.getElementById('agentSendBtn').disabled = true;
@@ -293,7 +497,7 @@ export async function sendAgentRequest() {
             // 問答型回覆（不含排班變更）直接顯示，不進入驗證/套用流程
             if (result.answerOnly || result.mode === 'answer_only' || !Array.isArray(result.scheduleData)) {
                 hideAgentLoading();
-                addChatMessage(result.answer || result.explanation || '已收到回覆。', 'assistant');
+                addChatMessage(result.answer || result.explanation || '已收到回覆。', 'assistant', { mode: selectedMode });
                 break;
             }
 
@@ -310,11 +514,11 @@ export async function sendAgentRequest() {
 
             if (!validation.valid) {
                 // 如果有警告，優先顯示警告資訊
-                addChatMessage((result.explanation || '已產生排班建議') + `（但有 ${validation.warnings.length} 項規則警告）`, 'assistant');
-                validation.warnings.forEach(w => addChatMessage(w.message, 'error'));
+                addChatMessage((result.explanation || '已產生排班建議') + `（但有 ${validation.warnings.length} 項規則警告）`, 'assistant', { mode: selectedMode });
+                validation.warnings.forEach(w => addChatMessage(w.message, 'error', { mode: selectedMode }));
             } else {
                 // 有 explanation 就顯示 explanation，否則顯示預設字眼
-                addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant');
+                addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant', { mode: selectedMode });
             }
 
             // --- 處理結構變更 (Structural Changes) ---
@@ -335,7 +539,7 @@ export async function sendAgentRequest() {
         } catch (error) {
             hideAgentLoading();
             console.error('Agent API 呼叫失敗:', error);
-            addChatMessage(`❌ 發生錯誤：${error.message}`, 'error');
+            addChatMessage(`❌ 發生錯誤：${error.message}`, 'error', { mode: selectedMode });
             break;
         }
     }

@@ -1,74 +1,111 @@
 # Agent Schedule Generator (Cloud Function)
 
-Claude API Proxy，接收前端排班指令並呼叫 Claude API 產生排班建議。
+此服務提供 `generate_agent_schedule` API，前端會送出排班資料與使用者提示，後端依 `selectedMode` 選擇不同模型與 provider，回傳：
+- 排班更新（tool call）
+- 或純問答內容（answer-only）
 
-## 架構
+## 檔案
 
-```
+```text
 agent_schedule_GCF/
-├── main.py           # Cloud Function 主程式
-├── agentConfig.py    # API Key 設定（.gitignore 排除）
-└── requirements.txt  # Python 依賴
+├─ main.py
+├─ agentConfig.py
+├─ requirements.txt
+└─ README.md
 ```
 
-## 設定
+## Request Body
 
-1. 複製設定檔並填入 API Key：
-```python
-# agentConfig.py
-ANTHROPIC_API_KEY = "your-key-here"
-```
-
-2. 安裝依賴（本地測試用）：
-```bash
-pip install -r requirements.txt
-```
-
-## 部署
-
-```bash
-gcloud functions deploy generate_agent_schedule \
-  --runtime python312 \
-  --trigger-http \
-  --allow-unauthenticated \
-  --region us-central1
-```
-
-> **注意**：若不使用 `agentConfig.py`，可改用環境變數：
-> ```bash
-> --set-env-vars ANTHROPIC_API_KEY=your-key-here
-> ```
-
-## API 規格
-
-### POST `/generate_agent_schedule`
-
-**Request Body:**
 ```json
 {
-  "prompt": "幫我排下週的班表",
+  "prompt": "4/19有誰？",
   "currentSchedule": "{scheduleData, serviceItems, nonUserColumns}",
-  "selectedModel": "claude-sonnet-4-6",
+  "selectedMode": "edit_qa",
   "activeRules": { "consecutive": true, "maxRoles": true },
-  "attachedCsvText": "(optional) CSV 純文字"
+  "attachedCsvText": "(optional)"
 }
 ```
 
-**Response:**
+## 模式
+
+- `edit_qa`：編輯/問答模式
+- `scheduling`：排班模式
+
+## 模式行為
+
+- `edit_qa`：
+  - 可附帶 `attachedCsvText`
+  - 後端不把排班規則寫入 system prompt
+- `scheduling`：
+  - 排班規則（`activeRules`）會寫入 system prompt
+  - CSV 不會寫入 system prompt
+
+## agentConfig.py
+
+`MODE_CONFIG` 可讓你針對兩個模式各自設定：
+- `provider`
+- `model`
+- `api_base_url`
+- `api_key`
+
+範例：
+
+```python
+import os
+
+MODE_CONFIG = {
+    "edit_qa": {
+        "provider": "openai_compatible",
+        "model": "gpt-4.1",
+        "api_base_url": "https://api.openai.com/v1",
+        "api_key": os.environ.get("OPENAI_API_KEY", ""),
+    },
+    "scheduling": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-6",
+        "api_base_url": "",
+        "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+    },
+}
+
+DEFAULT_MODE = "edit_qa"
+```
+
+## 支援的 provider
+
+- `anthropic`
+- `openai_compatible`（例如 `https://api.openai.com/v1`）
+
+## 回應格式
+
+### 1) 排班更新
+
 ```json
 {
-  "scheduleData": [{ "date": "2026-03-29", "主領": ["小明"], ... }],
-  "explanation": "排班邏輯說明",
-  "model": "claude-sonnet-4-6",
-  "usage": { "input_tokens": 1234, "output_tokens": 567 }
+  "scheduleData": [...],
+  "explanation": "...",
+  "addWeeks": 0,
+  "removeWeeks": 0,
+  "addServiceColumns": [],
+  "removeServiceColumns": [],
+  "modeKey": "scheduling",
+  "provider": "anthropic",
+  "model": "claude-opus-4-6",
+  "usage": { "input_tokens": 123, "output_tokens": 456 }
 }
 ```
 
-### CORS 白名單
-- `bol-line-bot-3.web.app`
-- `bol-line-bot-3.firebaseapp.com`
-- `localhost:5000`（本地開發）
+### 2) 問答模式（不改排班）
 
-## Claude Tool Schema
-
-使用 Function Calling 強制 Claude 回傳 `scheduleData` JSON 格式，確保結構一致。
+```json
+{
+  "mode": "answer_only",
+  "answerOnly": true,
+  "answer": "...",
+  "explanation": "...",
+  "modeKey": "edit_qa",
+  "provider": "openai_compatible",
+  "model": "gpt-4.1",
+  "usage": { "input_tokens": 123, "output_tokens": 456 }
+}
+```
