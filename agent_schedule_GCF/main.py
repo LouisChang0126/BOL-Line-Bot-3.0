@@ -169,10 +169,12 @@ def generate_agent_schedule(request):
         # 從 tool_use 回應中取出結果
         result = None
         explanation = ''
+        tool_input = None
         for content_block in message.content:   
             if content_block.type == 'tool_use' and content_block.name == 'update_schedule':
-                result = content_block.input.get('scheduleData', [])
-                explanation = content_block.input.get('explanation', '')
+                tool_input = content_block.input or {}
+                result = tool_input.get('scheduleData', [])
+                explanation = tool_input.get('explanation', '')
                 break
 
         # 如果沒有呼叫工具（代表 Claude 只是進行一般文字對話回答問題）
@@ -199,10 +201,10 @@ def generate_agent_schedule(request):
         response = cors_response({
             'scheduleData': result,
             'explanation': explanation,
-            'addWeeks': content_block.input.get('addWeeks', 0) if result is not None else 0,
-            'removeWeeks': content_block.input.get('removeWeeks', 0) if result is not None else 0,
-            'addServiceColumns': content_block.input.get('addServiceColumns', []) if result is not None else [],
-            'removeServiceColumns': content_block.input.get('removeServiceColumns', []) if result is not None else [],
+            'addWeeks': tool_input.get('addWeeks', 0) if tool_input else 0,
+            'removeWeeks': tool_input.get('removeWeeks', 0) if tool_input else 0,
+            'addServiceColumns': tool_input.get('addServiceColumns', []) if tool_input else [],
+            'removeServiceColumns': tool_input.get('removeServiceColumns', []) if tool_input else [],
             'model': selected_model,
             'usage': {
                 'input_tokens': message.usage.input_tokens,
