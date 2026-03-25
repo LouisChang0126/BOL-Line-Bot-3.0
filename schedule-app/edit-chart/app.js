@@ -913,10 +913,15 @@ export function setupDragAndDrop() {
 
             try {
                 // 從來源移除
-                await removePerson(draggedData.date, draggedData.service, draggedData.person);
+                await movePersonBetweenCells(
+                    draggedData.date,
+                    draggedData.service,
+                    targetDate,
+                    targetService,
+                    draggedData.person
+                );
 
                 // 新增到目標
-                await addPersonToCell(targetDate, targetService, draggedData.person);
 
                 updateStatus('人員已移動');
 
@@ -2364,6 +2369,47 @@ export async function checkMissingUsers() {
     } catch (error) {
         console.error('檢查未註冊使用者失敗:', error);
     }
+}
+
+export async function movePersonBetweenCells(fromDate, fromService, toDate, toService, person) {
+    const fromRow = scheduleData.find(r => r.date === fromDate);
+    const toRow = scheduleData.find(r => r.date === toDate);
+    if (!fromRow || !toRow) return;
+
+    if (!Array.isArray(fromRow[fromService]) || !Array.isArray(toRow[toService])) return;
+    if (fromDate === toDate && fromService === toService) return;
+
+    const fromIndex = fromRow[fromService].indexOf(person);
+    if (fromIndex === -1) return;
+    if (toRow[toService].includes(person)) {
+        alert('目標格已經有這位同工');
+        return;
+    }
+
+    fromRow[fromService].splice(fromIndex, 1);
+    toRow[toService].push(person);
+
+    const { writeBatch, doc } = window.firestore;
+    const db = window.db;
+    const COLLECTION_NAME = window.COLLECTION_NAME;
+    const batch = writeBatch(db);
+
+    const fromData = { ...fromRow };
+    delete fromData.date;
+    batch.set(doc(db, COLLECTION_NAME, fromRow.date), fromData);
+
+    if (fromRow.date !== toRow.date) {
+        const toData = { ...toRow };
+        delete toData.date;
+        batch.set(doc(db, COLLECTION_NAME, toRow.date), toData);
+    }
+
+    await batch.commit();
+
+    pushHistory();
+    updateEditDifference();
+    renderTable();
+    checkMissingUsers();
 }
 
 // 更新使用者警示符號

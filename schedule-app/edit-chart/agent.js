@@ -289,6 +289,14 @@ export async function sendAgentRequest() {
             }
 
             const result = await response.json();
+
+            // 問答型回覆（不含排班變更）直接顯示，不進入驗證/套用流程
+            if (result.answerOnly || result.mode === 'answer_only' || !Array.isArray(result.scheduleData)) {
+                hideAgentLoading();
+                addChatMessage(result.answer || result.explanation || '已收到回覆。', 'assistant');
+                break;
+            }
+
             const validation = scheduleValidator.validate(result.scheduleData, serviceItems, nonUserColumns, activeRules);
 
             if (!validation.valid && retryCount < MAX_RETRIES) {
@@ -371,7 +379,7 @@ export function setPendingChanges(newScheduleData) {
 }
 
 // Accept 單格
-window.acceptCellChange = async function (date, service) {
+export async function acceptCellChange(date, service) {
     if (!pendingAgentChanges || !pendingAgentChanges[date] || !pendingAgentChanges[date][service]) return;
 
     const change = pendingAgentChanges[date][service];
@@ -399,10 +407,10 @@ window.acceptCellChange = async function (date, service) {
         addChatMessage(`單格儲存失敗：${error.message}`, 'error');
         renderTable();
     }
-};
+}
 
 // Reject 單格
-window.rejectCellChange = function (date, service) {
+export function rejectCellChange(date, service) {
     if (!pendingAgentChanges || !pendingAgentChanges[date] || !pendingAgentChanges[date][service]) return;
 
     delete pendingAgentChanges[date][service];
@@ -410,7 +418,7 @@ window.rejectCellChange = function (date, service) {
 
     checkPendingComplete();
     renderTable();
-};
+}
 
 // Accept 全部
 export async function acceptAllChanges() {

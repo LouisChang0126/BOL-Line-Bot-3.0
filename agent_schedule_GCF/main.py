@@ -185,14 +185,19 @@ def generate_agent_schedule(request):
                     text_response += content_block.text + '\n'
             
             # 將原封不動的 current_schedule 還給前端，這樣前端比對就不會有異動
-            import json
-            try:
-                current_dict = json.loads(current_schedule)
-                result = current_dict.get('scheduleData', [])
-            except Exception:
-                result = []
-            
-            explanation = text_response.strip()
+            answer_text = text_response.strip() or '目前沒有可回覆的內容。'
+            response = cors_response({
+                'mode': 'answer_only',
+                'answerOnly': True,
+                'answer': answer_text,
+                'explanation': answer_text,
+                'model': selected_model,
+                'usage': {
+                    'input_tokens': message.usage.input_tokens,
+                    'output_tokens': message.usage.output_tokens
+                }
+            })
+            return add_cors_headers(response, origin)
 
         if not result:
             response = cors_response({'error': 'No schedule data in response'}, 500)

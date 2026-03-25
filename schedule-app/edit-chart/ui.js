@@ -21,7 +21,7 @@ import {
     pushHistory, updateEditDifference
 } from './app.js';
 
-import { pendingAgentChanges, showModalAlert } from './agent.js';
+import { pendingAgentChanges, showModalAlert, acceptCellChange, rejectCellChange } from './agent.js';
 
 // ===========================
 // 外部注入 — 由 app.js 呼叫 setUIContext() 傳入無法直接 import 的可變狀態
@@ -105,7 +105,7 @@ function injectPendingHighlights() {
             acceptBtn.textContent = '✅';
             acceptBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                window.acceptCellChange(date, service);
+                acceptCellChange(date, service);
             });
 
             const rejectBtn = document.createElement('button');
@@ -114,7 +114,7 @@ function injectPendingHighlights() {
             rejectBtn.textContent = '❌';
             rejectBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                window.rejectCellChange(date, service);
+                rejectCellChange(date, service);
             });
 
             btnsDiv.appendChild(acceptBtn);
