@@ -314,21 +314,118 @@ export function addChatMessage(text, role = 'user', options = {}) {
     }
 }
 
-export function showAgentLoading() {
+// --- 非線性進度條 ---
+// 分段定義：每段 { end: 秒數, startPct, endPct }
+// 預設 3 分鐘：0-60s → 0%-50%, 60-120s → 50%-80%, 120-180s → 80%-100%
+const BASE_SEGMENTS = [
+    { end: 60, startPct: 0, endPct: 50 },
+    { end: 120, startPct: 50, endPct: 80 },
+    { end: 180, startPct: 80, endPct: 100 },
+];
+
+let _progressTimer = null;
+let _progressStartTime = 0;
+let _progressTotalDuration = 180; // 秒
+let _progressSegments = [...BASE_SEGMENTS];
+
+function calcProgressPercent(elapsedSec) {
+    const segments = _progressSegments;
+    if (elapsedSec <= 0) return 0;
+    if (elapsedSec >= segments[segments.length - 1].end) return 99.5; // 永遠不到 100%
+    for (const seg of segments) {
+        const segStart = seg === segments[0] ? 0 : segments[segments.indexOf(seg) - 1].end;
+        if (elapsedSec <= seg.end) {
+            const segDuration = seg.end - segStart;
+            const segElapsed = elapsedSec - segStart;
+            const ratio = segElapsed / segDuration;
+            return seg.startPct + ratio * (seg.endPct - seg.startPct);
+        }
+    }
+    return 99.5;
+}
+
+/** 重試時呼叫：延長總時長（從目前已過時間再加 extraSec 秒） */
+export function extendProgressDuration(extraSec) {
+    if (!_progressTimer) return;
+    const elapsed = (Date.now() - _progressStartTime) / 1000;
+    const currentPct = calcProgressPercent(elapsed);
+    // 新的總時長 = 已過時間 + extraSec
+    _progressTotalDuration = elapsed + extraSec;
+    // 從目前百分比到 100% 重建剩餘段落
+    const remaining = _progressTotalDuration - elapsed;
+    const t1 = elapsed + remaining / 3;
+    const t2 = elapsed + (remaining * 2) / 3;
+    _progressSegments = [
+        // 保留已完成的部分作為第零段（瞬間跳過）
+        { end: elapsed, startPct: 0, endPct: currentPct },
+        { end: t1, startPct: currentPct, endPct: currentPct + (100 - currentPct) * 0.5 },
+        { end: t2, startPct: currentPct + (100 - currentPct) * 0.5, endPct: currentPct + (100 - currentPct) * 0.85 },
+        { end: _progressTotalDuration, startPct: currentPct + (100 - currentPct) * 0.85, endPct: 100 },
+    ];
+}
+
+function formatElapsed(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return m > 0 ? `${m}分${String(s).padStart(2, '0')}秒` : `${s}秒`;
+}
+
+export function showAgentLoading(mode) {
     const chatArea = document.getElementById('agentChatArea');
     const loading = document.createElement('div');
-    loading.className = 'agent-loading';
     loading.id = 'agentLoadingIndicator';
-    loading.innerHTML = `
-        <div class="agent-loading-dot"></div>
-        <div class="agent-loading-dot"></div>
-        <div class="agent-loading-dot"></div>
-    `;
-    chatArea.appendChild(loading);
-    chatArea.scrollTop = chatArea.scrollHeight;
+
+    if (mode === MODE_SCHEDULING) {
+        // 排班模式：非線性進度條
+        loading.className = 'agent-loading-progress';
+        loading.innerHTML = `
+            <div class="agent-progress-label">🤖 AI 排班中，請稍候...</div>
+            <div class="agent-progress-track">
+                <div class="agent-progress-fill" id="agentProgressFill"></div>
+            </div>
+            <div class="agent-progress-info">
+                <span class="agent-progress-pct" id="agentProgressPct">0%</span>
+                <span class="agent-progress-time" id="agentProgressTime">0秒</span>
+            </div>
+        `;
+        chatArea.appendChild(loading);
+        chatArea.scrollTop = chatArea.scrollHeight;
+
+        // 初始化進度狀態
+        _progressStartTime = Date.now();
+        _progressTotalDuration = 180;
+        _progressSegments = [...BASE_SEGMENTS];
+
+        // 每秒更新
+        _progressTimer = setInterval(() => {
+            const elapsed = (Date.now() - _progressStartTime) / 1000;
+            const pct = calcProgressPercent(elapsed);
+            const fill = document.getElementById('agentProgressFill');
+            const pctLabel = document.getElementById('agentProgressPct');
+            const timeLabel = document.getElementById('agentProgressTime');
+            if (fill) fill.style.width = `${pct}%`;
+            if (pctLabel) pctLabel.textContent = `${Math.floor(pct)}%`;
+            if (timeLabel) timeLabel.textContent = formatElapsed(elapsed);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }, 1000);
+    } else {
+        // 編輯/問答模式：泡泡動畫
+        loading.className = 'agent-loading';
+        loading.innerHTML = `
+            <div class="agent-loading-dot"></div>
+            <div class="agent-loading-dot"></div>
+            <div class="agent-loading-dot"></div>
+        `;
+        chatArea.appendChild(loading);
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
 }
 
 export function hideAgentLoading() {
+    if (_progressTimer) {
+        clearInterval(_progressTimer);
+        _progressTimer = null;
+    }
     const loading = document.getElementById('agentLoadingIndicator');
     if (loading) loading.remove();
 }
@@ -619,7 +716,7 @@ export async function sendAgentRequest() {
 
     agentIsLoading = true;
     document.getElementById('agentSendBtn').disabled = true;
-    showAgentLoading();
+    showAgentLoading(selectedMode);
 
     let retryCount = 0;
     const MAX_RETRIES = 1;
@@ -668,6 +765,7 @@ export async function sendAgentRequest() {
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
                 retryCount++;
+                extendProgressDuration(180); // 規則違反重試：再延長 3 分鐘
                 await new Promise(resolve => setTimeout(resolve, 500));
                 continue;
             }
@@ -706,6 +804,7 @@ export async function sendAgentRequest() {
 
             if (isRetryableApiError && apiErrorRetryCount < MAX_API_ERROR_RETRIES) {
                 apiErrorRetryCount++;
+                extendProgressDuration(120); // 連線錯誤重試：再延長 2 分鐘
                 addChatMessage('伺服器暫時忙碌，正在自動重試一次...', 'assistant', {
                     mode: selectedMode,
                     persist: false

@@ -1776,7 +1776,7 @@ body.multi-selecting-active {
   border: 1px solid #fecaca;
 }
 
-/* Loading 動畫 */
+/* Loading 泡泡動畫（編輯/問答模式） */
 .agent-loading {
   display: flex;
   align-items: center;
@@ -1801,6 +1801,53 @@ body.multi-selecting-active {
 @keyframes agentDotPulse {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
   40% { opacity: 1; transform: scale(1.2); }
+}
+
+/* 進度條載入動畫（排班模式） */
+.agent-loading-progress {
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  align-self: stretch;
+}
+
+.agent-progress-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.agent-progress-track {
+  width: 100%;
+  height: 8px;
+  background: var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.agent-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border-radius: 4px;
+  transition: width 1s linear;
+}
+
+.agent-progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.agent-progress-pct {
+  font-weight: 600;
+}
+
+.agent-progress-time {
+  font-variant-numeric: tabular-nums;
 }
 
 /* 輸入區域 */

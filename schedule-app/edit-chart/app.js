@@ -436,6 +436,13 @@ export async function deleteLastRow(skipConfirm = false) {
 
     try {
         lastRow = scheduleData.pop();
+
+        // 判斷被刪除的那週是否有任何非空白的服事資料
+        const rowHasData = serviceItems.some(s => {
+            const val = lastRow[s];
+            return Array.isArray(val) ? val.length > 0 : !!val;
+        });
+
         await deleteSchedule(lastRow.date);
 
         pushHistory();
@@ -1932,10 +1939,17 @@ export function saveOriginalChartSnapshot() {
 export function updateEditDifference() {
     let hasDiff = false;
 
+    const currentDates = new Set(scheduleData.map(r => r.date));
+
     scheduleData.forEach(row => {
         const date = row.date;
         const originalRow = originalChart[date];
         if (!originalRow) return;
+
+        // 如果此日期先前被標記為刪除，現在已恢復，清除刪除標記
+        if (editDifference[date]?._deleted) {
+            delete editDifference[date]._deleted;
+        }
 
         serviceItems.forEach(service => {
             const originalValue = originalRow[service] || [];
@@ -1965,6 +1979,41 @@ export function updateEditDifference() {
             }
         });
     });
+
+    // 偵測被刪除的週：存在於 originalChart 但不在目前 scheduleData 中
+    if (originalChart) {
+        Object.keys(originalChart).forEach(date => {
+            if (currentDates.has(date)) return; // 仍存在，跳過
+
+            const originalRow = originalChart[date];
+            // 檢查該週是否有任何非空白服事資料
+            const rowHasData = serviceItems.some(s => {
+                const val = originalRow[s];
+                return Array.isArray(val) ? val.length > 0 : !!val;
+            });
+
+            if (rowHasData) {
+                // 記錄為刪除差異：所有有值的服事欄位標記 new 為 []
+                if (!editDifference[date]) editDifference[date] = {};
+                serviceItems.forEach(service => {
+                    const originalValue = originalRow[service] || [];
+                    if (Array.isArray(originalValue) ? originalValue.length > 0 : !!originalValue) {
+                        editDifference[date][service] = {
+                            old: Array.isArray(originalValue) ? [...originalValue] : [originalValue],
+                            new: []
+                        };
+                    }
+                });
+                editDifference[date]._deleted = true;
+                hasDiff = true;
+            } else {
+                // 空白週被刪除，移除差異（如果先前有記錄的話）
+                if (editDifference[date]) {
+                    delete editDifference[date];
+                }
+            }
+        });
+    }
 
     // 檢查是否還有任何差異
     hasEdited = Object.keys(editDifference).length > 0;
