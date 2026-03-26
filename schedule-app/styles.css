@@ -1608,7 +1608,7 @@ body.multi-selecting-active {
 }
 
 .agent-sidebar-close {
-  background: rgba(255,255,255,0.2);
+  background: rgba(255, 255, 255, 0.2);
   border: none;
   color: white;
   font-size: 18px;
@@ -1623,7 +1623,7 @@ body.multi-selecting-active {
 }
 
 .agent-sidebar-close:hover {
-  background: rgba(255,255,255,0.3);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* 設定區域 */
@@ -1725,11 +1725,11 @@ body.multi-selecting-active {
   word-break: break-word;
 }
 
-.agent-msg > div {
+.agent-msg>div {
   margin: 0 0 4px 0;
 }
 
-.agent-msg > div:last-child {
+.agent-msg>div:last-child {
   margin-bottom: 0;
 }
 
@@ -1795,12 +1795,27 @@ body.multi-selecting-active {
   animation: agentDotPulse 1.4s infinite;
 }
 
-.agent-loading-dot:nth-child(2) { animation-delay: 0.2s; }
-.agent-loading-dot:nth-child(3) { animation-delay: 0.4s; }
+.agent-loading-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.agent-loading-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
 
 @keyframes agentDotPulse {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-  40% { opacity: 1; transform: scale(1.2); }
+
+  0%,
+  80%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+
+  40% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
 }
 
 /* 進度條載入動畫（排班模式） */
@@ -1961,8 +1976,15 @@ body.multi-selecting-active {
 }
 
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .agent-review-label {
@@ -2010,29 +2032,60 @@ body.multi-selecting-active {
 /* 格子內的 Review 按鈕 */
 .cell-review-btns {
   display: flex;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 5px;
+  margin-top: 6px;
   justify-content: center;
+  padding: 0 2px;
 }
 
 .cell-review-btn {
-  background: none;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 2px 6px;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 900;
+  font-family: inherit;
+  padding: 2px 2px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.cell-review-btn.accept {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: white;
 }
 
 .cell-review-btn.accept:hover {
-  background: #dcfce7;
-  border-color: #22c55e;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(34, 197, 94, 0.45);
+  filter: brightness(1.08);
+}
+
+.cell-review-btn.accept:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(34, 197, 94, 0.3);
+}
+
+.cell-review-btn.reject {
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  color: white;
 }
 
 .cell-review-btn.reject:hover {
-  background: #fef2f2;
-  border-color: #ef4444;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(239, 68, 68, 0.45);
+  filter: brightness(1.08);
+}
+
+.cell-review-btn.reject:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.3);
 }
 
 /* Warning 標記 */

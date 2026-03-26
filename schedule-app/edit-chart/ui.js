@@ -147,7 +147,7 @@ function injectPendingHighlights() {
             const acceptBtn = document.createElement('button');
             acceptBtn.className = 'cell-review-btn accept';
             acceptBtn.type = 'button';
-            acceptBtn.textContent = '✅';
+            acceptBtn.textContent = '✓';
             acceptBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 acceptCellChange(date, service);
@@ -156,7 +156,7 @@ function injectPendingHighlights() {
             const rejectBtn = document.createElement('button');
             rejectBtn.className = 'cell-review-btn reject';
             rejectBtn.type = 'button';
-            rejectBtn.textContent = '❌';
+            rejectBtn.textContent = '✕';
             rejectBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 rejectCellChange(date, service);

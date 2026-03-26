@@ -19,7 +19,8 @@
         <div class="header-section">
           <div class="app-title">
             <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
-            <h1 style="display: inline;"><span id="collectionEmoji">⛪</span> <span id="collectionTitle">教會服事班表</span></h1>
+            <h1 style="display: inline;"><span id="collectionEmoji">⛪</span> <span id="collectionTitle">教會服事班表</span>
+            </h1>
           </div>
 
           <div class="control-actions compact">
@@ -47,8 +48,8 @@
               👥管理使用者
               <span class="badge-alert hidden" id="userAlertBadge">!</span>
             </button>
-            <button class="btn btn-primary" id="toggleSidebarBtn" title="開關AI側邊欄">
-              🤖AI
+            <button class="btn btn-secondary" id="toggleSidebarBtn" title="開關AI側邊欄">
+              🤖AI助手
             </button>
           </div>
 
@@ -461,7 +462,7 @@
         updatePageTitle(serve);
 
         // 載入應用程式
-        import('./app.js').then(() => {}).catch(error => {
+        import('./app.js').then(() => { }).catch(error => {
           console.error('❌ 載入應用程式失敗:', error);
           document.getElementById('statusText').textContent = '載入失敗，請檢查 Firebase 配置';
         });
