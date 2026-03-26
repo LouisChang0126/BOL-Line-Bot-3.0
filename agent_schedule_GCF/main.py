@@ -15,6 +15,9 @@ import functions_framework
 import requests
 from flask import jsonify, make_response
 
+MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
+REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
+
 try:
     from agentConfig import MODE_CONFIG, DEFAULT_MODE, ALLOWED_ORIGINS
 except ImportError:
@@ -123,7 +126,10 @@ def _build_messages(chat_history, prompt):
 
 
 def _anthropic_chat(api_key, model, system_prompt, messages):
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(
+        api_key=api_key,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
     max_retries = 3
     retryable_status_codes = {429, 500, 502, 503, 504, 529}
     last_error = None
@@ -133,7 +139,7 @@ def _anthropic_chat(api_key, model, system_prompt, messages):
         try:
             message = client.messages.create(
                 model=model,
-                max_tokens=8192,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 system=system_prompt,
                 tools=[SCHEDULE_TOOL],
                 tool_choice={"type": "auto"},
@@ -200,7 +206,12 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
         "tool_choice": "auto",
     }
 
-    response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+    response = requests.post(
+        endpoint,
+        headers=headers,
+        json=payload,
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
     if response.status_code >= 400:
         raise RuntimeError(f"OpenAI-compatible API error ({response.status_code}): {response.text}")
 

@@ -622,7 +622,7 @@ export async function sendAgentRequest() {
     showAgentLoading();
 
     let retryCount = 0;
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = 1;
     let apiErrorRetryCount = 0;
     const MAX_API_ERROR_RETRIES = 1;
     let lastResult = null;
@@ -664,11 +664,6 @@ export async function sendAgentRequest() {
                 activeRules,
                 changedCells
             });
-            console.log('[Agent Validation] changedCells:', validation.debug?.changedCells || []);
-            console.log('[Agent Validation] validatedCells.consecutive:', validation.debug?.validatedCells?.consecutive || []);
-            console.log('[Agent Validation] validatedCells.maxRoles:', validation.debug?.validatedCells?.maxRoles || []);
-            console.log('[Agent Validation] validatedCells.serviceKnownPeople:', validation.debug?.validatedCells?.serviceKnownPeople || []);
-            console.log('[Agent Validation] warningsCount:', validation.warnings.length);
 
             if (!validation.valid && retryCount < MAX_RETRIES) {
                 lastResult = validation;
@@ -947,5 +942,4 @@ export function showModalAlert(message) {
 export function initAgentFeature() {
     setupAgentSidebar();
     setupResizer();
-    console.log('✅ Agent 排班副駕已初始化');
 }

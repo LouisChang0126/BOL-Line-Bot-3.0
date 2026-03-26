@@ -200,8 +200,6 @@ async function loadData() {
         if (scheduleData.length === 0) {
             await createInitialData();
             console.log('已建立初始資料');
-        } else {
-            console.log('已載入班表資料');
         }
 
         // 更新顯示歷史資料按鈕狀態
