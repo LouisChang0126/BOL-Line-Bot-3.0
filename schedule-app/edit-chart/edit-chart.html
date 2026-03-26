@@ -19,7 +19,7 @@
         <div class="header-section">
           <div class="app-title">
             <a href="index.html" class="btn btn-secondary" style="margin-right: 12px; padding: 6px 12px;">← 返回</a>
-            <h1 style="display: inline;">⛪ <span id="collectionTitle">教會服事班表</span></h1>
+            <h1 style="display: inline;"><span id="collectionEmoji">⛪</span> <span id="collectionTitle">教會服事班表</span></h1>
           </div>
 
           <div class="control-actions compact">
@@ -422,6 +422,7 @@
 
     // 更新頁面標題
     function updatePageTitle(serve) {
+      document.getElementById('collectionEmoji').textContent = serve.emoji || '⛪';
       document.getElementById('collectionTitle').textContent = serve.name + '班表';
       document.title = `${serve.name}班表 - 教會服事班表系統`;
     }

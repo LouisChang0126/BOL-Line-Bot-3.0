@@ -80,12 +80,10 @@ function injectPendingHighlights() {
                 chip.textContent = person;
 
                 if (isOld && !isNew) {
-                    chip.style.backgroundColor = '#ef4444';
+                    chip.style.backgroundColor = '#9ca3af';
                     chip.style.textDecoration = 'line-through';
                     chip.style.textDecorationThickness = '3px';
                     chip.style.opacity = '0.9';
-                } else if (!isOld && isNew) {
-                    chip.style.backgroundColor = '#22c55e';
                 } else {
                     chip.style.backgroundColor = getPersonColor(person);
                 }
