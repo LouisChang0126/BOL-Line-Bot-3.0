@@ -331,6 +331,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
     is_scheduling = selected_mode == "scheduling"
 
     rules = []
+    rules_section = ""
     if is_scheduling:
         consecutive_weeks = max(2, int(active_rules.get("consecutiveWeeks", 2) or 2))
         max_roles_limit = max(1, int(active_rules.get("maxRolesLimit", 3) or 3))
@@ -345,8 +346,12 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
             rules.append("- For each service, only use people who have appeared in that service historically.")
         if not rules:
             rules.append("- No extra scheduling rules are enabled.")
+        rules_section = (
+            "## Active Rules\n"
+            f"{os.linesep.join(rules)}\n\n"
+        )
     else:
-        rules.append("- Rule checks are disabled in edit/qa mode.")
+        rules_section = ""
 
     csv_section = ""
     if (not is_scheduling) and attached_csv_text:
@@ -366,8 +371,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
         "```json\n"
         f"{current_schedule}\n"
         "```\n\n"
-        "## Active Rules\n"
-        f"{os.linesep.join(rules)}"
+        f"{rules_section}"
         f"{csv_section}\n"
         "## Tool Requirements\n"
         "1. Always return complete `scheduleData` when calling the tool.\n"

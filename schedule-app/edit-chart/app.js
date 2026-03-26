@@ -255,8 +255,6 @@ async function loadPastData() {
                 pastData.push({ date: docRef.id, ...data });
             }
         });
-        // 反轉回舊到新的順序
-        pastData.reverse();
 
         updateStatus('就緒');
     } catch (error) {
@@ -1676,6 +1674,13 @@ function rebuildPersonColorMap() {
 
 export function updateStatus(text) {
     document.getElementById('statusText').textContent = text;
+}
+
+export function getHistoryViewContext() {
+    return {
+        showingPast,
+        pastData: pastData.map(row => ({ ...row }))
+    };
 }
 
 // ===========================

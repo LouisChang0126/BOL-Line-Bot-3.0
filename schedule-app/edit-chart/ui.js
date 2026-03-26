@@ -82,7 +82,7 @@ function injectPendingHighlights() {
                 if (isOld && !isNew) {
                     chip.style.backgroundColor = '#9ca3af';
                     chip.style.textDecoration = 'line-through';
-                    chip.style.textDecorationThickness = '3px';
+                    chip.style.textDecorationThickness = '2px';
                     chip.style.opacity = '0.9';
                 } else {
                     chip.style.backgroundColor = getPersonColor(person);

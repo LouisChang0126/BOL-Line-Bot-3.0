@@ -1,7 +1,8 @@
 import {
     scheduleData, serviceItems, nonUserColumns,
     saveSchedule, applyAgentStructuralChanges,
-    pushHistory, updateEditDifference, updateStatus
+    pushHistory, updateEditDifference, updateStatus,
+    getHistoryViewContext
 } from './app.js';
 
 import { renderTable } from './ui.js';
@@ -597,6 +598,13 @@ export async function sendAgentRequest() {
                 });
             }
         });
+    }
+
+    const historyViewContext = getHistoryViewContext();
+
+    // 如果有歷史資料，直接把它接在 effectiveScheduleData 的最前面
+    if (historyViewContext.showingPast && historyViewContext.pastData && historyViewContext.pastData.length > 0) {
+        effectiveScheduleData = [...historyViewContext.pastData, ...effectiveScheduleData];
     }
 
     const payload = {
