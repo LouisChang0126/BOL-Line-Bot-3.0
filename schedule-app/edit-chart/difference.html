@@ -213,13 +213,18 @@
 
         // 從 URL 取得 collection
         const urlParams = new URLSearchParams(window.location.search);
-        const targetCollection = urlParams.get('collection') || 'youth-serve';
+        const targetCollection = urlParams.get('collection') || '';
 
         let db;
         let allLogs = [];
         let displayName = targetCollection; // 預設為 collection ID
 
         async function init() {
+            if (!targetCollection) {
+                document.getElementById('logList').innerHTML = '<div class="no-logs">缺少崇拜名稱，請從班表頁面進入此頁面</div>';
+                return;
+            }
+
             try {
                 const app = initializeApp(firebaseConfig);
 

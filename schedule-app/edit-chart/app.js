@@ -3,7 +3,7 @@ import { initAgentFeature, showModalAlert } from './agent.js';
 
 // --- 引入 UI 渲染與彈窗 ---
 import {
-    renderTable, renderTableHead, renderTableBody,
+    renderTable, renderTableHead, renderTableBody, renderSingleCell,
     initDisplayConfigEditor,
     openEditPersonModal, renderPersonDropdown, renderCurrentPersonChips, renderInfoInputs,
     setUIContext, showConfirm
@@ -464,11 +464,14 @@ export async function deleteLastRow(skipConfirm = false) {
 
 
 
-export async function doAddServiceItem(trimmedName) {
-    updateStatus('新增服事項目中...');
+export async function doAddColumn(trimmedName, isInfo = false) {
+    const label = isInfo ? '資訊欄位' : '服事項目';
+    updateStatus(`新增${label}中...`);
     try {
         serviceItems.push(trimmedName);
-        // 將新服事項目加入 displayConfig 的「未分組」群組
+        if (isInfo) nonUserColumns.push(trimmedName);
+
+        // 將新欄位加入 displayConfig 的「未分組」群組
         if (displayConfig && displayConfig.groups) {
             const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
             if (ungrouped) ungrouped.items.push(trimmedName);
@@ -497,54 +500,12 @@ export async function doAddServiceItem(trimmedName) {
         pushHistory();
         updateEditDifference();
         renderTable();
-        updateStatus('服事項目已新增');
+        updateStatus(`${label}已新增`);
     } catch (error) {
-        console.error('新增服事項目失敗:', error);
-        showModalAlert('新增服事項目失敗');
+        console.error(`新增${label}失敗:`, error);
+        showModalAlert(`新增${label}失敗`);
         serviceItems.pop();
-        updateStatus('就緒');
-    }
-}
-
-export async function doAddInfoColumn(trimmedName) {
-    updateStatus('新增資訊欄位中...');
-    try {
-        serviceItems.push(trimmedName);
-        nonUserColumns.push(trimmedName);
-        if (displayConfig && displayConfig.groups) {
-            const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
-            if (ungrouped) ungrouped.items.push(trimmedName);
-        }
-
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
-
-        // 批次更新所有班表列
-        scheduleData.forEach(row => {
-            row[trimmedName] = [];
-            const data = { ...row };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, row.date), data);
-        });
-
-        // 批次更新 Metadata
-        const metadata = { serviceItems, nonUserColumns };
-        if (displayConfig) metadata.displayConfig = displayConfig;
-        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
-
-        await batch.commit();
-
-        pushHistory();
-        updateEditDifference();
-        renderTable();
-        updateStatus('資訊欄位已新增');
-    } catch (error) {
-        console.error('新增資訊欄位失敗:', error);
-        showModalAlert('新增資訊欄位失敗');
-        serviceItems.pop();
-        nonUserColumns.pop();
+        if (isInfo) nonUserColumns.pop();
         updateStatus('就緒');
     }
 }
@@ -824,7 +785,7 @@ export async function addPersonToCell(date, service, person) {
         renderCurrentPersonChips(currentEditingCell.date, currentEditingCell.service);
         renderPersonDropdown(currentEditingCell.date, currentEditingCell.service);
     }
-    renderTable();
+    renderSingleCell(date, service);
 
     // 刷新管理使用者按鈕警示
     checkMissingUsers();
@@ -847,8 +808,8 @@ export async function removePerson(date, service, person) {
         pushHistory();
         updateEditDifference();
 
-        // 更新顯示
-        renderTable();
+        // 更新顯示（只更新異動的單格）
+        renderSingleCell(date, service);
 
         // 刷新管理使用者按鈕警示
         checkMissingUsers();
@@ -1715,15 +1676,23 @@ export function setCurrentEditingCell(cell) {
 
 // 設定服事標題拖拉排序橋接（供 ui.js renderTableBody 呼叫）
 
-window.closeModal = function (modalId) {
+function closeModal(modalId) {
     document.getElementById(modalId).classList.add('hidden');
-};
+}
 
 // ===========================
 // 事件監聯器設定
 // ===========================
 function setupEventListeners() {
-    // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定    // 按 ESC 關閉模態框
+    // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定
+
+    // data-close-modal 委派：處理所有帶 data-close-modal 屬性的按鈕
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-close-modal]');
+        if (btn) closeModal(btn.dataset.closeModal);
+    });
+
+    // 按 ESC 關閉模態框
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeModal('editDateModal');
@@ -2460,7 +2429,8 @@ export async function movePersonBetweenCells(fromDate, fromService, toDate, toSe
 
     pushHistory();
     updateEditDifference();
-    renderTable();
+    renderSingleCell(fromDate, fromService);
+    renderSingleCell(toDate, toService);
     checkMissingUsers();
 }
 

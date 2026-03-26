@@ -305,7 +305,7 @@
                     <label for="monthSelect">選擇月份：</label>
                     <select id="monthSelect"></select>
                 </div>
-                <button class="refresh-btn" onclick="loadData()">🔄 刷新</button>
+                <button class="refresh-btn" id="refreshBtn">🔄 刷新</button>
             </div>
         </div>
 
@@ -332,6 +332,8 @@
                 isTokenAutoRefreshEnabled: true
             });
             db = getFirestore(app);
+
+            document.getElementById('refreshBtn').addEventListener('click', loadData);
 
             // 初始化月份選擇器
             initMonthSelector();
@@ -382,7 +384,7 @@
             });
         }
 
-        window.loadData = async function () {
+        async function loadData() {
             try {
                 const dashboard = document.getElementById('dashboard');
                 dashboard.innerHTML = '<div class="spinner"></div><div>載入數據中...</div>';

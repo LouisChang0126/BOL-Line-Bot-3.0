@@ -62,7 +62,7 @@
           <div class="modal" style="max-width: 420px;">
             <div class="modal-header">
               <h2>✨新增欄位</h2>
-              <button class="modal-close" onclick="closeModal('addColumnModal')">&times;</button>
+              <button class="modal-close" data-close-modal="addColumnModal">&times;</button>
             </div>
             <div class="modal-body">
               <!-- 類型選擇 radio btn-group -->
@@ -93,7 +93,7 @@
               </div>
             </div>
             <div class="modal-footer">
-              <button class="btn btn-secondary" onclick="closeModal('addColumnModal')">取消</button>
+              <button class="btn btn-secondary" data-close-modal="addColumnModal">取消</button>
               <button class="btn btn-primary" id="addColumnConfirmBtn">新增</button>
             </div>
           </div>
@@ -134,7 +134,7 @@
           <div class="modal" style="max-width: 850px;">
             <div class="modal-header">
               <h2>📋 貼上預覽</h2>
-              <button class="modal-close" onclick="closeModal('pastePreviewModal')">&times;</button>
+              <button class="modal-close" data-close-modal="pastePreviewModal">&times;</button>
             </div>
             <div class="modal-body">
               <div class="separator-options">
@@ -154,7 +154,7 @@
               <div id="pastePreviewContent" style="overflow-x: auto; margin-top: 12px;"></div>
             </div>
             <div class="modal-footer">
-              <button class="btn btn-secondary" onclick="closeModal('pastePreviewModal')">取消</button>
+              <button class="btn btn-secondary" data-close-modal="pastePreviewModal">取消</button>
               <button class="btn btn-primary" id="confirmPasteBtn">確認匯入</button>
             </div>
           </div>
@@ -166,7 +166,7 @@
         <div class="modal">
           <div class="modal-header">
             <h2>編輯服事項目</h2>
-            <button class="modal-close" onclick="closeModal('editServiceModal')">&times;</button>
+            <button class="modal-close" data-close-modal="editServiceModal">&times;</button>
           </div>
           <div class="modal-body">
             <div class="form-group">
@@ -181,7 +181,7 @@
           <div class="modal-footer" style="justify-content: space-between;">
             <button class="btn btn-danger" id="deleteServiceBtn">移除服事項目</button>
             <div style="display: flex; gap: 16px;">
-              <button class="btn btn-secondary" onclick="closeModal('editServiceModal')">取消</button>
+              <button class="btn btn-secondary" data-close-modal="editServiceModal">取消</button>
               <button class="btn btn-primary" id="saveServiceBtn">儲存</button>
             </div>
           </div>
@@ -198,7 +198,7 @@
                 <!-- 動態顯示日期和服事項目 -->
               </div>
             </div>
-            <button class="modal-close" onclick="closeModal('editPersonModal')">&times;</button>
+            <button class="modal-close" data-close-modal="editPersonModal">&times;</button>
           </div>
           <div class="modal-body">
             <div class="form-group">
@@ -223,7 +223,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-primary" onclick="closeModal('editPersonModal')">完成</button>
+            <button class="btn btn-primary" data-close-modal="editPersonModal">完成</button>
           </div>
         </div>
       </div>
@@ -233,7 +233,7 @@
         <div class="modal" style="max-width: 800px; max-height: 80vh;">
           <div class="modal-header">
             <h2>📊 編輯顯示欄位</h2>
-            <button class="modal-close" onclick="closeModal('displayConfigModal')">&times;</button>
+            <button class="modal-close" data-close-modal="displayConfigModal">&times;</button>
           </div>
           <div class="modal-body" style="overflow-y: auto; max-height: 60vh;">
             <div id="displayConfigGroups" class="display-config-groups">
@@ -252,7 +252,7 @@
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="closeModal('displayConfigModal')">取消</button>
+            <button class="btn btn-secondary" data-close-modal="displayConfigModal">取消</button>
             <button class="btn btn-primary" id="saveDisplayConfigBtn">儲存設定</button>
           </div>
         </div>
@@ -262,14 +262,14 @@
         <div class="modal" style="max-width: 400px;">
           <div class="modal-header">
             <h2 id="confirmModalTitle">確認操作</h2>
-            <button class="modal-close" onclick="closeModal('confirmModal')">&times;</button>
+            <button class="modal-close" data-close-modal="confirmModal">&times;</button>
           </div>
           <div class="modal-body">
             <p id="confirmModalMessage" style="margin: 0; line-height: 1.5;"></p>
           </div>
           <div class="modal-footer"
             style="padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 12px;">
-            <button class="btn btn-secondary" onclick="closeModal('confirmModal')">取消</button>
+            <button class="btn btn-secondary" data-close-modal="confirmModal">取消</button>
             <button class="btn btn-danger" id="confirmModalBtn">確認</button>
           </div>
         </div>
@@ -360,8 +360,6 @@
 
   <!-- Firebase SDK -->
   <script type="module">
-    console.log('🚀 開始初始化 Firebase...');
-
     // 引入 Firebase
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
     import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
@@ -440,17 +438,10 @@
     };
     window.SESSION_START_TIME = formatSessionTime(sessionStartTime);
 
-    console.log('📝 Firebase 配置:', {
-      projectId: firebaseConfig.projectId,
-      authDomain: firebaseConfig.authDomain,
-      collectionName: collectionName
-    });
-
     // 初始化 Firebase
     (async function initFirebase() {
       try {
         const app = initializeApp(firebaseConfig);
-        console.log('✅ Firebase App 初始化成功');
 
         const appCheck = initializeAppCheck(app, {
           provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
@@ -458,14 +449,11 @@
         });
 
         const db = getFirestore(app);
-        console.log('✅ Firestore 連接成功');
 
         window.db = db;
         window.firestore = { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, where, limit, writeBatch };
         window.COLLECTION_NAME = collectionName;
         window.AGENT_API_URL = AGENT_API_URL;
-
-        console.log('✅ Firebase 全域變數已設定');
 
         const serve = await loadAndValidateCollection(db);
         if (!serve) return;
@@ -473,9 +461,7 @@
         updatePageTitle(serve);
 
         // 載入應用程式
-        import('./app.js').then(() => {
-          console.log('✅ app.js 已載入');
-        }).catch(error => {
+        import('./app.js').then(() => {}).catch(error => {
           console.error('❌ 載入應用程式失敗:', error);
           document.getElementById('statusText').textContent = '載入失敗，請檢查 Firebase 配置';
         });

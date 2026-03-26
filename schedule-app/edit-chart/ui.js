@@ -11,7 +11,7 @@ import {
     getPersonColor,
     addPersonToCell, removePerson,
     addNewRow, deleteLastRow,
-    doAddServiceItem, doAddInfoColumn,
+    doAddColumn,
     addInfoItem, updateInfoItem, removeInfoItem,
     setCurrentEditingCell,
     saveMetadata,
@@ -49,6 +49,53 @@ export function renderTable() {
     renderTableBody();
 
     injectPendingHighlights();
+}
+
+/**
+ * 只更新單一儲存格的人名積木，不重繪整張表。
+ * 適用於 addPersonToCell / removePerson 等單格異動場景。
+ */
+export function renderSingleCell(date, service) {
+    const cell = document.querySelector(
+        `.service-cell[data-date="${date}"][data-service="${service}"]`
+    );
+    if (!cell) return; // 找不到時 fallback 由呼叫端處理
+
+    const row = scheduleData.find(r => r.date === date);
+    const persons = row ? (row[service] || []) : [];
+    const isEmpty = persons.length === 0;
+
+    cell.classList.toggle('empty', isEmpty);
+
+    if (isEmpty) {
+        cell.innerHTML = '<div class="add-person-placeholder">＋</div>';
+    } else {
+        const fragment = document.createDocumentFragment();
+        const chipsDiv = document.createElement('div');
+        chipsDiv.className = 'person-chips';
+
+        persons.forEach((person, personIndex) => {
+            const chip = document.createElement('div');
+            chip.className = 'person-chip';
+            chip.draggable = true;
+            chip.dataset.date = date;
+            chip.dataset.service = service;
+            chip.dataset.person = person;
+            chip.dataset.index = personIndex;
+            chip.style.background = getPersonColor(person);
+            chip.textContent = person;
+            chipsDiv.appendChild(chip);
+        });
+
+        fragment.appendChild(chipsDiv);
+        cell.innerHTML = '';
+        cell.appendChild(fragment);
+    }
+
+    // 若此格有 pending agent 變更，補上 highlight
+    if (pendingAgentChanges?.[date]?.[service]) {
+        injectPendingHighlights();
+    }
 }
 
 // 注入差異高亮
@@ -235,11 +282,7 @@ export function renderTableBody() {
         html += `<tr ${rowClass}>`;
 
         // 日期欄位
-        if (isPast) {
-            html += `<td><div class="date-cell" style="cursor: default;">${row.date}</div></td>`;
-        } else {
-            html += `<td><div class="date-cell" style="cursor: default;">${row.date}</div></td>`;
-        }
+        html += `<td><div class="date-cell" style="cursor: default;">${row.date}</div></td>`;
 
         // 服事項目欄位
         serviceItems.forEach(item => {
@@ -367,11 +410,7 @@ export function showAddColumnModal() {
             return;
         }
 
-        if (mode === 'service') {
-            doAddServiceItem(name);
-        } else {
-            doAddInfoColumn(name);
-        }
+        doAddColumn(name, mode === 'info');
     };
     confirmBtn.addEventListener('click', onConfirm);
 }

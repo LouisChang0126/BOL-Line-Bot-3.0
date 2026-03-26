@@ -286,8 +286,18 @@
                     if (docRef.id !== '_metadata') {
                         const data = docRef.data();
                         pastData.push({ date: docRef.id, ...data });
+
+                        // 將歷史資料的人名也加入顏色映射
+                        serviceItems.forEach(service => {
+                            if (data[service]) {
+                                data[service].forEach(name => allPersonNames.add(name));
+                            }
+                        });
                     }
                 });
+
+                // 有新人名加入，重建顏色映射
+                buildColorMap();
             } catch (error) {
                 console.log('無過去資料或載入失敗:', error);
                 pastData = [];

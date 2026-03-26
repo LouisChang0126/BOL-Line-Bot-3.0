@@ -66,12 +66,6 @@ function syncAgentModeUI() {
         csvAttachBtn.style.display = scheduling ? 'none' : '';
     }
 
-    if (chatHint) {
-        chatHint.textContent = scheduling
-            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
-            : '💡 你可以上傳 CSV 檔案作為排班參考資料。';
-    }
-
     if (scheduling) {
         attachedCsvText = null;
         attachedCsvFileName = '';
