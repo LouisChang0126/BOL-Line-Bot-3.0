@@ -1877,6 +1877,30 @@ function setupEventListeners() {
             document.getElementById('newPersonInput').value = '';
         });
     }
+
+    const editPersonDoneBtn = document.getElementById('editPersonDoneBtn');
+    if (editPersonDoneBtn) {
+        editPersonDoneBtn.addEventListener('click', async () => {
+            const cell = currentEditingCell;
+            const isInfoColumn = cell ? nonUserColumns.includes(cell.service) : false;
+
+            if (cell && isInfoColumn) {
+                const newInfoInput = document.getElementById('newInfoInput');
+                const pendingValue = newInfoInput ? newInfoInput.value.trim() : '';
+                if (pendingValue) {
+                    try {
+                        await addInfoItem(cell.date, cell.service, pendingValue);
+                    } catch (error) {
+                        console.error('儲存資訊內容失敗:', error);
+                        alert('儲存資訊內容失敗');
+                        return;
+                    }
+                }
+            }
+
+            closeModal('editPersonModal');
+        });
+    }
 }
 
 // ===========================

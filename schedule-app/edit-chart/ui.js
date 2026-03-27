@@ -436,6 +436,10 @@ export function openEditServiceModal(serviceName) {
     document.getElementById('serviceNameInput').value = serviceName;
     const isInfoColumn = nonUserColumns.includes(serviceName);
     document.getElementById('isInfoColumnCheckbox').checked = isInfoColumn;
+    const serviceModalTitle = document.getElementById('editServiceModalTitle');
+    if (serviceModalTitle) {
+        serviceModalTitle.textContent = isInfoColumn ? '編輯資訊欄位' : '編輯服事項目';
+    }
     document.getElementById('editServiceModal').classList.remove('hidden');
 }
 
@@ -447,6 +451,7 @@ export function openEditPersonModal(date, service) {
     setCurrentEditingCell({ date, service });
 
     const isInfoColumn = nonUserColumns.includes(service);
+    const personModalTitle = document.getElementById('editPersonModalTitle');
 
     document.getElementById('editPersonModalSubtitle').textContent = `${date} - ${service}`;
 
@@ -455,11 +460,13 @@ export function openEditPersonModal(date, service) {
     const secondLabel = formGroups[1]?.querySelector('label');
 
     if (isInfoColumn) {
+        if (personModalTitle) personModalTitle.textContent = '編輯資訊內容';
         document.getElementById('personSelectContainer').style.display = 'none';
         if (firstLabel) firstLabel.textContent = '資訊內容';
         if (secondLabel) secondLabel.style.display = 'none';
         renderInfoInputs(date, service);
     } else {
+        if (personModalTitle) personModalTitle.textContent = '編輯服事人員';
         document.getElementById('personSelectContainer').style.display = 'block';
         if (firstLabel) firstLabel.textContent = '選擇現有人員或輸入新人員';
         if (secondLabel) {
