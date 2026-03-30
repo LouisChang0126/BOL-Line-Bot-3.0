@@ -18,7 +18,7 @@ import {
     setupDragAndDrop, setupContextMenu, setupMultiCellSelection,
     prepareDisplayConfigEditorState, saveDisplayConfig, checkMissingUsers,
     updateStatus,
-    pushHistory, updateEditDifference
+    pushHistory, updateEditDifference, saveEditLog
 } from './app.js';
 
 import { pendingAgentChanges, showModalAlert, acceptCellChange, rejectCellChange } from './agent.js';
@@ -651,17 +651,29 @@ export function initDisplayConfigEditor() {
 
     const viewLogsBtn = document.getElementById('viewLogsBtn');
     if (viewLogsBtn) {
-        viewLogsBtn.addEventListener('click', () => {
+        viewLogsBtn.addEventListener('click', async () => {
             const collectionName = window.COLLECTION_NAME;
+            // 點擊瀏覽紀錄時先手動觸發最後一次存檔，確保 'ai' 標籤被正確寫入
+            await saveEditLog();
             window.location.href = `./difference.html?collection=${collectionName}`;
         });
     }
 
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     if (manageUsersBtn) {
-        manageUsersBtn.addEventListener('click', () => {
+        manageUsersBtn.addEventListener('click', async () => {
             const collectionName = window.COLLECTION_NAME;
+            await saveEditLog();
             window.location.href = `edit-user.html?collection=${collectionName}`;
+        });
+    }
+
+    const backToIndexBtn = document.getElementById('backToIndexBtn');
+    if (backToIndexBtn) {
+        backToIndexBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            await saveEditLog();
+            window.location.href = backToIndexBtn.href;
         });
     }
 

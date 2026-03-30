@@ -868,7 +868,7 @@ export async function acceptCellChange(date, service) {
         delete data.date;
         await saveSchedule(row.date, data);
         pushHistory();
-        updateEditDifference();
+        updateEditDifference('ai');
 
         delete pendingAgentChanges[date][service];
         if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
@@ -915,7 +915,7 @@ export async function acceptAllChanges() {
 
         await batch.commit();
         pushHistory();
-        updateEditDifference();
+        updateEditDifference('ai');
 
         pendingAgentChanges = null;
         document.getElementById('agentReviewBar').classList.add('hidden');

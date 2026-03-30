@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>班表編輯記錄 - 管理員</title>
+    <title>班表編輯記錄</title>
     <link rel="stylesheet" href="../styles.css">
     <style>
         .admin-page {
@@ -94,6 +94,56 @@
         .source-badge.linebot {
             background: #fef3c7;
             color: #d97706;
+        }
+
+        .source-badge.ai {
+            background: #f3e8ff;
+            color: #7c3aed;
+        }
+
+        /* ===== 篩選 Tab ===== */
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-tab {
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 1.5px solid var(--border-color);
+            background: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.18s;
+        }
+
+        .filter-tab:hover {
+            background: var(--bg-hover);
+        }
+
+        .filter-tab.active {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .filter-tab.active.tab-admin {
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+
+        .filter-tab.active.tab-ai {
+            background: #7c3aed;
+            border-color: #7c3aed;
+        }
+
+        .filter-tab.active.tab-linebot {
+            background: #d97706;
+            border-color: #d97706;
         }
 
         .diff-section {
@@ -200,6 +250,13 @@
             ⚠️ 還原必須按照時間順序：請從最新的記錄開始還原，才能確保資料一致性。
         </div>
 
+        <div class="filter-tabs" id="filterTabs">
+            <button class="filter-tab active tab-all" onclick="setFilter('all')">全部</button>
+            <button class="filter-tab tab-admin" onclick="setFilter('admin')">✏️ 管理員編輯</button>
+            <button class="filter-tab tab-ai" onclick="setFilter('ai')">🤖 AI助手編輯</button>
+            <button class="filter-tab tab-linebot" onclick="setFilter('linebot')">📲 LINE Bot 調班</button>
+        </div>
+
         <div class="log-list" id="logList">
             <div class="no-logs">載入中...</div>
         </div>
@@ -298,19 +355,64 @@
             }
         }
 
+        let currentFilter = 'all';
+
+        window.setFilter = function (filter) {
+            currentFilter = filter;
+            // 更新 tab 樣式
+            document.querySelectorAll('.filter-tab').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = document.querySelector(`.filter-tab.tab-${filter}`);
+            if (activeBtn) activeBtn.classList.add('active');
+            renderLogs();
+        };
+
         function renderLogs() {
             const logList = document.getElementById('logList');
             let html = '';
 
-            allLogs.forEach((log, index) => {
+            // 篩選後的記錄
+            let filteredLogs;
+            if (currentFilter === 'all') {
+                filteredLogs = allLogs;
+            } else if (currentFilter === 'ai') {
+                filteredLogs = allLogs.filter(log => {
+                    const src = log['source'] || '';
+                    return src === 'ai' || src === 'ai-assistant' || src === 'admin+ai';
+                });
+            } else if (currentFilter === 'admin') {
+                filteredLogs = allLogs.filter(log => {
+                    const src = log['source'] || 'admin';
+                    return src === 'admin' || src === 'admin+ai';
+                });
+            } else {
+                filteredLogs = allLogs.filter(log => (log['source'] || 'admin') === currentFilter);
+            }
+
+            if (filteredLogs.length === 0) {
+                const labelMap = { admin: '管理員編輯', ai: 'AI助手編輯', linebot: 'LINE Bot 調班' };
+                const label = labelMap[currentFilter] || '';
+                logList.innerHTML = `<div class="no-logs">目前沒有「${label}」的編輯記錄</div>`;
+                return;
+            }
+
+            filteredLogs.forEach((log, index) => {
                 const difference = log['difference'] || {};
                 const lastEdited = log['last-edited-time'] || log.id;
-                const isLatest = index === 0;
-                const canRestore = isLatest; // 只有最新的可以還原
+                // 「最新」＆「可還原」以 allLogs 中的位置為準（全域最新）
+                const isLatest = allLogs[0].id === log.id;
+                const canRestore = isLatest;
                 const source = log['source'] || 'admin';
-                const sourceBadge = source === 'linebot'
-                    ? '<span class="source-badge linebot">🤖 LINE Bot 調班</span>'
-                    : '<span class="source-badge admin">✏️ 管理員編輯</span>';
+
+                let sourceBadge = '';
+                if (source === 'linebot') {
+                    sourceBadge = '<span class="source-badge linebot">📲 LINE Bot 調班</span>';
+                } else if (source === 'admin+ai') {
+                    sourceBadge = '<span class="source-badge mixed" style="background: #e0e7ff; color: #4338ca;">✏️🤖 管理員+AI助手編輯</span>';
+                } else if (source === 'ai' || source === 'ai-assistant') {
+                    sourceBadge = '<span class="source-badge ai">🤖 AI助手編輯</span>';
+                } else {
+                    sourceBadge = '<span class="source-badge admin">✏️ 管理員編輯</span>';
+                }
 
                 html += `
             <div class="log-card ${isLatest ? 'latest' : 'disabled'}" data-log-id="${log.id}">
