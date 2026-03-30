@@ -427,12 +427,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: 6px 12px;
+  padding: 4px 9px;
   background: var(--primary-color);
   /* 預設顏色，會被 inline style 覆蓋 */
   color: white;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: 7px;
+  font-size: 15px;
   font-weight: 500;
   cursor: move;
   transition: all var(--transition-normal);
@@ -815,11 +815,11 @@ body.multi-selecting-active {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: 6px 12px;
+  padding: 4px 9px;
   background: var(--primary-color);
   color: white;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: 7px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-normal);
@@ -843,7 +843,7 @@ body.multi-selecting-active {
   align-items: center;
   background: white;
   border: 2px dashed var(--border-color);
-  border-radius: 20px;
+  border-radius: 7px;
   padding: 2px;
   transition: all var(--transition-fast);
   margin-top: var(--spacing-sm);

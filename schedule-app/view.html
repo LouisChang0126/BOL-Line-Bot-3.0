@@ -38,7 +38,8 @@
     <div class="app-container">
         <div class="header-section">
             <div class="app-title">
-                <h1 style="display: inline;"><span id="collectionEmoji">⛪</span> <span id="collectionTitle">教會服事班表</span></h1>
+                <h1 style="display: inline;"><span id="collectionEmoji">⛪</span> <span
+                        id="collectionTitle">教會服事班表</span></h1>
             </div>
             <!-- 分組過濾器 -->
             <div class="group-filter" id="groupFilter" style="display: none;">
@@ -94,16 +95,6 @@
                 .replace(/'/g, '&#39;');
         }
 
-        // 顏色陣列
-        const PERSON_CHIP_COLORS = [
-            '#E74C3C', '#3498DB', '#2ECC71', '#9B59B6', '#F39C12',
-            '#1ABC9C', '#E91E63', '#00BCD4', '#8BC34A', '#FF5722',
-            '#673AB7', '#009688', '#CDDC39', '#795548', '#607D8B',
-            '#FF9800', '#4CAF50', '#2196F3', '#F44336', '#9C27B0',
-            '#00ACC1', '#7CB342', '#C0392B', '#D35400', '#16A085',
-            '#8E44AD', '#27AE60', '#2980B9', '#F1C40F', '#34495E'
-        ];
-
         let scheduleData = [];
         let pastData = []; // 過去的資料（現在日期前5週）
         let serviceItems = [];
@@ -157,14 +148,14 @@
                 const app = initializeApp(firebaseConfig);
 
                 // 初始化 App Check
-                const appCheck = initializeAppCheck(app, {
+                initializeAppCheck(app, {
                     provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
                     isTokenAutoRefreshEnabled: true
                 });
 
                 db = getFirestore(app);
 
-                // 驗證崇拜名稱並取得 collection ID
+                // 第一層並行：同時取得 serve-list
                 const serve = await loadAndValidateService(db);
                 if (!serve) {
                     return; // 驗證失敗，showError 已顯示錯誤訊息
@@ -178,16 +169,10 @@
                 document.getElementById('collectionTitle').textContent = serve.name + '班表';
                 document.title = `${serve.name}班表`;
 
-                // 載入資料（只載入未來的資料）
-                await loadData(db);
+                // 第二層並行：同時發起 metadata 讀取 + 班表 query
+                await loadDataAndConfig(db);
 
-                // 不預載入過去資料，等用戶勾選時才載入
-
-                // 建立顏色映射
-                buildColorMap();
-
-                // 載入分組設定並初始化過濾器
-                await loadDisplayConfig(db);
+                // 初始化分組過濾器並渲染表格
                 initGroupFilter();
 
                 // 渲染表格
@@ -223,27 +208,33 @@
             return serve;
         }
 
-        async function loadData(db) {
-            // 載入 metadata
+        // 合併載入 metadata + 班表資料 + displayConfig（一次讀取 metadata，並行發起 query）
+        async function loadDataAndConfig(db) {
             const metadataRef = doc(db, collectionName, '_metadata');
-            const metadataDoc = await getDoc(metadataRef);
-            if (metadataDoc.exists()) {
-                serviceItems = metadataDoc.data().serviceItems || [];
-            }
-
-            // 取得當前週日字串
             const currentSundayStr = formatDateString(getCurrentSunday());
 
-            // 使用 Firestore query 只載入當前週日以後的資料
-            const q = query(
+            const scheduleQuery = query(
                 collection(db, collectionName),
                 where('__name__', '>=', currentSundayStr),
                 orderBy('__name__'),
                 limit(MAX_DISPLAY_ROWS)
             );
-            const snapshot = await getDocs(q);
-            scheduleData = [];
 
+            // 同時發起 metadata 讀取和班表 query
+            const [metadataDoc, snapshot] = await Promise.all([
+                getDoc(metadataRef),
+                getDocs(scheduleQuery)
+            ]);
+
+            // 處理 metadata（同時取得 serviceItems 和 displayConfig）
+            if (metadataDoc.exists()) {
+                const meta = metadataDoc.data();
+                serviceItems = meta.serviceItems || [];
+                displayConfig = meta.displayConfig || null;
+            }
+
+            // 處理班表資料
+            scheduleData = [];
             snapshot.forEach(docRef => {
                 if (docRef.id !== '_metadata') {
                     const data = docRef.data();
@@ -296,23 +287,10 @@
                     }
                 });
 
-                // 有新人名加入，重建顏色映射
-                buildColorMap();
             } catch (error) {
                 console.log('無過去資料或載入失敗:', error);
                 pastData = [];
             }
-        }
-
-        function buildColorMap() {
-            const sortedNames = Array.from(allPersonNames).sort();
-            sortedNames.forEach((name, index) => {
-                personColorMap.set(name, PERSON_CHIP_COLORS[index % PERSON_CHIP_COLORS.length]);
-            });
-        }
-
-        function getPersonColor(name) {
-            return personColorMap.get(name) || '#888888';
         }
 
         function renderTable() {
@@ -320,21 +298,6 @@
             renderTableBody();
         }
 
-        // 載入分組設定
-        async function loadDisplayConfig(db) {
-            try {
-                const metadataRef = doc(db, collectionName, '_metadata');
-                const metadataDoc = await getDoc(metadataRef);
-
-                if (metadataDoc.exists() && metadataDoc.data().displayConfig) {
-                    displayConfig = metadataDoc.data().displayConfig;
-                } else {
-                    displayConfig = null;
-                }
-            } catch (error) {
-                console.error('載入分組設定失敗:', error);
-            }
-        }
 
         // 初始化分組過濾器
         function initGroupFilter() {
