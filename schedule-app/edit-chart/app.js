@@ -1685,10 +1685,67 @@ function closeModal(modalId) {
 }
 
 // ===========================
+// 匯出 Excel
+// ===========================
+function exportToExcel() {
+    updateStatus('匯出 Excel 中...');
+    try {
+        const rows = [];
+        // 表頭
+        const header = ['日期', ...serviceItems];
+        rows.push(header);
+
+        // 資料 (根據是否顯示歷史資料來決定匯出範圍)
+        let dataToExport = scheduleData;
+        if (showingPast && pastData.length > 0) {
+            dataToExport = [...pastData, ...scheduleData];
+        }
+
+        dataToExport.forEach(row => {
+            const rowData = [row.date.replace(/\./g, '/')];
+            serviceItems.forEach(service => {
+                const val = row[service];
+                if (Array.isArray(val)) {
+                    rowData.push(val.join('/') || '');
+                } else {
+                    rowData.push(val || '');
+                }
+            });
+            rows.push(rowData);
+        });
+
+        // 建立 worksheet
+        const ws = window.XLSX.utils.aoa_to_sheet(rows);
+
+        // 建立 workbook 
+        const wb = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(wb, ws, "班表");
+
+        // 匯出檔案
+        const titleEl = document.getElementById('collectionTitle');
+        const collectionName = titleEl ? titleEl.textContent.trim() : (window.COLLECTION_NAME || '教會服事班表');
+        const dateStr = new Date().toISOString().split('T')[0];
+        window.XLSX.writeFile(wb, `${collectionName}_${dateStr}.xlsx`);
+
+        updateStatus('匯出完成');
+        setTimeout(() => updateStatus('就緒'), 2000);
+    } catch (error) {
+        console.error('匯出 Excel 失敗:', error);
+        alert('匯出 Excel 失敗');
+        updateStatus('就緒');
+    }
+}
+
+// ===========================
 // 事件監聯器設定
 // ===========================
 function setupEventListeners() {
     // addRowBtn 和 deleteLastRowBtn 現在在 renderTableBody 中動態綁定
+
+    const exportExcelBtn = document.getElementById('exportExcelBtn');
+    if (exportExcelBtn) {
+        exportExcelBtn.addEventListener('click', exportToExcel);
+    }
 
     // data-close-modal 委派：處理所有帶 data-close-modal 屬性的按鈕
     document.addEventListener('click', (e) => {

@@ -76,7 +76,7 @@ function syncAgentModeUI() {
     if (chatHint) {
         chatHint.textContent = scheduling
             ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
-            : '💡 你可以上傳 CSV 檔案作為參考資料。';
+            : '💡 你可以上傳 Excel 或 CSV 檔案作為參考資料。';
     }
 }
 
@@ -89,7 +89,7 @@ function createWelcomeNode(mode = getSelectedMode()) {
         <p>你可以直接輸入需求，系統會協助你調整排班。</p>
         <p class="agent-chat-hint" id="agentChatHint">${mode === MODE_SCHEDULING
             ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
-            : '💡 你可以上傳 CSV 檔案作為參考資料。'
+            : '💡 你可以上傳 Excel 或 CSV 檔案作為參考資料。'
         }</p>
     `;
     return wrapper;
@@ -185,14 +185,39 @@ export function setupAgentSidebar() {
             const file = e.target.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                attachedCsvText = event.target.result;
-                attachedCsvFileName = file.name;
-                attachmentName.textContent = `📄 ${file.name}`;
-                attachmentPreview.classList.remove('hidden');
-            };
-            reader.readAsText(file);
+            const fileExt = file.name.split('.').pop().toLowerCase();
+
+            if (fileExt === 'csv') {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    attachedCsvText = event.target.result;
+                    attachedCsvFileName = file.name;
+                    attachmentName.textContent = `📄 ${file.name}`;
+                    attachmentPreview.classList.remove('hidden');
+                };
+                reader.readAsText(file);
+            } else if (fileExt === 'xlsx' || fileExt === 'xls') {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const data = new Uint8Array(event.target.result);
+                        const workbook = window.XLSX.read(data, { type: 'array' });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const csvText = window.XLSX.utils.sheet_to_csv(worksheet);
+                        attachedCsvText = csvText;
+                        attachedCsvFileName = file.name;
+                        attachmentName.textContent = `📄 ${file.name}`;
+                        attachmentPreview.classList.remove('hidden');
+                    } catch (err) {
+                        console.error("Excel 解析錯誤:", err);
+                        alert("解析 Excel 檔案失敗，請檢查檔案格式是否正確。");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                alert("不支援的檔案格式，請上傳 Excel 或 CSV 檔案。");
+            }
         });
     }
 
@@ -643,7 +668,7 @@ export async function sendAgentRequest() {
     const csvTextToSend = (!scheduling && attachedCsvText) ? attachedCsvText : '';
     const csvFileNameToSend = attachedCsvFileName || 'uploaded.csv';
     if (csvTextToSend) {
-        addChatMessage(`[CSV] ${csvFileNameToSend}`, 'user', { mode: selectedMode });
+        addChatMessage(`[附件] ${csvFileNameToSend}`, 'user', { mode: selectedMode });
         attachedCsvText = null;
         attachedCsvFileName = '';
         const attachmentPreview = document.getElementById('attachmentPreview');

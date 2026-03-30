@@ -169,6 +169,7 @@ body {
   background: white;
   color: var(--text-primary);
   border-color: var(--border-color);
+  padding: 10px;
 }
 
 .btn-secondary:hover:not(:disabled) {
