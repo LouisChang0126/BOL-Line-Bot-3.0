@@ -2171,7 +2171,10 @@ async function restoreFromHistory() {
     isRestoring = true;
     const state = JSON.parse(historyStack[historyIndex]);
 
-    // 記錄舊的日期集合（用於偵測列數變化）
+    // diff：比對舊狀態，只寫入有差異的列
+    const oldRowMap = new Map(scheduleData.map(r => [r.date, JSON.stringify(r)]));
+    const oldMetadata = JSON.stringify({ serviceItems, nonUserColumns, displayConfig });
+
     const oldDates = new Set(scheduleData.map(r => r.date));
     const newDates = new Set(state.scheduleData.map(r => r.date));
 
@@ -2181,7 +2184,7 @@ async function restoreFromHistory() {
     nonUserColumns = state.nonUserColumns || [];
     displayConfig = state.displayConfig || null;
 
-    // 同步到 Firestore
+    // 同步到 Firestore（僅寫入有差異的部分）
     try {
         const { writeBatch, doc } = window.firestore;
         const db = window.db;
@@ -2193,16 +2196,22 @@ async function restoreFromHistory() {
             if (!newDates.has(date)) batch.delete(doc(db, COLLECTION_NAME, date));
         }
 
-        // 儲存所有現有列
+        // 只寫入與舊狀態不同的列
         scheduleData.forEach(row => {
-            const data = { ...row };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, row.date), data);
+            if (JSON.stringify(row) !== oldRowMap.get(row.date)) {
+                const data = { ...row };
+                delete data.date;
+                batch.set(doc(db, COLLECTION_NAME, row.date), data);
+            }
         });
 
-        const metadata = { serviceItems, nonUserColumns };
-        if (displayConfig) metadata.displayConfig = displayConfig;
-        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+        // 只在 metadata 有變化時寫入
+        const newMetadata = JSON.stringify({ serviceItems, nonUserColumns, displayConfig });
+        if (newMetadata !== oldMetadata) {
+            const metadata = { serviceItems, nonUserColumns };
+            if (displayConfig) metadata.displayConfig = displayConfig;
+            batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+        }
 
         await batch.commit();
     } catch (error) {
