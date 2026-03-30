@@ -37,6 +37,8 @@ let originalChart = null; // 進入頁面時的班表快照
 let hasEdited = false; // 是否有編輯過
 let editDifference = {}; // 記錄編輯差異
 let currentSessionSources = new Set(); // 記錄當前 session 所有的編輯來源
+let logWasWritten = false; // 本 session 是否曾寫入過 Firestore log
+let _saveDebounceTimer = null; // 自動存檔的 debounce timer
 
 // ===========================
 // 撤銷/重做系統 (最多 20 步)
@@ -44,6 +46,7 @@ let currentSessionSources = new Set(); // 記錄當前 session 所有的編輯�
 const MAX_HISTORY_SIZE = 20;
 let historyStack = []; // 歷史記錄堆疊
 let historyIndex = -1; // 目前在歷史中的位置
+let isRestoring = false; // 防止 undo/redo 並發
 
 // ===========================
 // 日期工具函數
@@ -2012,9 +2015,15 @@ export function updateEditDifference(source = 'admin') {
     hasEdited = Object.keys(editDifference).length > 0;
 
     if (hasEdited) {
-        saveEditLog();
+        // debounce 自動存檔，避免快速連續編輯產生競態
+        if (_saveDebounceTimer) clearTimeout(_saveDebounceTimer);
+        _saveDebounceTimer = setTimeout(() => {
+            _saveDebounceTimer = null;
+            saveEditLog();
+        }, 1500);
     } else {
         // 所有變更已撤銷回原始狀態：清除來源記錄，並刪除 Firestore 上已存的 log
+        if (_saveDebounceTimer) { clearTimeout(_saveDebounceTimer); _saveDebounceTimer = null; }
         currentSessionSources.clear();
         deleteEditLog();
     }
@@ -2022,9 +2031,7 @@ export function updateEditDifference(source = 'admin') {
 
 // 儲存編輯記錄到 Firestore
 export async function saveEditLog() {
-    if (!hasEdited || Object.keys(editDifference).length === 0) {
-        return;
-    }
+    if (!hasEdited) return;
 
     const sessionTime = window.SESSION_START_TIME || formatCurrentTime();
     const lastEditedTime = formatCurrentTime();
@@ -2049,6 +2056,7 @@ export async function saveEditLog() {
             'last-edited-time': lastEditedTime
         });
 
+        logWasWritten = true;
         console.log('編輯記錄已儲存');
     } catch (error) {
         console.error('儲存編輯記錄失敗:', error);
@@ -2057,7 +2065,8 @@ export async function saveEditLog() {
 
 // 刪除 Firestore 上的編輯記錄（用於撤銷回原始狀態時）
 async function deleteEditLog() {
-    if (!window.SESSION_START_TIME) return;
+    if (!logWasWritten) return; // 本 session 從未寫入過，無需刪除
+    logWasWritten = false;
     try {
         const { doc, deleteDoc } = window.firestore;
         await deleteDoc(doc(window.db, '_edit_chart_log', window.SESSION_START_TIME));
@@ -2140,25 +2149,26 @@ export function pushHistory() {
 }
 
 // 撤銷
-function undo() {
-    if (historyIndex <= 0) return;
+async function undo() {
+    if (isRestoring || historyIndex <= 0) return;
 
     historyIndex--;
-    restoreFromHistory();
+    await restoreFromHistory();
     updateStatus('已撤銷');
 }
 
 // 重做
-function redo() {
-    if (historyIndex >= historyStack.length - 1) return;
+async function redo() {
+    if (isRestoring || historyIndex >= historyStack.length - 1) return;
 
     historyIndex++;
-    restoreFromHistory();
+    await restoreFromHistory();
     updateStatus('已重做');
 }
 
 // 從歷史記錄恢復
 async function restoreFromHistory() {
+    isRestoring = true;
     const state = JSON.parse(historyStack[historyIndex]);
 
     // 記錄舊的日期集合（用於偵測列數變化）
@@ -2198,6 +2208,8 @@ async function restoreFromHistory() {
     } catch (error) {
         console.error('同步到 Firestore 失敗:', error);
     }
+
+    isRestoring = false;
 
     // 更新差異記錄（undo/redo 不記錄來源）
     updateEditDifference(null);
