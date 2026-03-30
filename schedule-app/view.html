@@ -429,7 +429,7 @@
                 const rowStyle = isPast ? 'opacity: 0.6; background: #f8fafc;' : '';
 
                 html += `<tr style="${rowStyle}">`;
-                html += `<td><div class="date-cell">${escapeHtml(row.date)}</div></td>`;
+                html += `<td><div class="date-cell">${escapeHtml(row.date.replaceAll('.', '/'))}</div></td>`;
 
                 visibleItems.forEach(item => {
                     const persons = row[item] || [];

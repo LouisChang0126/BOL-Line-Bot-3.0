@@ -355,6 +355,12 @@
             }
         }
 
+        function formatTimestamp(ts) {
+            // "2026.02.22.18.39.15" → "2026/02/22 18:39:15"
+            const [y, mo, d, h, min, s] = ts.split('.');
+            return `${y}/${mo}/${d} ${h}:${min}:${s}`;
+        }
+
         let currentFilter = 'all';
 
         window.setFilter = function (filter) {
@@ -418,8 +424,8 @@
             <div class="log-card ${isLatest ? 'latest' : 'disabled'}" data-log-id="${log.id}">
               <div class="log-header">
                 <div>
-                  <h3>編輯記錄 ${log.id}${isLatest ? '<span class="latest-badge">最新</span>' : ''}${sourceBadge}</h3>
-                  <div class="log-meta">最後編輯：${lastEdited}</div>
+                  <h3>編輯記錄 ${formatTimestamp(log.id)}${isLatest ? '<span class="latest-badge">最新</span>' : ''}${sourceBadge}</h3>
+                  <div class="log-meta">最後編輯：${formatTimestamp(lastEdited)}</div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
                   <button class="toggle-btn" onclick="toggleDiff('${log.id}')">展開詳情</button>
@@ -479,7 +485,7 @@
 
                 html += `
             <div class="diff-item">
-              <span class="diff-date">${date}</span>
+              <span class="diff-date">${date.replaceAll('.', '/')}</span>
               <span class="diff-value">${changesHtml}</span>
             </div>
           `;

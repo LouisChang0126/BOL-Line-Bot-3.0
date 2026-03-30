@@ -282,7 +282,7 @@ export function renderTableBody() {
         html += `<tr ${rowClass}>`;
 
         // 日期欄位
-        html += `<td><div class="date-cell" style="cursor: default;">${row.date}</div></td>`;
+        html += `<td><div class="date-cell" style="cursor: default;">${row.date.replaceAll('.', '/')}</div></td>`;
 
         // 服事項目欄位
         serviceItems.forEach(item => {
@@ -453,7 +453,7 @@ export function openEditPersonModal(date, service) {
     const isInfoColumn = nonUserColumns.includes(service);
     const personModalTitle = document.getElementById('editPersonModalTitle');
 
-    document.getElementById('editPersonModalSubtitle').textContent = `${date} - ${service}`;
+    document.getElementById('editPersonModalSubtitle').textContent = `${date.replaceAll('.', '/')} - ${service}`;
 
     const formGroups = document.getElementById('editPersonModal').querySelectorAll('.form-group');
     const firstLabel = formGroups[0]?.querySelector('label');
