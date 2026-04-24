@@ -32,6 +32,11 @@ cred = credentials.Certificate('serviceAccount.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+
+def now_tw():
+    """回傳台灣時間 (UTC+8) 的 datetime。GCF 執行環境為 UTC，不可用 datetime.now()。"""
+    return datetime.utcnow() + timedelta(hours=8)
+
 # LINE Bot API 初始化 - 支援多台 LINE Bot
 # line_bot_id 規則: 0=未連線, 1=第一台(索引 0), 2=第二台(索引 1), ...
 handlers = [WebhookHandler(secret) for secret in channel_secret]
@@ -110,7 +115,7 @@ def log_usage(user_name, action_type):
     
     try:
         # 取得當前年月
-        month_key = datetime.now().strftime("%Y.%m")
+        month_key = now_tw().strftime("%Y.%m")
         
         # 使用 Firestore 的原子操作增加計數
         user_ref = db.collection("users").document(user_name)
@@ -242,7 +247,7 @@ def get_collection_schedule(collection_id):
         dict: { 日期: { 服事項目: [人員列表], ... }, ... }
     """
     schedule = {}
-    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    now_taiwan = now_tw()
     today = now_taiwan.strftime("%Y.%m.%d")
     
     # 使用 document ID 篩選今天及之後的文件（最多半年份）
@@ -461,29 +466,31 @@ def find_shift_candidates(collection_id, serve_type, change_date, requester_name
     actions = []
     
     if mode == 'G':
-        # 代班模式：找所有有這個服事的人
-        users_query = db.collection("users").get()
+        # 代班模式：以 array_contains 索引查詢，只撈「這個崇拜的這個服事項目」可擔任的人
+        # 注意：需在 Firestore 建立對應欄位的單欄索引 (single-field exemption 預設已支援 array_contains)
+        field_path = f"serve_types.{collection_id}"
+        users_query = db.collection("users").where(field_path, "array_contains", serve_type).get()
         for user_doc in users_query:
             if user_doc.id == requester_name:
                 continue
             user_data = user_doc.to_dict()
-            serve_types = user_data.get('serve_types', {}).get(collection_id, [])
-            if serve_type in serve_types and user_data.get('lineId', ''):
-                actions.append(PostbackTemplateAction(
-                    label=user_doc.id,
-                    text=f"請 {user_doc.id} 代班",
-                    data=f"G#{user_doc.id}|{change_date}|{collection_id}|{serve_type}|{requester_name}"
+            if not user_data.get('lineId', ''):
+                continue
+            actions.append(PostbackTemplateAction(
+                label=user_doc.id,
+                text=f"請 {user_doc.id} 代班",
+                data=f"G#{user_doc.id}|{change_date}|{collection_id}|{serve_type}|{requester_name}"
+            ))
+            if len(actions) == 3:
+                columns.append(CarouselColumn(
+                    title='請誰代班?',
+                    text='請「一定要」與該同工先私訊溝通好',
+                    actions=actions
                 ))
-                if len(actions) == 3:
-                    columns.append(CarouselColumn(
-                        title='請誰代班?',
-                        text='請「一定要」與該同工先私訊溝通好',
-                        actions=actions
-                    ))
-                    actions = []
+                actions = []
     else:
         # 調班模式：找該服事其他日期的人
-        now_taiwan = datetime.utcnow() + timedelta(hours=8)
+        now_taiwan = now_tw()
         today = now_taiwan.strftime("%Y.%m.%d")
         # 使用 document ID 篩選今天及之後的文件
         docs = db.collection(collection_id) \
@@ -761,7 +768,7 @@ def execute_shift(case_id):
     
     collection_id = data.get('collection', 'service')  # 相容舊資料
     serve_type = data['種類']
-    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    now_taiwan = now_tw()
     today = now_taiwan.strftime("%Y.%m.%d")
     
     # 檢查並執行調班
@@ -809,7 +816,7 @@ def execute_shift(case_id):
     
     # 記錄到編輯記錄 (_edit_chart_log)
     try:
-        log_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%Y.%m.%d.%H.%M.%S")
+        log_time = now_tw().strftime("%Y.%m.%d.%H.%M.%S")
         difference = {}
         
         if data['被申請日'] != 'none':
@@ -1116,7 +1123,7 @@ def build_schedule_message(collection_id):
         return TextSendMessage(text="找不到服事項目資料")
     
     # 取得當週班表
-    now_taiwan = datetime.utcnow() + timedelta(hours=8)
+    now_taiwan = now_tw()
     today = now_taiwan.strftime("%Y.%m.%d")
     docs = db.collection(collection_id) \
         .where("__name__", ">=", db.collection(collection_id).document(today)) \

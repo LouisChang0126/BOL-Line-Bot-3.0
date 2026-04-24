@@ -17,6 +17,12 @@ db = firestore.client()
 import json
 from datetime import datetime, timedelta, date
 
+
+def now_tw():
+    """回傳台灣時間 (UTC+8) 的 datetime。Cloud Scheduler 觸發環境為 UTC，不可用 datetime.now()。"""
+    return datetime.utcnow() + timedelta(hours=8)
+
+
 # LINE Bot API 初始化 - 支援多台 LINE Bot
 line_bot_apis = [LineBotApi(token) for token in channel_access_token]
 
@@ -34,7 +40,7 @@ def log_usage(user_name, action_type):
     
     try:
         # 取得當前年月
-        month_key = datetime.now().strftime("%Y.%m")
+        month_key = now_tw().strftime("%Y.%m")
         
         # 使用 Firestore 的原子操作增加計數
         user_ref = db.collection("users").document(user_name)
@@ -95,7 +101,7 @@ def reminder_all_serves():
     """
     
     # 計算這週日的日期
-    today = datetime.now()
+    today = now_tw()
     days_until_sunday = (6 - today.weekday()) % 7  # weekday(): Monday=0, Sunday=6
     if days_until_sunday == 0:
         days_until_sunday = 7  # 如果今天是週日，取下週日

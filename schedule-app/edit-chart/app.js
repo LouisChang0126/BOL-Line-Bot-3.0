@@ -26,6 +26,20 @@ let usersCacheReady = false;
 let usersCacheInitPromise = null;
 let usersUnsubscribe = null;
 
+/**
+ * 取消既有的 users Firestore listener，並把 cache 狀態重置，
+ * 讓下次 ensureUsersCache() 會重新建立訂閱。
+ * 於 loadData 入口、beforeunload、pagehide 時呼叫，避免 listener 殘留 / 重複訂閱。
+ */
+function cancelUsersListener() {
+    if (typeof usersUnsubscribe === 'function') {
+        try { usersUnsubscribe(); } catch (_) { /* ignore */ }
+    }
+    usersUnsubscribe = null;
+    usersCacheReady = false;
+    usersCacheInitPromise = null;
+}
+
 // 最大顯示/新增限制
 const MAX_FUTURE_ROWS = 52; // 未來資料最多52筆
 const MAX_PAST_ROWS = 26; // 歷史資料最多26筆
@@ -154,6 +168,9 @@ function waitForFirebase() {
 async function loadData() {
     updateStatus('載入資料中...');
 
+    // 取消上一輪可能殘留的 users listener，避免重複訂閱 / 記憶體洩漏
+    cancelUsersListener();
+
     try {
         const { collection, getDocs, query, orderBy, doc, getDoc, where, limit } = window.firestore;
         const db = window.db;
@@ -162,8 +179,11 @@ async function loadData() {
         // 載入服事項目
         const metadataDoc = await getDoc(doc(db, COLLECTION_NAME, '_metadata'));
         if (metadataDoc.exists()) {
-            serviceItems = metadataDoc.data().serviceItems || [];
-            nonUserColumns = metadataDoc.data().nonUserColumns || [];
+            const md = metadataDoc.data();
+            serviceItems = md.serviceItems || [];
+            nonUserColumns = md.nonUserColumns || [];
+            // 樂觀鎖版本：記錄載入時的 _version；saveMetadata 時會做 compare-and-set
+            window.__metadataVersion = typeof md._version === 'number' ? md._version : 0;
         } else {
             throw new Error('沒有 metadata');
         }
@@ -184,7 +204,10 @@ async function loadData() {
         querySnapshot.forEach((docRef) => {
             if (docRef.id !== '_metadata') {
                 const data = docRef.data();
-                scheduleData.push({ date: docRef.id, ...data });
+                // 樂觀鎖：保留 _version 於記憶體，不讓它被當成服事欄位顯示
+                const row = { date: docRef.id, ...data };
+                row._version = typeof data._version === 'number' ? data._version : 0;
+                scheduleData.push(row);
 
                 // 收集所有人名
                 serviceItems.forEach(item => {
@@ -325,9 +348,17 @@ async function createInitialData() {
     }
 }
 
-// 儲存 metadata
+// 樂觀鎖衝突時統一通知並強制重新載入（讓使用者重新操作，避免互蓋）
+function _handleConflict(where) {
+    console.warn(`[optimistic-lock] conflict at ${where}`);
+    alert(`偵測到其他使用者同時編輯了「${where}」\n你的這次變更未被寫入，頁面將重新載入以取得最新資料。`);
+    // 重新整理保證拿到最新版本，避免基於過期資料再次寫入
+    window.location.reload();
+}
+
+// 儲存 metadata（含 _version 樂觀鎖：多人同時改欄位時阻擋互蓋）
 export async function saveMetadata() {
-    const { doc, setDoc } = window.firestore;
+    const { doc, runTransaction } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
@@ -335,26 +366,75 @@ export async function saveMetadata() {
         serviceItems: serviceItems,
         nonUserColumns: nonUserColumns
     };
-
-    // 如果有 displayConfig，也儲存
     if (displayConfig) {
         metadata.displayConfig = displayConfig;
     }
 
-    await setDoc(doc(db, COLLECTION_NAME, '_metadata'), metadata);
+    const ref = doc(db, COLLECTION_NAME, '_metadata');
+    const expectedVersion = typeof window.__metadataVersion === 'number' ? window.__metadataVersion : 0;
+
+    try {
+        const nextVersion = await runTransaction(db, async (tx) => {
+            const snap = await tx.get(ref);
+            const currentVersion = snap.exists() && typeof snap.data()._version === 'number'
+                ? snap.data()._version : 0;
+            if (currentVersion !== expectedVersion) {
+                throw new Error('__VERSION_CONFLICT__');
+            }
+            const payload = { ...metadata, _version: currentVersion + 1 };
+            tx.set(ref, payload);
+            return currentVersion + 1;
+        });
+        window.__metadataVersion = nextVersion;
+    } catch (err) {
+        if (err && err.message === '__VERSION_CONFLICT__') {
+            _handleConflict('服事項目設定');
+            throw err;
+        }
+        throw err;
+    }
 }
 
-// 儲存班表資料
+// 儲存班表資料（含 _version 樂觀鎖）
 export async function saveSchedule(dateStr, data) {
-    const { doc, setDoc } = window.firestore;
+    const { doc, runTransaction } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
-    // 移除 date 欄位（因為已經是 document ID）
+    // 找到這個日期在記憶體中的 cached _version；若不存在（新增的週次），從 0 開始
+    const row = (typeof scheduleData !== 'undefined' && Array.isArray(scheduleData))
+        ? scheduleData.find(r => r.date === dateStr) : null;
+    const expectedVersion = row && typeof row._version === 'number' ? row._version : 0;
+
+    // 移除不應寫回 Firestore 的欄位
     const saveData = { ...data };
     delete saveData.date;
+    delete saveData._version;
 
-    await setDoc(doc(db, COLLECTION_NAME, dateStr), saveData);
+    const ref = doc(db, COLLECTION_NAME, dateStr);
+
+    try {
+        const nextVersion = await runTransaction(db, async (tx) => {
+            const snap = await tx.get(ref);
+            const currentVersion = snap.exists() && typeof snap.data()._version === 'number'
+                ? snap.data()._version : 0;
+            // 新增文件時 expectedVersion 是 0、current 也是 0 → 放行
+            // 已存在的文件：必須版本吻合才能寫
+            if (snap.exists() && currentVersion !== expectedVersion) {
+                throw new Error('__VERSION_CONFLICT__');
+            }
+            const payload = { ...saveData, _version: currentVersion + 1 };
+            tx.set(ref, payload);
+            return currentVersion + 1;
+        });
+        if (row) row._version = nextVersion;
+    } catch (err) {
+        if (err && err.message === '__VERSION_CONFLICT__') {
+            _handleConflict(dateStr);
+            throw err;
+        }
+        throw err;
+    }
 }
 
 // 刪除班表資料
@@ -2144,17 +2224,16 @@ function formatCurrentTime() {
     return `${y}.${m}.${d}.${h}.${min}.${sec}`;
 }
 
-// 頁面離開前儲存
+// 頁面離開前儲存；同時支援 pagehide（bfcache 場景 beforeunload 可能不觸發）
 function setupBeforeUnloadHandler() {
-    window.addEventListener('beforeunload', () => {
+    const cleanup = () => {
         if (hasEdited) {
             saveEditLog(); // 離開頁面前存檔
         }
-        if (typeof usersUnsubscribe === 'function') {
-            usersUnsubscribe();
-            usersUnsubscribe = null;
-        }
-    });
+        cancelUsersListener();
+    };
+    window.addEventListener('beforeunload', cleanup);
+    window.addEventListener('pagehide', cleanup);
 }
 
 // ===========================
