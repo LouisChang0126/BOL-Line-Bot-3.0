@@ -10,6 +10,7 @@ import os
 import random
 import re
 import time
+from datetime import datetime, timezone
 
 import anthropic
 import functions_framework
@@ -18,6 +19,18 @@ from flask import jsonify, make_response
 
 MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
+
+# =====================================================
+# Prompt Engineering 實驗紀錄（暫時）
+# =====================================================
+# 排班模式 (selectedMode == "scheduling") 的每次 HTTP 呼叫會把 prompt/response
+# 落檔到 Prompt_Experiment/{start-time}-{retry}.txt。要停用就把環境變數
+# AGENT_EXPERIMENT_LOG_DIR 設成空字串，或直接砍掉這個資料夾。
+EXPERIMENT_LOG_DIR = os.environ.get(
+    "AGENT_EXPERIMENT_LOG_DIR",
+    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "Prompt_Experiment")),
+)
+EXPERIMENT_LOG_MODE = "scheduling"  # 只在這個 mode 紀錄
 
 _DEFAULT_SCHEMA_VALIDATION = {
     "max_add_weeks": 26,
@@ -317,6 +330,13 @@ def generate_agent_schedule(request):
     attached_csv_text = data.get("attachedCsvText", "")
     chat_history = data.get("chatHistory", [])
 
+    # Prompt Engineering 實驗用：由 client 傳來，排班模式會落檔
+    experiment_start = str(data.get("experimentStartTime", "") or "")
+    try:
+        experiment_retry = int(data.get("experimentRetryCount", 0) or 0)
+    except (TypeError, ValueError):
+        experiment_retry = 0
+
     if not prompt:
         return add_cors_headers(cors_response({"error": "Missing prompt"}, 400), origin)
 
@@ -334,19 +354,41 @@ def generate_agent_schedule(request):
     )
     messages = _build_messages(chat_history, prompt)
 
+    def _maybe_log(body, status):
+        if mode != EXPERIMENT_LOG_MODE:
+            return
+        try:
+            _log_experiment(
+                start_time=experiment_start,
+                retry_count=experiment_retry,
+                mode=mode,
+                provider=provider,
+                model=model,
+                system_prompt=system_prompt,
+                messages=messages,
+                response_body=body,
+                status_code=status,
+            )
+        except Exception as log_err:
+            print(f"[experiment-log] write failed: {log_err}")
+
     try:
         if provider == "anthropic":
             if not api_key:
-                return add_cors_headers(cors_response({"error": "API key not configured for anthropic mode"}, 500), origin)
+                body = {"error": "API key not configured for anthropic mode"}
+                _maybe_log(body, 500)
+                return add_cors_headers(cors_response(body, 500), origin)
             tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages)
         elif provider == "openai_compatible":
             tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages)
         else:
-            return add_cors_headers(cors_response({"error": f"Unsupported provider: {provider}"}, 500), origin)
+            body = {"error": f"Unsupported provider: {provider}"}
+            _maybe_log(body, 500)
+            return add_cors_headers(cors_response(body, 500), origin)
 
         if not tool_input:
             answer_text = text_response or "目前無需修改排班，這題以問答模式回覆。"
-            response = cors_response({
+            body = {
                 "mode": "answer_only",
                 "answerOnly": True,
                 "answer": answer_text,
@@ -355,26 +397,31 @@ def generate_agent_schedule(request):
                 "provider": provider,
                 "model": model,
                 "usage": usage,
-            })
-            return add_cors_headers(response, origin)
+            }
+            _maybe_log(body, 200)
+            return add_cors_headers(cors_response(body), origin)
 
         result = tool_input.get("scheduleData", [])
         explanation = tool_input.get("explanation", "")
         if not result:
-            return add_cors_headers(cors_response({"error": "No schedule data in response"}, 500), origin)
+            body = {"error": "No schedule data in response"}
+            _maybe_log(body, 500)
+            return add_cors_headers(cors_response(body, 500), origin)
 
         valid, err_msg = _validate_tool_input(tool_input, SCHEMA_VALIDATION)
         if not valid:
-            return add_cors_headers(cors_response({
+            body = {
                 "error": "Agent response failed schema validation",
                 "detail": err_msg,
                 "modeKey": mode,
                 "provider": provider,
                 "model": model,
                 "usage": usage,
-            }, 422), origin)
+            }
+            _maybe_log(body, 422)
+            return add_cors_headers(cors_response(body, 422), origin)
 
-        response = cors_response({
+        body = {
             "scheduleData": result,
             "explanation": explanation,
             "addWeeks": int(tool_input.get("addWeeks", 0) or 0),
@@ -385,13 +432,18 @@ def generate_agent_schedule(request):
             "provider": provider,
             "model": model,
             "usage": usage,
-        })
-        return add_cors_headers(response, origin)
+        }
+        _maybe_log(body, 200)
+        return add_cors_headers(cors_response(body), origin)
 
     except anthropic.APIError as e:
-        return add_cors_headers(cors_response({"error": f"Claude API error: {str(e)}"}, 502), origin)
+        body = {"error": f"Claude API error: {str(e)}"}
+        _maybe_log(body, 502)
+        return add_cors_headers(cors_response(body, 502), origin)
     except Exception as e:
-        return add_cors_headers(cors_response({"error": f"Internal error: {str(e)}"}, 500), origin)
+        body = {"error": f"Internal error: {str(e)}"}
+        _maybe_log(body, 500)
+        return add_cors_headers(cors_response(body, 500), origin)
 
 
 def _sanitize_untrusted(text):
@@ -536,13 +588,16 @@ def _validate_tool_input(tool_input, rules):
     max_persons = int(rules.get("max_persons_per_cell", 10))
     max_person_len = int(rules.get("max_person_name_length", 20))
 
+    # 這些是內部 metadata，不是服事欄位；LLM 萬一回傳也不視為錯誤
+    RESERVED_ROW_KEYS = {"date", "_version"}
+
     for idx, row in enumerate(schedule_data):
         if not isinstance(row, dict):
             return False, f"scheduleData[{idx}] is not an object"
         date_val = row.get("date")
         if not isinstance(date_val, str) or not date_re.match(date_val):
             return False, f"scheduleData[{idx}].date invalid: {date_val!r}"
-        non_date_keys = [k for k in row.keys() if k != "date"]
+        non_date_keys = [k for k in row.keys() if k not in RESERVED_ROW_KEYS]
         if len(non_date_keys) > max_cols_per_row:
             return False, f"scheduleData[{idx}] has {len(non_date_keys)} service cols (limit {max_cols_per_row})"
         for k in non_date_keys:
@@ -562,3 +617,83 @@ def _validate_tool_input(tool_input, rules):
                     return False, f"scheduleData[{idx}].{k} person name too long: {person[:20]}..."
 
     return True, ""
+
+
+# =====================================================
+# Prompt Engineering 實驗落檔
+# =====================================================
+
+_FILENAME_UNSAFE_RE = re.compile(r"[^0-9A-Za-z._-]")
+
+
+def _sanitize_filename_part(value, fallback):
+    """把 start_time / retry 等欄位濾成檔名安全字元，避免路徑穿越或非法字元。"""
+    value = str(value or "").strip()
+    if not value:
+        return fallback
+    cleaned = _FILENAME_UNSAFE_RE.sub("_", value)
+    # 避免過長 / 過空
+    cleaned = cleaned[:64] or fallback
+    return cleaned
+
+
+def _log_experiment(start_time, retry_count, mode, provider, model,
+                    system_prompt, messages, response_body, status_code):
+    """排班模式每次 HTTP 呼叫寫一份純文字 log：{start-time}-{retry}.txt。
+    start_time 為空時會用 server 當下時間做後備（方便早期還沒接 client 欄位的情境）。
+    """
+    if not EXPERIMENT_LOG_DIR:
+        return
+
+    # fallback：client 沒傳 start_time 時，用伺服器當下時間
+    default_start = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    safe_start = _sanitize_filename_part(start_time, default_start)
+    try:
+        safe_retry = str(int(retry_count))
+    except (TypeError, ValueError):
+        safe_retry = "0"
+
+    os.makedirs(EXPERIMENT_LOG_DIR, exist_ok=True)
+    path = os.path.join(EXPERIMENT_LOG_DIR, f"{safe_start}-{safe_retry}.txt")
+
+    # 若同檔已存在（同一重試號重複觸發）加流水號避免互相覆蓋
+    if os.path.exists(path):
+        i = 1
+        while True:
+            alt = os.path.join(EXPERIMENT_LOG_DIR, f"{safe_start}-{safe_retry}_dup{i}.txt")
+            if not os.path.exists(alt):
+                path = alt
+                break
+            i += 1
+
+    try:
+        body_serialized = json.dumps(response_body, ensure_ascii=False, indent=2)
+    except (TypeError, ValueError):
+        body_serialized = repr(response_body)
+
+    lines = []
+    lines.append(f"=== Experiment Log ===")
+    lines.append(f"wall_clock_utc:  {datetime.now(timezone.utc).isoformat()}")
+    lines.append(f"start_time:      {start_time or '(none, fell back to server time)'}")
+    lines.append(f"retry_count:     {retry_count}")
+    lines.append(f"mode:            {mode}")
+    lines.append(f"provider:        {provider}")
+    lines.append(f"model:           {model}")
+    lines.append(f"status_code:     {status_code}")
+    lines.append("")
+    lines.append("--- System Prompt ---")
+    lines.append(system_prompt or "")
+    lines.append("")
+    lines.append("--- Messages (chat history + current user prompt) ---")
+    for i, m in enumerate(messages or []):
+        role = m.get("role", "?")
+        content = m.get("content", "")
+        lines.append(f"[{i}] {role}:")
+        lines.append(content if isinstance(content, str) else repr(content))
+        lines.append("")
+    lines.append("--- Response Body ---")
+    lines.append(body_serialized)
+    lines.append("")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))

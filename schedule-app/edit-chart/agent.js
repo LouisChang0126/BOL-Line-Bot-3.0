@@ -704,7 +704,11 @@ export async function sendAgentRequest() {
     });
 
     // 複製目前的 scheduleData，若有 pendingChanges 則先行合併，讓 LLM 基於最新的「草稿」繼續修改
-    let effectiveScheduleData = JSON.parse(JSON.stringify(scheduleData));
+    // 剝除內部 metadata（_version 是樂觀鎖用，不該給 LLM 看見否則會被當作欄位回填）
+    let effectiveScheduleData = JSON.parse(JSON.stringify(scheduleData)).map(row => {
+        const { _version, ...rest } = row;
+        return rest;
+    });
     if (pendingAgentChanges) {
         Object.entries(pendingAgentChanges).forEach(([date, services]) => {
             const row = effectiveScheduleData.find(r => r.date === date);
@@ -743,15 +747,26 @@ export async function sendAgentRequest() {
     const MAX_API_ERROR_RETRIES = 1;
     let lastResult = null;
 
+    // Prompt Engineering 實驗：排班模式才會被後端落檔。
+    // 同一個 sendAgentRequest 裡每次 fetch 共用 experimentStartTime，retry 計數隨迴圈累加。
+    const pad2 = n => String(n).padStart(2, '0');
+    const _now = new Date();
+    const experimentStartTime = `${_now.getFullYear()}-${pad2(_now.getMonth() + 1)}-${pad2(_now.getDate())}_${pad2(_now.getHours())}-${pad2(_now.getMinutes())}-${pad2(_now.getSeconds())}`;
+
     while (retryCount <= MAX_RETRIES) {
         try {
+            const experimentRetryCount = retryCount + apiErrorRetryCount;
+            const experimentFields = scheduling
+                ? { experimentStartTime, experimentRetryCount }
+                : {};
             const response = await fetch(AGENT_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(retryCount > 0 ? {
                     ...payload,
+                    ...experimentFields,
                     prompt: `${prompt}\n\n[系統提示] 上次產生的班表違反規則，請修正：\n${lastResult.warnings.map(w => w.message).join('\n')}`
-                } : payload)
+                } : { ...payload, ...experimentFields })
             });
 
             if (!response.ok) {
