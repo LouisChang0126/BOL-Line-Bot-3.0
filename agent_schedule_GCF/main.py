@@ -31,7 +31,7 @@ REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "1
 #         - CF 收到後再把 CSV 解回 JSON array，前端看到的 response shape 不變
 # False → 沿用原本純 JSON 流程（與 edit_qa 一致）。
 # 只影響 scheduling 模式，edit_qa 永遠是 JSON。
-USE_CSV_SCHEDULE = True
+USE_CSV_SCHEDULE = False
 CSV_MULTI_PERSON_SEPARATOR = "/"  # CSV 單格多人時的分隔符（勿用逗號，會跟 CSV 本身衝突）
 
 # =====================================================
@@ -494,6 +494,16 @@ def generate_agent_schedule(request):
     except (TypeError, ValueError):
         experiment_retry = 0
 
+    # 「參考範圍」功能的 client 旗標
+    #   generate_weeks: 限縮 LLM 能輸出的週次（非空就送進 system prompt 當 hard constraint）
+    #   suppress_structural: 若為 True，從 tool schema 拿掉 addWeeks/removeWeeks
+    suppress_structural = bool(data.get("suppressStructural", False))
+    generate_weeks = data.get("generateWeeks", []) or []
+    if not isinstance(generate_weeks, list):
+        generate_weeks = []
+    # 只保留字串型的日期，避免奇怪型別進入 prompt
+    generate_weeks = [str(d) for d in generate_weeks if isinstance(d, str) and d.strip()]
+
     if not prompt:
         return add_cors_headers(cors_response({"error": "Missing prompt"}, 400), origin)
 
@@ -506,6 +516,19 @@ def generate_agent_schedule(request):
     # 排班模式且實驗旗標開啟時走 CSV input/output
     use_csv = (mode == "scheduling" and USE_CSV_SCHEDULE)
     schedule_tool = _tool_for_mode(mode)
+
+    # 若「生成週次」非空，suppress addWeeks/removeWeeks（前端已預建好缺漏週次）
+    if suppress_structural:
+        schedule_tool = {
+            **schedule_tool,
+            "input_schema": {
+                **schedule_tool["input_schema"],
+                "properties": {
+                    k: v for k, v in schedule_tool["input_schema"]["properties"].items()
+                    if k not in ("addWeeks", "removeWeeks")
+                },
+            },
+        }
 
     if use_csv:
         csv_schedule, _service_items_hint, non_user_columns_hint = _parse_current_schedule_to_csv(current_schedule)
@@ -520,6 +543,7 @@ def generate_agent_schedule(request):
         attached_csv_text,
         selected_mode=mode,
         schedule_format=("csv" if use_csv else "json"),
+        generate_weeks=generate_weeks,
     )
     messages = _build_messages(chat_history, prompt)
 
@@ -651,14 +675,17 @@ def _wrap_untrusted(tag, content):
     return f"<{tag}>\n{safe}\n</{tag}>"
 
 
-def build_system_prompt(current_schedule, active_rules, attached_csv_text, selected_mode, schedule_format="json"):
+def build_system_prompt(current_schedule, active_rules, attached_csv_text, selected_mode, schedule_format="json", generate_weeks=None):
     """
     schedule_format:
       - "json": current_schedule 是 JSON 字串（前端送的 currentSchedule 原封不動）
       - "csv":  current_schedule 是已經轉好的 CSV 文字
+    generate_weeks:
+      - 非空時會注入 Scope Constraint 段，要求 LLM 只修改/回傳這幾個日期
     """
     is_scheduling = selected_mode == "scheduling"
     use_csv = schedule_format == "csv"
+    generate_weeks = [str(d) for d in (generate_weeks or []) if str(d).strip()]
 
     rules = []
     rules_section = ""
@@ -678,7 +705,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
             rules.append("- No extra scheduling rules are enabled.")
         rules_section = (
             "## Active Rules\n"
-            f"{os.linesep.join(rules)}\n\n"
+            f"{os.linesep.join(rules)}\n"
         )
     else:
         rules_section = ""
@@ -701,24 +728,56 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
     defense = PROMPT_HARDENING.get("defense_instruction", "") or ""
     defense_block = f"{defense}\n\n" if defense else ""
 
+    # Scope Constraint：generate_weeks 非空時限縮 LLM 能產出的週次
+    # 注意：addWeeks/removeWeeks 已從 tool schema 移除，毋須在 prompt 重複提醒
+    scope_block = ""
+    if generate_weeks:
+        # dates_line = ", ".join(generate_weeks)
+        dates_line = generate_weeks[0]+"~"+generate_weeks[-1]
+        scope_block = (
+            "## Schedule Scope Constraint (HARD REQUIREMENT)\n"
+            f"You MUST ONLY modify and return rows for these dates: {dates_line}.\n"
+            "- Do NOT emit rows for any other date.\n\n"
+        )
+
     if use_csv:
+        # Scope Constraint 下 scheduleData 只含指定週次
+        schedule_scope_line = (
+            "1. Return ONLY rows for the dates listed in the Scope Constraint section (subset, not the full schedule).\n"
+            if generate_weeks else
+            "1. Return the FULL updated schedule as CSV text in `scheduleData`.\n"
+        )
+        # 若 suppress 則 addWeeks/removeWeeks 已從 tool 拿掉，不再提這一條
+        week_structural_line = (
+            "" if generate_weeks else
+            "7. Use `addWeeks`/`removeWeeks` only for structural week changes (and reflect them in the CSV rows).\n"
+        )
         tool_requirements = (
             "## Tool Requirements (scheduleData is CSV TEXT)\n"
-            "1. Return the FULL updated schedule as CSV text in `scheduleData`.\n"
+            + schedule_scope_line +
             "2. Header row MUST be 'date' followed by each existing service column in the exact same order as in the current CSV.\n"
             "   If you call `addServiceColumns` / `removeServiceColumns`, your CSV must already reflect those column changes.\n"
             "3. Date format: YYYY.MM.DD. One row per week.\n"
             f"4. Multi-person cells: join names with '{CSV_MULTI_PERSON_SEPARATOR}' (no spaces, no commas). Empty cell means no one assigned.\n"
             "5. Do NOT emit a `_version` column or any other internal metadata column.\n"
             "6. Do NOT add blank lines or commentary in the CSV.\n"
-            "7. Use `addWeeks`/`removeWeeks` only for structural week changes (and reflect them in the CSV rows).\n"
+            + week_structural_line +
             "8. Include a concise `explanation`.\n"
         )
     else:
+        schedule_scope_line = (
+            "1. Return `scheduleData` ONLY containing rows for the dates listed in the Scope Constraint section (subset, not the full schedule).\n"
+            if generate_weeks else
+            "1. Always return complete `scheduleData` when calling the tool.\n"
+        )
+        week_structural_line = (
+            "" if generate_weeks else
+            "2. Use `addWeeks`/`removeWeeks` only for structural week changes.\n"
+        )
         tool_requirements = (
             "## Tool Requirements\n"
-            "1. Always return complete `scheduleData` when calling the tool.\n"
-            "2. Use `addWeeks`/`removeWeeks` only for structural week changes.\n"
+            + schedule_scope_line
+            + week_structural_line +
             "3. Use `addServiceColumns`/`removeServiceColumns` for structural service changes.\n"
             "4. Keep each row with a `date` field and service arrays of names.\n"
             "5. Include a concise `explanation`.\n"
@@ -731,6 +790,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
         "If the user asks a pure question, answer directly without tool call.\n\n"
         f"{schedule_header}\n"
         f"{schedule_block}\n\n"
+        f"{scope_block}"
         f"{rules_section}"
         f"{csv_section}\n"
         f"{tool_requirements}"

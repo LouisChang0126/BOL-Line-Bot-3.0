@@ -56,6 +56,19 @@ function syncAgentModeUI() {
         rulesSection.style.display = scheduling ? '' : 'none';
     }
 
+    const referenceRangeSection = document.getElementById('agentReferenceRangeSection');
+    const referenceRangeContent = document.getElementById('agentReferenceRangeContent');
+    if (referenceRangeSection) {
+        referenceRangeSection.style.display = scheduling ? '' : 'none';
+    }
+    if (referenceRangeContent) {
+        referenceRangeContent.style.display = scheduling ? 'flex' : 'none';
+    }
+    if (scheduling) {
+        // 進排班模式時，依當下 scheduleData 重新填下拉選項
+        populateReferenceRangeDropdowns();
+    }
+
     if (!scheduling) {
         if (rulesContent) rulesContent.style.display = 'none';
     } else {
@@ -107,6 +120,132 @@ function renderChatHistory(mode = getSelectedMode()) {
     }
 
     history.forEach(({ content, role }) => appendChatMessageNode(content, role));
+}
+
+// --- 參考範圍 / 生成範圍下拉選單 ---
+// 由 setupAgentSidebar 與 syncAgentModeUI 觸發 populate；listeners 只裝一次。
+
+const REFERENCE_RANGE_IDS = ['agentReferenceStart', 'agentReferenceEnd'];
+const GENERATE_RANGE_IDS = ['agentGenerateStart', 'agentGenerateEnd'];
+const FUTURE_SUNDAY_COUNT = 26;  // 生成週次下拉裡多附 N 個未來週日候選，方便建立新週
+
+function getFutureSundayCandidates(latestExistingDate, count = FUTURE_SUNDAY_COUNT) {
+    if (!latestExistingDate || !/^\d{4}\.\d{2}\.\d{2}$/.test(latestExistingDate)) return [];
+    const [y, m, d] = latestExistingDate.split('.').map(Number);
+    const base = new Date(y, m - 1, d);
+    const out = [];
+    for (let i = 1; i <= count; i++) {
+        const next = new Date(base);
+        next.setDate(base.getDate() + 7 * i);
+        const yy = next.getFullYear();
+        const mm = String(next.getMonth() + 1).padStart(2, '0');
+        const dd = String(next.getDate()).padStart(2, '0');
+        out.push(`${yy}.${mm}.${dd}`);
+    }
+    return out;
+}
+
+function _setSelectOptions(selectId, dateValues, placeholder) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const prev = el.value;
+    const opts = [`<option value="">${placeholder}</option>`]
+        .concat(dateValues.map(v => `<option value="${v}">${v}</option>`));
+    el.innerHTML = opts.join('');
+    if (prev && [...el.options].some(o => o.value === prev)) {
+        el.value = prev;
+    } else {
+        el.value = '';
+    }
+}
+
+function _isWeekNonEmpty(row) {
+    return Object.entries(row).some(([k, v]) => {
+        if (k === 'date' || k === '_version') return false;
+        if (Array.isArray(v)) return v.length > 0;
+        if (typeof v === 'string') return v.trim().length > 0;
+        return false;
+    });
+}
+
+function _findLastNonEmptyDate(rows) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+        if (_isWeekNonEmpty(rows[i])) return rows[i].date;
+    }
+    return null;
+}
+
+function populateReferenceRangeDropdowns() {
+    const existing = [...new Set(scheduleData.map(r => r.date))].sort();
+    const latest = existing[existing.length - 1] || null;
+    const future = latest ? getFutureSundayCandidates(latest) : [];
+    const refDates = existing;
+    const genDates = [...existing, ...future];  // 生成下拉多附未來候選
+
+    _setSelectOptions('agentReferenceStart', refDates, '起始週次');
+    _setSelectOptions('agentReferenceEnd', refDates, '結束週次');
+    _setSelectOptions('agentGenerateStart', genDates, '起始週次');
+    _setSelectOptions('agentGenerateEnd', genDates, '結束週次');
+
+    // 參考週次預填：第一週 → 最後一個非空白週（只在使用者尚未選擇時填）
+    const refStartEl = document.getElementById('agentReferenceStart');
+    const refEndEl = document.getElementById('agentReferenceEnd');
+    const firstWeek = existing[0] || '';
+    const lastNonEmpty = _findLastNonEmptyDate(scheduleData) || existing[existing.length - 1] || '';
+    if (refStartEl && !refStartEl.value && firstWeek) refStartEl.value = firstWeek;
+    if (refEndEl && !refEndEl.value && lastNonEmpty) refEndEl.value = lastNonEmpty;
+
+    _applyRangeConstraints(...REFERENCE_RANGE_IDS);
+    _applyRangeConstraints(...GENERATE_RANGE_IDS);
+}
+
+function _applyRangeConstraints(startId, endId) {
+    const startEl = document.getElementById(startId);
+    const endEl = document.getElementById(endId);
+    if (!startEl || !endEl) return;
+    const startVal = startEl.value;
+    const endVal = endEl.value;
+    // 用 hidden 而非 disabled，讓不能選的日期不顯示而非灰色保留
+    [...endEl.options].forEach(o => {
+        o.hidden = !!(startVal && o.value && o.value < startVal);
+    });
+    [...startEl.options].forEach(o => {
+        o.hidden = !!(endVal && o.value && o.value > endVal);
+    });
+}
+
+function _wireRangePair(startId, endId) {
+    const startEl = document.getElementById(startId);
+    const endEl = document.getElementById(endId);
+    if (!startEl || !endEl) return;
+    startEl.addEventListener('change', () => {
+        // 若 start 改到比 end 還晚 → 清掉 end 避免送出無效範圍
+        if (startEl.value && endEl.value && startEl.value > endEl.value) {
+            endEl.value = '';
+        }
+        _applyRangeConstraints(startId, endId);
+    });
+    endEl.addEventListener('change', () => {
+        if (startEl.value && endEl.value && startEl.value > endEl.value) {
+            startEl.value = '';
+        }
+        _applyRangeConstraints(startId, endId);
+    });
+}
+
+function setupReferenceRangeListeners() {
+    _wireRangePair(...REFERENCE_RANGE_IDS);
+    _wireRangePair(...GENERATE_RANGE_IDS);
+}
+
+// 把 [startDate ... endDate] 範圍展開成完整日期陣列（皆需在 candidates 裡）
+function expandDateRange(startDate, endDate, candidates) {
+    if (!startDate || !endDate) return [];
+    const sorted = [...new Set(candidates)].sort();
+    const s = sorted.indexOf(startDate);
+    const e = sorted.indexOf(endDate);
+    if (s < 0 || e < 0 || s > e) return [];
+    return sorted.slice(s, e + 1);
 }
 
 // --- 側邊欄控制 ---
@@ -173,6 +312,25 @@ export function setupAgentSidebar() {
             }
         });
     }
+
+    // 參考範圍收合/展開
+    const refRangeToggle = document.getElementById('agentReferenceRangeToggle');
+    const refRangeContent = document.getElementById('agentReferenceRangeContent');
+    const refRangeIcon = document.getElementById('agentReferenceRangeIcon');
+    if (refRangeToggle && refRangeContent && refRangeIcon) {
+        refRangeToggle.addEventListener('click', () => {
+            if (refRangeContent.style.display === 'none') {
+                refRangeContent.style.display = 'flex';
+                refRangeIcon.textContent = '▼';
+            } else {
+                refRangeContent.style.display = 'none';
+                refRangeIcon.textContent = '▶';
+            }
+        });
+    }
+
+    // 參考範圍下拉：裝 listener（一次），populate 等資料載入後在 syncAgentModeUI 呼叫
+    setupReferenceRangeListeners();
 
     // CSV 上傳
     const csvInput = document.getElementById('csvFileInput');
@@ -655,8 +813,8 @@ function validateScopedChanges({
 // --- API 呼叫 ---
 export async function sendAgentRequest() {
     const promptInput = document.getElementById('agentPromptInput');
-    const prompt = promptInput.value.trim();
-    if (!prompt || agentIsLoading) return;
+    const promptRaw = promptInput.value.trim();
+    if (agentIsLoading) return;
 
     if (!AGENT_API_URL) {
         addChatMessage('未設定 Agent API URL，請先檢查 firebase-config.js。', 'error');
@@ -665,6 +823,10 @@ export async function sendAgentRequest() {
 
     const selectedMode = getSelectedMode();
     const scheduling = selectedMode === MODE_SCHEDULING;
+    // 排班模式 prompt 為「額外指令」，非必填；空時用最小指令當 user_request 內容
+    // 其他模式 prompt 仍必填
+    const prompt = promptRaw || (scheduling ? '請依參考範圍與規則排班' : '');
+    if (!prompt) return;
     const csvTextToSend = (!scheduling && attachedCsvText) ? attachedCsvText : '';
     const csvFileNameToSend = attachedCsvFileName || 'uploaded.csv';
     if (csvTextToSend) {
@@ -690,6 +852,60 @@ export async function sendAgentRequest() {
             serviceKnownPeople: document.getElementById('ruleServiceKnownPeople')?.checked ?? true
         }
         : {};
+
+    // --- 參考範圍：必填欄位（從下拉選單讀起訖日期再展開） ---
+    const readSel = (id) => (scheduling ? document.getElementById(id)?.value || '' : '');
+    const refStart = readSel('agentReferenceStart');
+    const refEnd = readSel('agentReferenceEnd');
+    const genStart = readSel('agentGenerateStart');
+    const genEnd = readSel('agentGenerateEnd');
+
+    // 候選池：reference 只允許既有；generate 允許既有 + 未來週日候選
+    const _existingDates = scheduleData.map(r => r.date);
+    const _latestExisting = [..._existingDates].sort().pop() || null;
+    const _futureCandidates = _latestExisting ? getFutureSundayCandidates(_latestExisting) : [];
+
+    if (scheduling) {
+        if (!refStart || !refEnd) {
+            addChatMessage('❌ 請選擇「參考週次」的起始與結束', 'error', { mode: selectedMode });
+            return;
+        }
+        if (!genStart || !genEnd) {
+            addChatMessage('❌ 請選擇「生成週次」的起始與結束', 'error', { mode: selectedMode });
+            return;
+        }
+    }
+
+    const referenceWeeks = expandDateRange(refStart, refEnd, _existingDates);
+    const generateWeeks = expandDateRange(genStart, genEnd, [..._existingDates, ..._futureCandidates]);
+
+    // 生成週次：如果有不存在的，先在前端 + Firestore 建空週次後才打 API
+    if (generateWeeks.length > 0) {
+        const existingDates = new Set(scheduleData.map(r => r.date));
+        const missing = generateWeeks.filter(d => !existingDates.has(d)).sort();
+        if (missing.length > 0) {
+            updateStatus(`新增 ${missing.length} 個週次中...`);
+            try {
+                for (const dateStr of missing) {
+                    const blank = {};
+                    serviceItems.forEach(item => { blank[item] = []; });
+                    scheduleData.push({ date: dateStr, ...blank, _version: 0 });
+                    await saveSchedule(dateStr, blank);
+                }
+                scheduleData.sort((a, b) => a.date.localeCompare(b.date));
+                pushHistory();
+                updateEditDifference('ai');
+                renderTable();
+                populateReferenceRangeDropdowns();  // 新週次加入後同步重填下拉
+                addChatMessage(`✅ 已自動新增 ${missing.length} 個週次：${missing.join(', ')}`, 'assistant', { mode: selectedMode });
+            } catch (err) {
+                addChatMessage(`❌ 新增週次失敗：${err.message}`, 'error', { mode: selectedMode });
+                updateStatus('就緒');
+                return;
+            }
+            updateStatus('就緒');
+        }
+    }
 
     // 取得歷史訊息對話紀錄
     const chatHistory = [];
@@ -727,15 +943,26 @@ export async function sendAgentRequest() {
         effectiveScheduleData = [...historyViewContext.pastData, ...effectiveScheduleData];
     }
 
+    // referenceWeeks 非空時，只把指定週次送給 LLM
+    const scheduleToSend = referenceWeeks.length > 0
+        ? effectiveScheduleData.filter(r => referenceWeeks.includes(r.date))
+        : effectiveScheduleData;
+
     const payload = {
         prompt,
-        currentSchedule: JSON.stringify({ scheduleData: effectiveScheduleData, serviceItems, nonUserColumns }),
+        currentSchedule: JSON.stringify({ scheduleData: scheduleToSend, serviceItems, nonUserColumns }),
         selectedMode,
         activeRules,
         chatHistory
     };
 
     if (csvTextToSend) payload.attachedCsvText = csvTextToSend;
+
+    // 生成週次非空：通知後端限縮輸出範圍並 suppress addWeeks/removeWeeks tool 欄位
+    if (generateWeeks.length > 0) {
+        payload.generateWeeks = generateWeeks;
+        payload.suppressStructural = true;
+    }
 
     agentIsLoading = true;
     document.getElementById('agentSendBtn').disabled = true;
@@ -825,8 +1052,15 @@ export async function sendAgentRequest() {
                 removeServiceColumns: result.removeServiceColumns || []
             });
 
+            // 若啟用「生成週次」限縮，多一層前端護欄：LLM 多回的日期直接丟棄
+            let nextScheduleData = result.scheduleData;
+            if (generateWeeks.length > 0) {
+                const allowed = new Set(generateWeeks);
+                nextScheduleData = nextScheduleData.filter(r => allowed.has(r.date));
+            }
+
             // 最後才計算內容差異，此時 scheduleData 已經是擴充後的狀態
-            setPendingChanges(result.scheduleData);
+            setPendingChanges(nextScheduleData);
 
             break;
 
