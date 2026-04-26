@@ -94,11 +94,20 @@
 - 📱 **螢幕方向提示**（可選）：在行動裝置上建議橫向瀏覽（目前已停用）
 
 ### 🤖 AI 助手
-- 💬 **Agent 側邊欄**：與 AI 對話式排班，支援 編輯+問答/排班 模式選擇
-- 📎 **CSV 上傳**：上傳參考資料協助 AI 排班
-- ✅ **Rule Engine**：自動檢查連續排班、單週服事上限等規則，不合規時自動重試（最多 2 次）
+- 💬 **Agent 側邊欄**：與 AI 對話式排班，支援 編輯+問答 / 排班 模式選擇；歷史對話模式隔離
+- 📎 **CSV 上傳**：在編輯/問答模式可上傳 Excel/CSV 作為參考資料
+- 📅 **參考範圍 / 生成範圍**（排班模式專屬）：
+  - 兩組起訖日期下拉選單（同列排列、ⓘ 圖示 hover 說明）
+  - **參考週次**：限縮 LLM 看到的班表（input filter），預設第一週至最後一個非空白週
+  - **生成週次**：限縮 LLM 只能改這幾週（output scope），可選擇尚未存在的未來週日，前端會自動建立空週次再打 API
+  - 起訖選項會即時連動隱藏（start 不能晚於 end）
+- ✅ **Rule Engine**：自動檢查連續排班、單週服事上限、僅用歷史人員等規則，不合規時自動重試（最多 1 次規則違反 + 1 次 API 錯誤）
+  - prompt 為「額外指令」，可空著只用 UI 設定送出
+- 🔒 **樂觀鎖（_version）**：所有班表寫入透過 Firestore transaction + version compare-and-set，多人同時編輯時自動偵測衝突並 alert 重新整理
 - 🔍 **Review UI**：差異高亮顯示（綠色新增、紅色移除、黃色修改），支援逐格或全部 Accept/Reject
-- 🔗 **後端 API**：透過 GCP Cloud Function 呼叫 Claude API，CORS 白名單保護
+- 🛡️ **後端 schema 驗證**：LLM 回應在 Cloud Function 內過 `_validate_tool_input` 護欄；違反 → 422，前端顯示錯誤
+- 📊 **Prompt Experiment**：排班模式每次 API 呼叫會落檔到 repo 根的 `Prompt_Experiment/`（內含 `analyze.py` 可比對平均時間與 token）
+- 🔗 **後端 API**：透過 GCP Cloud Function 呼叫 Claude API（或 OpenAI-compatible），CORS 白名單保護
 
 ## 🚀 快速開始
 
@@ -162,7 +171,8 @@ schedule-app/
   主領: ["劉婕"],
   音控: ["家睿", "芯芳"],
   字幕: ["捷希"],
-  彩排: ["週六 14:00"]  // 資訊欄位範例
+  彩排: ["週六 14:00"],  // 資訊欄位範例
+  _version: 5            // 樂觀鎖版本號，每次 saveSchedule transaction +1
 }
 
 // Document ID: "_metadata"
@@ -184,7 +194,8 @@ schedule-app/
       }
     ],
     hidden: []  // 隱藏的服事項目
-  }
+  },
+  _version: 12  // metadata 也有獨立樂觀鎖
 }
 ```
 
@@ -294,6 +305,17 @@ A:
 - `3-4`：預留給未來擴充
 
 ## 📝 更新日誌
+
+### v4.2.0 (2026-04-26)
+- 🆕 **AI 助手「參考範圍」功能**：以兩組起訖日期下拉限縮 LLM 的 input scope（參考週次）與 output scope（生成週次）
+  - 生成週次允許未來尚未存在的週日，前端自動建立空週次後再打 API
+  - 後端 system prompt 加入 Scope Constraint 段，並動態移除 tool schema 的 `addWeeks`/`removeWeeks`
+- 🆕 **prompt 改非必填**：排班模式 prompt 變成「額外指令」，可只靠 UI 設定送出
+- 🔒 **樂觀鎖**：班表寫入改用 Firestore transaction + `_version` compare-and-set，避免多人同時編輯互蓋
+- 🛡️ **後端 schema 護欄**：LLM 輸出由 `_validate_tool_input` 強制檢查日期格式、欄位數量、字串長度等，違反回 422
+- 🔧 **CORS 白名單可調**：`agentConfig.py` 的 `ALLOWED_ORIGINS` 可加 localhost 開發網域
+- 📊 **Prompt Experiment 紀錄**：排班模式落檔到 `Prompt_Experiment/`，含 `analyze.py` 統計腳本
+- ⚠️ **隱藏實驗性規則**：「分配頻率與參考班表相似」rule 暫時從 UI 隱藏（功能尚未穩定，邏輯仍保留在 code 內）
 
 ### v4.0.0 (2026-03-25)
 - 🏗️ **架構重構**：將 `app.js` 拆分為 `app.js` (資料)、`ui.js` (渲染) 與 `agent.js` (AI)

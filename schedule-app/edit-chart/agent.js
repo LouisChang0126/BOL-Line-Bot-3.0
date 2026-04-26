@@ -88,8 +88,8 @@ function syncAgentModeUI() {
 
     if (chatHint) {
         chatHint.textContent = scheduling
-            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
-            : '💡 你可以上傳 Excel 或 CSV 檔案作為參考資料。';
+            ? '💡 有額外排班要求可填寫下方指令，沒有可直接送出。'
+            : '💡 可以上傳 Excel 或 CSV 檔案作為參考資料。';
     }
 }
 
@@ -99,10 +99,13 @@ function createWelcomeNode(mode = getSelectedMode()) {
     wrapper.innerHTML = `
         <div class="agent-chat-welcome-icon">🤖</div>
         <p>歡迎使用 AI 助手。</p>
-        <p>你可以直接輸入需求，系統會協助你調整排班。</p>
+        <p>${mode === MODE_SCHEDULING
+            ? '請填入你的排班需求，規則只會在排班模式套用。'
+            : '你可以直接輸入需求，系統會協助你調整班表。'
+        }</p>
         <p class="agent-chat-hint" id="agentChatHint">${mode === MODE_SCHEDULING
-            ? '💡 請描述你的排班需求，規則只會在排班模式套用。'
-            : '💡 你可以上傳 Excel 或 CSV 檔案作為參考資料。'
+            ? '💡 有額外排班要求可填寫下方指令，沒有可直接送出。'
+            : '💡 可以上傳 Excel 或 CSV 檔案作為參考資料。'
         }</p>
     `;
     return wrapper;
@@ -128,6 +131,11 @@ function renderChatHistory(mode = getSelectedMode()) {
 const REFERENCE_RANGE_IDS = ['agentReferenceStart', 'agentReferenceEnd'];
 const GENERATE_RANGE_IDS = ['agentGenerateStart', 'agentGenerateEnd'];
 const FUTURE_SUNDAY_COUNT = 26;  // 生成週次下拉裡多附 N 個未來週日候選，方便建立新週
+
+// 「頻率與參考班表一致」規則的相對誤差容忍度。
+// 0.50 = ±50%：例如某人在參考週次中應該排約 4 次，生成範圍內 [2.0, 6.0] 之間都算合格。
+// 工程師調整這個常數即可改寬/緊。
+const FREQUENCY_PARITY_TOLERANCE = 0.50;
 
 function getFutureSundayCandidates(latestExistingDate, count = FUTURE_SUNDAY_COUNT) {
     if (!latestExistingDate || !/^\d{4}\.\d{2}\.\d{2}$/.test(latestExistingDate)) return [];
@@ -646,13 +654,16 @@ function validateScopedChanges({
     serviceItems,
     nonUserColumns,
     activeRules,
-    changedCells
+    changedCells,
+    referenceWeeks = [],
+    generateWeeks = []
 }) {
     const warnings = [];
     const validatedCellsByRule = {
         consecutive: new Set(),
         maxRoles: new Set(),
-        serviceKnownPeople: new Set()
+        serviceKnownPeople: new Set(),
+        frequencyParity: new Set()
     };
     const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
     if (!changedCells || changedCells.size === 0) {
@@ -796,6 +807,64 @@ function validateScopedChanges({
         });
     }
 
+    // 規則4: 服事頻率與參考班表一致（盡量；用比例誤差判斷）
+    // 期望次數 = (參考週次中該人次數 / 參考週次總數) × 生成週次總數
+    // 相對誤差 = |actual − expected| / expected，超過 FREQUENCY_PARITY_TOLERANCE 視為違反
+    // 特例：expected = 0（該人在參考範圍內未服事）→ 不檢查（新加入的人允許自由排）
+    if (activeRules?.frequencyParity && referenceWeeks.length > 0 && generateWeeks.length > 0) {
+        const refSet = new Set(referenceWeeks);
+        const genSet = new Set(generateWeeks);
+
+        const countByName = (rows, dateSet) => {
+            const counts = new Map();
+            rows.forEach(row => {
+                if (!dateSet.has(row.date)) return;
+                userServiceItems.forEach(service => {
+                    (row[service] || []).forEach(name => {
+                        counts.set(name, (counts.get(name) || 0) + 1);
+                    });
+                });
+            });
+            return counts;
+        };
+
+        const refCounts = countByName(baseScheduleData, refSet);
+        const genCounts = countByName(nextScheduleData, genSet);
+
+        const refLen = referenceWeeks.length;
+        const genLen = generateWeeks.length;
+        const allNames = new Set([...refCounts.keys(), ...genCounts.keys()]);
+
+        // 標記：所有生成週次的所有服事格皆視為「被驗證過」（這個規則是全局性的）
+        generateWeeks.forEach(date => {
+            userServiceItems.forEach(service => {
+                validatedCellsByRule.frequencyParity.add(`${date}|${service}`);
+            });
+        });
+
+        const tolPct = Math.round(FREQUENCY_PARITY_TOLERANCE * 100);
+        const seenParityWarnings = new Set();
+        for (const name of allNames) {
+            const refC = refCounts.get(name) || 0;
+            const genC = genCounts.get(name) || 0;
+            const expected = (refC / refLen) * genLen;
+            if (expected <= 0) continue;  // 該人在參考範圍內沒服事 → 不限制
+            const relDiff = Math.abs(genC - expected) / expected;
+            if (relDiff > FREQUENCY_PARITY_TOLERANCE) {
+                if (seenParityWarnings.has(name)) continue;
+                seenParityWarnings.add(name);
+                warnings.push({
+                    type: 'frequencyParity',
+                    message: `⚠️ ${name} 服事頻率偏離參考（參考 ${refC}/${refLen} 週 → 生成 ${genC}/${genLen} 週，期望約 ${expected.toFixed(1)}，誤差 ${(relDiff * 100).toFixed(0)}% 超過 ${tolPct}%）`,
+                    person: name,
+                    refCount: refC,
+                    genCount: genC,
+                    expected: expected
+                });
+            }
+        }
+    }
+
     return {
         valid: warnings.length === 0,
         warnings,
@@ -804,7 +873,8 @@ function validateScopedChanges({
             validatedCells: {
                 consecutive: toSortedArray(validatedCellsByRule.consecutive),
                 maxRoles: toSortedArray(validatedCellsByRule.maxRoles),
-                serviceKnownPeople: toSortedArray(validatedCellsByRule.serviceKnownPeople)
+                serviceKnownPeople: toSortedArray(validatedCellsByRule.serviceKnownPeople),
+                frequencyParity: toSortedArray(validatedCellsByRule.frequencyParity)
             }
         }
     };
@@ -849,7 +919,8 @@ export async function sendAgentRequest() {
             consecutiveWeeks: Math.max(2, parseInt(document.getElementById('ruleConsecutiveWeeks')?.value, 10) || 2),
             maxRoles: document.getElementById('ruleMaxRoles')?.checked ?? false,
             maxRolesLimit: Math.max(1, parseInt(document.getElementById('ruleMaxRolesLimit')?.value, 10) || 2),
-            serviceKnownPeople: document.getElementById('ruleServiceKnownPeople')?.checked ?? true
+            serviceKnownPeople: document.getElementById('ruleServiceKnownPeople')?.checked ?? true,
+            frequencyParity: document.getElementById('ruleFrequencyParity')?.checked ?? false
         }
         : {};
 
@@ -1020,7 +1091,9 @@ export async function sendAgentRequest() {
                 serviceItems,
                 nonUserColumns,
                 activeRules,
-                changedCells
+                changedCells,
+                referenceWeeks,
+                generateWeeks
             });
 
             if (!validation.valid && retryCount < MAX_RETRIES) {

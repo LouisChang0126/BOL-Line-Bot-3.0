@@ -314,39 +314,37 @@
           <span id="agentReferenceRangeIcon" style="font-size: 10px; color: #64748b;">▼</span>
         </label>
         <div class="agent-rules" id="agentReferenceRangeContent">
-          <div class="agent-rule-option" style="flex-direction: column; align-items: stretch; gap: 4px;">
-            <span style="font-size: 12px; color: #475569;">
+          <div class="agent-rule-option" style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;">
+            <span style="font-size: 12px; color: #475569; white-space: nowrap;">
               參考週次 <span style="color:#dc2626;">*</span>
-              <span style="color:#94a3b8;">（AI助手參考的班表）</span>
+              <span class="info-icon" data-tip="AI 助手參考的班表"
+                style="color: #94a3b8; margin-left: 2px;">ⓘ</span>
             </span>
-            <div style="display: flex; gap: 6px; align-items: center;">
-              <select id="agentReferenceStart" class="agent-range-select"
-                style="flex: 1; padding: 4px 6px; font-size: 12px; font-family: monospace;">
-                <option value="">起始週次</option>
-              </select>
-              <span style="color: #94a3b8;">→</span>
-              <select id="agentReferenceEnd" class="agent-range-select"
-                style="flex: 1; padding: 4px 6px; font-size: 12px; font-family: monospace;">
-                <option value="">結束週次</option>
-              </select>
-            </div>
+            <select id="agentReferenceStart" class="agent-range-select"
+              style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px; font-family: monospace;">
+              <option value="">起始週次</option>
+            </select>
+            <span style="color: #94a3b8;">→</span>
+            <select id="agentReferenceEnd" class="agent-range-select"
+              style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px; font-family: monospace;">
+              <option value="">結束週次</option>
+            </select>
           </div>
-          <div class="agent-rule-option" style="flex-direction: column; align-items: stretch; gap: 4px;">
-            <span style="font-size: 12px; color: #475569;">
+          <div class="agent-rule-option" style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;">
+            <span style="font-size: 12px; color: #475569; white-space: nowrap;">
               生成週次 <span style="color:#dc2626;">*</span>
-              <span style="color:#94a3b8;">（AI助手只排這幾週）</span>
+              <span class="info-icon" data-tip="AI 助手只排這幾週"
+                style="color: #94a3b8; margin-left: 2px;">ⓘ</span>
             </span>
-            <div style="display: flex; gap: 6px; align-items: center;">
-              <select id="agentGenerateStart" class="agent-range-select"
-                style="flex: 1; padding: 4px 6px; font-size: 12px; font-family: monospace;">
-                <option value="">起始週次</option>
-              </select>
-              <span style="color: #94a3b8;">→</span>
-              <select id="agentGenerateEnd" class="agent-range-select"
-                style="flex: 1; padding: 4px 6px; font-size: 12px; font-family: monospace;">
-                <option value="">結束週次</option>
-              </select>
-            </div>
+            <select id="agentGenerateStart" class="agent-range-select"
+              style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px; font-family: monospace;">
+              <option value="">起始週次</option>
+            </select>
+            <span style="color: #94a3b8;">→</span>
+            <select id="agentGenerateEnd" class="agent-range-select"
+              style="flex: 1; min-width: 0; padding: 4px 6px; font-size: 12px; font-family: monospace;">
+              <option value="">結束週次</option>
+            </select>
           </div>
         </div>
       </div>
@@ -376,6 +374,11 @@
           <label class="agent-rule-option">
             <input type="checkbox" id="ruleServiceKnownPeople" checked>
             <span>僅使用該服事歷史人員</span>
+          </label>
+          <!-- 暫時隱藏：分配頻率與參考班表相似（功能尚未穩定） -->
+          <label class="agent-rule-option" style="display: none;">
+            <input type="checkbox" id="ruleFrequencyParity">
+            <span>分配頻率與參考班表相似</span>
           </label>
         </div>
       </div>

@@ -34,6 +34,10 @@ REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "1
 USE_CSV_SCHEDULE = False
 CSV_MULTI_PERSON_SEPARATOR = "/"  # CSV 單格多人時的分隔符（勿用逗號，會跟 CSV 本身衝突）
 
+# 「頻率與參考班表一致」規則的相對誤差容忍度（system prompt 用）。
+# 0.50 = ±50%。需與 schedule-app/edit-chart/agent.js 的 FREQUENCY_PARITY_TOLERANCE 對齊。
+FREQUENCY_PARITY_TOLERANCE = 0.50
+
 # =====================================================
 # Prompt Engineering 實驗紀錄（暫時）
 # =====================================================
@@ -701,6 +705,12 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
             rules.append(f"- Each person should not exceed {max_roles_limit} service roles per week.")
         if active_rules.get("serviceKnownPeople"):
             rules.append("- For each service, only use people who have appeared in that service historically.")
+        if active_rules.get("frequencyParity"):
+            tol_pct = int(round(FREQUENCY_PARITY_TOLERANCE * 100))
+            rules.append(
+                "- Try to keep each person's service frequency proportional to the reference schedule. "
+                f"|actual - expected| / expected should be within {tol_pct}% when expected > 0. "
+            )
         if not rules:
             rules.append("- No extra scheduling rules are enabled.")
         rules_section = (
