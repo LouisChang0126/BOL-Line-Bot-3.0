@@ -508,6 +508,17 @@ def generate_agent_schedule(request):
     # 只保留字串型的日期，避免奇怪型別進入 prompt
     generate_weeks = [str(d) for d in generate_weeks if isinstance(d, str) and d.strip()]
 
+    # 「請假區域」功能：{date: [names]} 形狀正規化
+    leave_by_date_raw = data.get("leaveByDate") or {}
+    leave_by_date = {}
+    if isinstance(leave_by_date_raw, dict):
+        for d, v in leave_by_date_raw.items():
+            if not isinstance(d, str) or not isinstance(v, list):
+                continue
+            names = [str(n).strip() for n in v if isinstance(n, str) and n.strip()]
+            if names:
+                leave_by_date[d] = names
+
     if not prompt:
         return add_cors_headers(cors_response({"error": "Missing prompt"}, 400), origin)
 
@@ -548,6 +559,7 @@ def generate_agent_schedule(request):
         selected_mode=mode,
         schedule_format=("csv" if use_csv else "json"),
         generate_weeks=generate_weeks,
+        leave_by_date=leave_by_date,
     )
     messages = _build_messages(chat_history, prompt)
 
@@ -620,7 +632,7 @@ def generate_agent_schedule(request):
             _maybe_log(body, 500)
             return add_cors_headers(cors_response(body, 500), origin)
 
-        valid, err_msg = _validate_tool_input(tool_input, SCHEMA_VALIDATION)
+        valid, err_msg = _validate_tool_input(tool_input, SCHEMA_VALIDATION, leave_by_date=leave_by_date)
         if not valid:
             body = {
                 "error": "Agent response failed schema validation",
@@ -679,17 +691,20 @@ def _wrap_untrusted(tag, content):
     return f"<{tag}>\n{safe}\n</{tag}>"
 
 
-def build_system_prompt(current_schedule, active_rules, attached_csv_text, selected_mode, schedule_format="json", generate_weeks=None):
+def build_system_prompt(current_schedule, active_rules, attached_csv_text, selected_mode, schedule_format="json", generate_weeks=None, leave_by_date=None):
     """
     schedule_format:
       - "json": current_schedule 是 JSON 字串（前端送的 currentSchedule 原封不動）
       - "csv":  current_schedule 是已經轉好的 CSV 文字
     generate_weeks:
       - 非空時會注入 Scope Constraint 段，要求 LLM 只修改/回傳這幾個日期
+    leave_by_date:
+      - {date: [names]}，非空時注入 Person Unavailability 段，要求 LLM 該日期不得排這些人
     """
     is_scheduling = selected_mode == "scheduling"
     use_csv = schedule_format == "csv"
     generate_weeks = [str(d) for d in (generate_weeks or []) if str(d).strip()]
+    leave_by_date = leave_by_date if isinstance(leave_by_date, dict) else {}
 
     rules = []
     rules_section = ""
@@ -750,6 +765,16 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
             "- Do NOT emit rows for any other date.\n\n"
         )
 
+    # Person Unavailability：leave_by_date 非空時注入「該日期不得排這些人」硬性規則
+    unavailability_block = ""
+    if leave_by_date:
+        lines = [f"- {d}: {', '.join(ns)}" for d, ns in sorted(leave_by_date.items())]
+        unavailability_block = (
+            "## Person Unavailability (HARD REQUIREMENT)\n"
+            "On the following dates, the listed people are UNAVAILABLE and MUST NOT be assigned to ANY service for that date:\n"
+            + "\n".join(lines) + "\n\n"
+        )
+
     if use_csv:
         # Scope Constraint 下 scheduleData 只含指定週次
         schedule_scope_line = (
@@ -801,6 +826,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
         f"{schedule_header}\n"
         f"{schedule_block}\n\n"
         f"{scope_block}"
+        f"{unavailability_block}"
         f"{rules_section}"
         f"{csv_section}\n"
         f"{tool_requirements}"
@@ -811,7 +837,7 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
 # Agent 回應 schema 驗證（門檻在 agentConfig.py SCHEMA_VALIDATION）
 # =====================================================
 
-def _validate_tool_input(tool_input, rules):
+def _validate_tool_input(tool_input, rules, leave_by_date=None):
     """驗證 LLM 回傳的 tool 參數是否符合門檻；返回 (ok, err_msg)。"""
     if not isinstance(tool_input, dict):
         return False, "tool_input is not an object"
@@ -874,6 +900,13 @@ def _validate_tool_input(tool_input, rules):
     # 這些是內部 metadata，不是服事欄位；LLM 萬一回傳也不視為錯誤
     RESERVED_ROW_KEYS = {"date", "_version"}
 
+    # 請假名單（dict[str, set[str]]）；空 dict 等同停用本檢查
+    leave_sets = {}
+    if isinstance(leave_by_date, dict):
+        for d, names in leave_by_date.items():
+            if isinstance(d, str) and isinstance(names, list):
+                leave_sets[d] = {str(n) for n in names if isinstance(n, str)}
+
     for idx, row in enumerate(schedule_data):
         if not isinstance(row, dict):
             return False, f"scheduleData[{idx}] is not an object"
@@ -883,6 +916,7 @@ def _validate_tool_input(tool_input, rules):
         non_date_keys = [k for k in row.keys() if k not in RESERVED_ROW_KEYS]
         if len(non_date_keys) > max_cols_per_row:
             return False, f"scheduleData[{idx}] has {len(non_date_keys)} service cols (limit {max_cols_per_row})"
+        leave_set = leave_sets.get(date_val) or set()
         for k in non_date_keys:
             if not isinstance(k, str) or not k.strip():
                 return False, f"scheduleData[{idx}] has invalid service key"
@@ -898,6 +932,11 @@ def _validate_tool_input(tool_input, rules):
                     return False, f"scheduleData[{idx}].{k} contains non-string"
                 if len(person) > max_person_len:
                     return False, f"scheduleData[{idx}].{k} person name too long: {person[:20]}..."
+                if leave_set and person in leave_set:
+                    return False, (
+                        f"scheduleData[{idx}] ({date_val}).{k} contains {person!r} "
+                        f"who is marked unavailable on {date_val}"
+                    )
 
     return True, ""
 

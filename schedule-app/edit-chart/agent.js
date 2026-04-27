@@ -1,5 +1,5 @@
 import {
-    scheduleData, serviceItems, nonUserColumns,
+    scheduleData, serviceItems, nonUserColumns, allPersonNames,
     saveSchedule, applyAgentStructuralChanges,
     pushHistory, updateEditDifference, updateStatus,
     getHistoryViewContext
@@ -64,9 +64,15 @@ function syncAgentModeUI() {
     if (referenceRangeContent) {
         referenceRangeContent.style.display = scheduling ? 'flex' : 'none';
     }
+    const leaveSection = document.getElementById('agentLeaveSection');
+    if (leaveSection) {
+        leaveSection.style.display = scheduling ? '' : 'none';
+    }
+
     if (scheduling) {
-        // 進排班模式時，依當下 scheduleData 重新填下拉選項
+        // 進排班模式時，依當下 scheduleData 重新填下拉選項與請假區域
         populateReferenceRangeDropdowns();
+        rebuildLeaveRows();
     }
 
     if (!scheduling) {
@@ -137,6 +143,9 @@ const FUTURE_SUNDAY_COUNT = 26;  // 生成週次下拉裡多附 N 個未來週�
 // 工程師調整這個常數即可改寬/緊。
 const FREQUENCY_PARITY_TOLERANCE = 0.50;
 
+// 請假區域：每列一筆 {date, person}，皆從下拉選擇。預設一列空白。
+let _leaveRows = [{ date: '', person: '' }];
+
 function getFutureSundayCandidates(latestExistingDate, count = FUTURE_SUNDAY_COUNT) {
     if (!latestExistingDate || !/^\d{4}\.\d{2}\.\d{2}$/.test(latestExistingDate)) return [];
     const [y, m, d] = latestExistingDate.split('.').map(Number);
@@ -187,8 +196,13 @@ function populateReferenceRangeDropdowns() {
     const existing = [...new Set(scheduleData.map(r => r.date))].sort();
     const latest = existing[existing.length - 1] || null;
     const future = latest ? getFutureSundayCandidates(latest) : [];
-    const refDates = existing;
-    const genDates = [...existing, ...future];  // 生成下拉多附未來候選
+
+    // 參考週次：若已 fetch 過歷史資料，把它的日期也加入候選（讓使用者能參考過去班表）
+    const historyCtx = getHistoryViewContext();
+    const pastDates = (historyCtx && Array.isArray(historyCtx.pastData))
+        ? historyCtx.pastData.map(r => r.date) : [];
+    const refDates = [...new Set([...pastDates, ...existing])].sort();
+    const genDates = [...existing, ...future];  // 生成下拉多附未來候選（不含歷史）
 
     _setSelectOptions('agentReferenceStart', refDates, '起始週次');
     _setSelectOptions('agentReferenceEnd', refDates, '結束週次');
@@ -222,28 +236,32 @@ function _applyRangeConstraints(startId, endId) {
     });
 }
 
-function _wireRangePair(startId, endId) {
+function _wireRangePair(startId, endId, onChange) {
     const startEl = document.getElementById(startId);
     const endEl = document.getElementById(endId);
     if (!startEl || !endEl) return;
+    const fire = () => {
+        _applyRangeConstraints(startId, endId);
+        if (typeof onChange === 'function') onChange();
+    };
     startEl.addEventListener('change', () => {
         // 若 start 改到比 end 還晚 → 清掉 end 避免送出無效範圍
         if (startEl.value && endEl.value && startEl.value > endEl.value) {
             endEl.value = '';
         }
-        _applyRangeConstraints(startId, endId);
+        fire();
     });
     endEl.addEventListener('change', () => {
         if (startEl.value && endEl.value && startEl.value > endEl.value) {
             startEl.value = '';
         }
-        _applyRangeConstraints(startId, endId);
+        fire();
     });
 }
 
 function setupReferenceRangeListeners() {
     _wireRangePair(...REFERENCE_RANGE_IDS);
-    _wireRangePair(...GENERATE_RANGE_IDS);
+    _wireRangePair(...GENERATE_RANGE_IDS, () => rebuildLeaveRows());
 }
 
 // 把 [startDate ... endDate] 範圍展開成完整日期陣列（皆需在 candidates 裡）
@@ -254,6 +272,104 @@ function expandDateRange(startDate, endDate, candidates) {
     const e = sorted.indexOf(endDate);
     if (s < 0 || e < 0 || s > e) return [];
     return sorted.slice(s, e + 1);
+}
+
+// --- 請假區域 helpers ---
+
+function _escapeAttr(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// 由生成週次推算可選日期；空時回傳 []
+function _getGenerateRangeDates() {
+    const genStart = document.getElementById('agentGenerateStart')?.value || '';
+    const genEnd = document.getElementById('agentGenerateEnd')?.value || '';
+    const existingDates = scheduleData.map(r => r.date);
+    const latestExisting = [...existingDates].sort().pop() || null;
+    const futureCandidates = latestExisting ? getFutureSundayCandidates(latestExisting) : [];
+    return expandDateRange(genStart, genEnd, [...existingDates, ...futureCandidates]);
+}
+
+function rebuildLeaveRows() {
+    const container = document.getElementById('agentLeaveRows');
+    if (!container) return;
+
+    if (!_leaveRows || _leaveRows.length === 0) {
+        _leaveRows = [{ date: '', person: '' }];
+    }
+
+    const dateOptions = _getGenerateRangeDates();
+    const personOptions = Array.from(allPersonNames || []).sort();
+
+    // 若舊 row 的 date 已不在新範圍 → 清掉該欄（保留 person，使用者可重選日期）
+    _leaveRows.forEach(r => {
+        if (r.date && !dateOptions.includes(r.date)) r.date = '';
+    });
+
+    const datePlaceholder = dateOptions.length === 0 ? '請先選擇生成週次' : '日期';
+    const dateOptHtml = dateOptions
+        .map(d => `<option value="${d}">${d}</option>`).join('');
+    const personOptHtml = personOptions
+        .map(n => `<option value="${_escapeAttr(n)}">${_escapeAttr(n)}</option>`).join('');
+
+    container.innerHTML = _leaveRows.map((_, i) => `
+        <div class="agent-leave-row" data-idx="${i}"
+            style="display:flex; align-items:center; gap:6px;">
+            <select class="agent-leave-date" data-idx="${i}"
+                style="flex:1; min-width:0; padding:4px 6px; font-size:12px; font-family:monospace;">
+                <option value="">${datePlaceholder}</option>
+                ${dateOptHtml}
+            </select>
+            <select class="agent-leave-person" data-idx="${i}"
+                style="flex:1; min-width:0; padding:4px 6px; font-size:12px;">
+                <option value="">人員</option>
+                ${personOptHtml}
+            </select>
+            <button type="button" class="agent-leave-remove" data-idx="${i}"
+                title="移除此列"
+                style="cursor:pointer; background:none; border:none; color:#94a3b8; font-size:16px; padding:0 4px; line-height:1;">×</button>
+        </div>
+    `).join('');
+
+    // 還原已選值（innerHTML 重建後 select.value 會被 reset）
+    _leaveRows.forEach((r, i) => {
+        const dEl = container.querySelector(`.agent-leave-date[data-idx="${i}"]`);
+        const pEl = container.querySelector(`.agent-leave-person[data-idx="${i}"]`);
+        if (dEl && r.date) dEl.value = r.date;
+        if (pEl && r.person) pEl.value = r.person;
+    });
+
+    // 綁事件：選值寫回 state
+    container.querySelectorAll('.agent-leave-date').forEach(el => {
+        el.addEventListener('change', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (Number.isFinite(idx) && _leaveRows[idx]) _leaveRows[idx].date = el.value;
+        });
+    });
+    container.querySelectorAll('.agent-leave-person').forEach(el => {
+        el.addEventListener('change', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (Number.isFinite(idx) && _leaveRows[idx]) _leaveRows[idx].person = el.value;
+        });
+    });
+    container.querySelectorAll('.agent-leave-remove').forEach(el => {
+        el.addEventListener('click', () => {
+            const idx = parseInt(el.dataset.idx, 10);
+            if (!Number.isFinite(idx) || !_leaveRows[idx]) return;
+            _leaveRows.splice(idx, 1);
+            if (_leaveRows.length === 0) _leaveRows.push({ date: '', person: '' });
+            rebuildLeaveRows();
+        });
+    });
+}
+
+function _addLeaveRow() {
+    _leaveRows.push({ date: '', person: '' });
+    rebuildLeaveRows();
+    // 滾到底，讓使用者看到新加的列
+    const sc = document.getElementById('agentLeaveScrollContainer');
+    if (sc) sc.scrollTop = sc.scrollHeight;
 }
 
 // --- 側邊欄控制 ---
@@ -339,6 +455,35 @@ export function setupAgentSidebar() {
 
     // 參考範圍下拉：裝 listener（一次），populate 等資料載入後在 syncAgentModeUI 呼叫
     setupReferenceRangeListeners();
+
+    // 請假區域收合/展開
+    const leaveToggle = document.getElementById('agentLeaveToggle');
+    const leaveContent = document.getElementById('agentLeaveContent');
+    const leaveIcon = document.getElementById('agentLeaveIcon');
+    if (leaveToggle && leaveContent && leaveIcon) {
+        leaveToggle.addEventListener('click', () => {
+            if (leaveContent.style.display === 'none') {
+                leaveContent.style.display = '';
+                leaveIcon.textContent = '▼';
+            } else {
+                leaveContent.style.display = 'none';
+                leaveIcon.textContent = '▶';
+            }
+        });
+    }
+
+    // 請假區域「+ 新增請假」按鈕
+    const leaveAddBtn = document.getElementById('agentLeaveAddBtn');
+    if (leaveAddBtn) {
+        leaveAddBtn.addEventListener('click', () => _addLeaveRow());
+    }
+
+    // 監聽歷史資料載入事件 → 即時重整參考週次下拉，把歷史日期加入候選
+    window.addEventListener('pastDataLoaded', () => {
+        if (isSchedulingMode()) {
+            populateReferenceRangeDropdowns();
+        }
+    });
 
     // CSV 上傳
     const csvInput = document.getElementById('csvFileInput');
@@ -656,14 +801,16 @@ function validateScopedChanges({
     activeRules,
     changedCells,
     referenceWeeks = [],
-    generateWeeks = []
+    generateWeeks = [],
+    leaveByDate = {}
 }) {
     const warnings = [];
     const validatedCellsByRule = {
         consecutive: new Set(),
         maxRoles: new Set(),
         serviceKnownPeople: new Set(),
-        frequencyParity: new Set()
+        frequencyParity: new Set(),
+        personUnavailability: new Set()
     };
     const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
     if (!changedCells || changedCells.size === 0) {
@@ -865,6 +1012,32 @@ function validateScopedChanges({
         }
     }
 
+    // 規則5: 請假區域 — 該週指定的人不應出現在任何 user service
+    if (leaveByDate && Object.keys(leaveByDate).length > 0) {
+        const seenLeave = new Set();
+        Object.entries(leaveByDate).forEach(([date, names]) => {
+            const row = nextIndex.get(date);
+            if (!row || !Array.isArray(names) || names.length === 0) return;
+            const nameSet = new Set(names);
+            userServiceItems.forEach(service => {
+                validatedCellsByRule.personUnavailability.add(`${date}|${service}`);
+                (row[service] || []).forEach(n => {
+                    if (!nameSet.has(n)) return;
+                    const key = `${date}|${service}|${n}`;
+                    if (seenLeave.has(key)) return;
+                    seenLeave.add(key);
+                    warnings.push({
+                        type: 'personUnavailability',
+                        message: `⚠️ ${n} 在 ${date} 請假，但仍被排了「${service}」`,
+                        date,
+                        service,
+                        person: n
+                    });
+                });
+            });
+        });
+    }
+
     return {
         valid: warnings.length === 0,
         warnings,
@@ -874,7 +1047,8 @@ function validateScopedChanges({
                 consecutive: toSortedArray(validatedCellsByRule.consecutive),
                 maxRoles: toSortedArray(validatedCellsByRule.maxRoles),
                 serviceKnownPeople: toSortedArray(validatedCellsByRule.serviceKnownPeople),
-                frequencyParity: toSortedArray(validatedCellsByRule.frequencyParity)
+                frequencyParity: toSortedArray(validatedCellsByRule.frequencyParity),
+                personUnavailability: toSortedArray(validatedCellsByRule.personUnavailability)
             }
         }
     };
@@ -1009,8 +1183,9 @@ export async function sendAgentRequest() {
 
     const historyViewContext = getHistoryViewContext();
 
-    // 如果有歷史資料，直接把它接在 effectiveScheduleData 的最前面
-    if (historyViewContext.showingPast && historyViewContext.pastData && historyViewContext.pastData.length > 0) {
+    // 已載入的歷史資料一律前置，讓使用者可把過去日期當 referenceWeeks 使用
+    // (referenceWeeks 後續 .filter 仍會限縮到使用者實際選的範圍，不會放大送 LLM 的內容)
+    if (historyViewContext.pastData && historyViewContext.pastData.length > 0) {
         effectiveScheduleData = [...historyViewContext.pastData, ...effectiveScheduleData];
     }
 
@@ -1033,6 +1208,34 @@ export async function sendAgentRequest() {
     if (generateWeeks.length > 0) {
         payload.generateWeeks = generateWeeks;
         payload.suppressStructural = true;
+    }
+
+    // 請假區域：每列必須日期 + 人員都有；兩個皆空就略過。組成 {date: [names]}
+    const leaveByDate = {};
+    if (scheduling) {
+        const leaveErrors = [];
+        _leaveRows.forEach((row, i) => {
+            const d = (row.date || '').trim();
+            const p = (row.person || '').trim();
+            if (!d && !p) return;                       // 完全空 → 略過
+            if (!d || !p) {
+                leaveErrors.push(`第 ${i + 1} 列：${!d ? '日期' : '人員'} 未選`);
+                return;
+            }
+            if (!leaveByDate[d]) leaveByDate[d] = [];
+            if (!leaveByDate[d].includes(p)) leaveByDate[d].push(p);
+        });
+        if (leaveErrors.length > 0) {
+            addChatMessage(
+                `❌ 請假區域格式錯誤：\n${leaveErrors.join('\n')}`,
+                'error',
+                { mode: selectedMode }
+            );
+            return;
+        }
+    }
+    if (Object.keys(leaveByDate).length > 0) {
+        payload.leaveByDate = leaveByDate;
     }
 
     agentIsLoading = true;
@@ -1093,7 +1296,8 @@ export async function sendAgentRequest() {
                 activeRules,
                 changedCells,
                 referenceWeeks,
-                generateWeeks
+                generateWeeks,
+                leaveByDate
             });
 
             if (!validation.valid && retryCount < MAX_RETRIES) {

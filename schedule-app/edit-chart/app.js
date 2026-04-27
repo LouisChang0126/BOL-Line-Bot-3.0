@@ -18,7 +18,7 @@ let pastDataLoaded = false; // 歷史資料是否已載入
 let showingPast = false; // 是否顯示過去資料
 export let serviceItems = []; // 服事項目列表
 export let nonUserColumns = []; // 資訊欄位列表（不包含人名的欄位）
-let allPersonNames = new Set(); // 所有出現過的人名
+export let allPersonNames = new Set(); // 所有出現過的人名
 let currentEditingCell = null; // 目前編輯的儲存格（ui.js 開啟 modal 時透過 setCurrentEditingCell 同步）
 let displayConfig = null; // 服事項目分組顯示設定
 let registeredUsersCache = {};
@@ -287,6 +287,9 @@ async function loadPastData() {
         pastData = [];
         updateStatus('就緒');
     }
+
+    // 通知其他模組（例如 agent.js 的參考週次下拉）pastData 已就緒
+    try { window.dispatchEvent(new CustomEvent('pastDataLoaded')); } catch (_) { /* noop */ }
 }
 
 // 更新顯示歷史資料按鈕狀態

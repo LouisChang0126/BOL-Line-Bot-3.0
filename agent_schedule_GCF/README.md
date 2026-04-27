@@ -36,6 +36,11 @@ agent_schedule_GCF/
   "generateWeeks": ["2026.07.05", "2026.07.12"],
   "suppressStructural": true,
 
+  "leaveByDate": {
+    "2026.07.05": ["阿明", "小華"],
+    "2026.07.12": ["老王"]
+  },
+
   "experimentStartTime": "2026-04-26_22-00-00",
   "experimentRetryCount": 0
 }
@@ -51,6 +56,7 @@ agent_schedule_GCF/
 | `attachedCsvText` | 選（僅 edit_qa） | 上傳的 CSV 參考資料 |
 | `generateWeeks` | 選（scheduling） | 限定 LLM 只能修改/輸出這些日期 |
 | `suppressStructural` | 選（scheduling） | true 時把 tool schema 的 `addWeeks` / `removeWeeks` 拿掉 |
+| `leaveByDate` | 選（scheduling） | `{date: [names]}`，硬性禁止指定的人在指定日期被排班；違反 → 422 |
 | `experimentStartTime` / `experimentRetryCount` | 選 | 排班模式落檔到 `Prompt_Experiment/` 用，方便 prompt engineering 比對 |
 
 ## 模式
@@ -69,6 +75,7 @@ agent_schedule_GCF/
   - CSV 不會寫入 system prompt
   - `USE_CSV_SCHEDULE=True` 時 `currentSchedule` 在後端轉成 CSV 餵給 LLM、回應再解回 JSON
   - `generateWeeks` 非空時加入 **Scope Constraint** 段落，限定輸出範圍；`suppressStructural=true` 時對應的 tool 欄位也會從 schema 移除
+  - `leaveByDate` 非空時加入 **Person Unavailability** 段落，硬性禁止指定日期排上指定人員；後端 `_validate_tool_input` 也會把違反的 LLM 回應擋下回 422
   - 每次呼叫會把 system prompt + messages + response 落檔到 `Prompt_Experiment/{start-time}-{retry}.txt`（可關閉，見下）
 
 ## activeRules

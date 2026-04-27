@@ -383,6 +383,33 @@
         </div>
       </div>
 
+      <!-- 請假區域（依生成週次動態建列） -->
+      <div class="agent-config-section" id="agentLeaveSection">
+        <label class="agent-config-label" id="agentLeaveToggle"
+          style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+          <span>
+            請假區域
+            <span class="info-icon" data-tip="當週指定的人不會被排到任何服事"
+              style="color: #94a3b8; margin-left: 6px;">ⓘ</span>
+          </span>
+          <span id="agentLeaveIcon" style="font-size: 10px; color: #64748b;">▶</span>
+        </label>
+        <div class="agent-rules" id="agentLeaveContent" style="display: none;">
+          <div id="agentLeaveScrollContainer"
+            style="max-height: 180px; overflow-y: auto; padding-right: 4px;">
+            <div id="agentLeaveRows" style="display: flex; flex-direction: column; gap: 6px;">
+              <!-- 動態填入；至少有一列 -->
+            </div>
+          </div>
+          <button type="button" id="agentLeaveAddBtn"
+            style="margin-top: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+                   background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1;
+                   border-radius: 4px; align-self: flex-start;">
+            + 新增請假
+          </button>
+        </div>
+      </div>
+
       <!-- 聊天對話區域 -->
       <div class="agent-chat-area" id="agentChatArea">
         <div class="agent-chat-welcome">
