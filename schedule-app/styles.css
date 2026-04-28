@@ -394,7 +394,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
+  min-height: 26px;
 }
 
 .service-cell.drag-over {
@@ -404,7 +404,7 @@ body {
 
 .add-person-placeholder {
   color: var(--text-light);
-  font-size: 24px;
+  font-size: 18px;
   opacity: 0.3;
   transition: all var(--transition-normal);
 }

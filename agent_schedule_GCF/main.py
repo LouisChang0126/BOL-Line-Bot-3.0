@@ -187,12 +187,17 @@ def _build_messages(chat_history, prompt):
     return messages
 
 
-def _anthropic_chat(api_key, model, system_prompt, messages, tool=None):
+def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base_url=""):
+    """provider=anthropic 的呼叫；api_base_url 為空時用官方 endpoint，
+    填非空值（例：https://api.deepseek.com/anthropic）則改打對應的 Anthropic 相容服務。"""
     tool = tool or SCHEDULE_TOOL
-    client = anthropic.Anthropic(
-        api_key=api_key,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
+    client_kwargs = {
+        "api_key": api_key,
+        "timeout": REQUEST_TIMEOUT_SECONDS,
+    }
+    if api_base_url and api_base_url.strip():
+        client_kwargs["base_url"] = api_base_url.strip()
+    client = anthropic.Anthropic(**client_kwargs)
     max_retries = 3
     retryable_status_codes = {429, 500, 502, 503, 504, 529}
     last_error = None
@@ -432,7 +437,7 @@ def generate_agent_schedule(request):
                 body = {"error": "API key not configured for anthropic mode"}
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
-            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool)
+            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url)
         elif provider == "openai_compatible":
             tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
         else:

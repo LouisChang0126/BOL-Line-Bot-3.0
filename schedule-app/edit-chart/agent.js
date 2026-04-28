@@ -368,9 +368,13 @@ function _collectAllPersons(scheduleData, leaveByDate) {
 }
 
 // 建立 4 張 map：service ↔ english、person ↔ english。排序後按 index 配池避免隨機性。
-function _buildAnonMap(scheduleData, serviceItems, leaveByDate) {
+// extraPersons：把 allPersonNames 等「全域」人名也納入，避免 user_request 提到 referenceWeeks
+// 範圍外的人名而沒被翻譯。
+function _buildAnonMap(scheduleData, serviceItems, leaveByDate, extraPersons = []) {
     const services = [...new Set(serviceItems || [])].sort();
-    const persons = _collectAllPersons(scheduleData, leaveByDate).sort();
+    const localPersons = _collectAllPersons(scheduleData, leaveByDate);
+    const extras = (extraPersons || []).filter(n => typeof n === 'string' && n.trim());
+    const persons = [...new Set([...localPersons, ...extras])].sort();
     if (services.length > JOB_TITLES.length) {
         throw new Error(`服事項目數 (${services.length}) 超過匿名池容量 (${JOB_TITLES.length})`);
     }
@@ -398,6 +402,21 @@ function _anonText(text, maps) {
     const pairs = [
         ...maps.personMap.entries(),
         ...maps.serviceMap.entries(),
+    ].filter(([k]) => k && String(k).length > 0)
+     .sort((a, b) => String(b[0]).length - String(a[0]).length);
+    let out = String(text);
+    for (const [from, to] of pairs) {
+        out = out.split(from).join(to);
+    }
+    return out;
+}
+
+// 反向：把 LLM 回應內的英文（explanation / answer）還原成中文
+function _deanonText(text, maps) {
+    if (!text || !maps) return text;
+    const pairs = [
+        ...maps.reversePerson.entries(),
+        ...maps.reverseService.entries(),
     ].filter(([k]) => k && String(k).length > 0)
      .sort((a, b) => String(b[0]).length - String(a[0]).length);
     let out = String(text);
@@ -460,6 +479,13 @@ function _deanonymizeResult(result, maps) {
     }
     if (Array.isArray(result.removeServiceColumns)) {
         result.removeServiceColumns = result.removeServiceColumns.map(s => maps.reverseService.get(s) || s);
+    }
+    // LLM 寫的自由文字（explanation / answer）也可能含英文人名 / 服事名 → 字串替換還原
+    if (typeof result.explanation === 'string') {
+        result.explanation = _deanonText(result.explanation, maps);
+    }
+    if (typeof result.answer === 'string') {
+        result.answer = _deanonText(result.answer, maps);
     }
     return result;
 }
@@ -1461,19 +1487,21 @@ export async function sendAgentRequest() {
         payload.leaveByDate = leaveByDate;
     }
 
-    // === 實驗：把 currentSchedule / leaveByDate / prompt 內所有中文匿名化成英文 ===
+    // === 實驗：把 currentSchedule / leaveByDate / prompt / chatHistory 內所有中文匿名化成英文 ===
     // 建一張 per-request map；response 解回時用 reverse map 還原。
     let anonMaps = null;
     if (scheduling && USE_ANONYMIZATION) {
         try {
             const csParsed = JSON.parse(payload.currentSchedule);
+            // 也把 allPersonNames 帶進來：避免 user_request 提到 reference 範圍外的人名沒被翻
             anonMaps = _buildAnonMap(
                 csParsed.scheduleData || [],
                 csParsed.serviceItems || serviceItems,
-                payload.leaveByDate || {}
+                payload.leaveByDate || {},
+                Array.from(allPersonNames || [])
             );
         } catch (err) {
-            addChatMessage(`❌ 匿名化建表失敗：${err.message}`, 'error', { mode: selectedMode });
+            addChatMessage(`❌ 匿名化建表失敗:${err.message}`, 'error', { mode: selectedMode });
             return;
         }
         payload.currentSchedule = _anonymizeCurrentSchedule(payload.currentSchedule, anonMaps);
@@ -1482,6 +1510,13 @@ export async function sendAgentRequest() {
         }
         // prompt 也可能含中文人名 / 服事名，做 longest-first 字串替換
         payload.prompt = _anonText(payload.prompt, anonMaps);
+        // chatHistory：同一 session 的歷史訊息也翻成英文，讓 LLM 看到的對話前後一致
+        if (Array.isArray(payload.chatHistory)) {
+            payload.chatHistory = payload.chatHistory.map(msg => ({
+                role: msg.role,
+                content: _anonText(msg.content, anonMaps)
+            }));
+        }
     }
 
     agentIsLoading = true;
