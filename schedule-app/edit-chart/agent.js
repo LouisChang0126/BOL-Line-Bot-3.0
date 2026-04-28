@@ -146,6 +146,41 @@ const FREQUENCY_PARITY_TOLERANCE = 0.50;
 // 請假區域：每列一筆 {date, person}，皆從下拉選擇。預設一列空白。
 let _leaveRows = [{ date: '', person: '' }];
 
+// =====================================================
+// 實驗：把所有「服事名稱」「人員名稱」匿名化成預設英文池後再送給 LLM
+// =====================================================
+// True  → 排班模式送 LLM 前，把 currentSchedule / leaveByDate / prompt / warning
+//         內所有中文服事名 / 人名替換成 JOB_TITLES / ENGLISH_NAMES 內的英文，
+//         response 解回來再 reverse-map 回原始中文。
+// False → 沿用原本中文流程。
+// 工程師可隨時切換來做 A/B 對照（搭配 USE_CSV_SCHEDULE）。
+const USE_ANONYMIZATION = true;
+
+const JOB_TITLES = [
+    "worship_leader", "music_director", "lead_vocalist", "support_vocalist",
+    "drummer", "bassist", "keyboardist", "sound_engineer", "slide_operator",
+    "mc", "intercessor", "prophet", "usher_a", "usher_b", "offering_collector",
+    "prayer_leader", "communion_server", "scripture_reader", "announcement_lead",
+    "hospitality", "security", "video_director", "lighting", "livestream", "setup_crew"
+];  // 25
+
+const ENGLISH_NAMES = [
+    "Adam", "Brian", "Charles", "David", "Edward", "Frank", "George", "Henry",
+    "Ian", "Jack", "Kevin", "Liam", "Mark", "Nathan", "Oliver", "Patrick",
+    "Quentin", "Robert", "Samuel", "Thomas", "Ulysses", "Victor", "William",
+    "Xavier", "Yann", "Zachary", "Aaron", "Brendan", "Carlos", "Derek",
+    "Ethan", "Felix", "Gabriel", "Hugo", "Isaac", "Jason", "Kyle", "Leo",
+    "Marcus", "Nolan", "Oscar", "Peter", "Riley", "Simon", "Tyler", "Vincent",
+    "Walter", "Xander", "Yuri", "Zane",
+    "Anna", "Bella", "Catherine", "Diana", "Emily", "Fiona", "Grace",
+    "Hannah", "Iris", "Jasmine", "Kate", "Laura", "Maria", "Nina", "Olivia",
+    "Paula", "Quinn", "Rachel", "Sophia", "Tina", "Uma", "Vivian", "Wendy",
+    "Xena", "Yara", "Zoe", "Abigail", "Beatrice", "Carolyn", "Daphne",
+    "Eliza", "Faith", "Gemma", "Helen", "Ivy", "Julia", "Kelly", "Lily",
+    "Megan", "Nora", "Opal", "Phoebe", "Rose", "Stella", "Tessa", "Ursula",
+    "Vera", "Willa", "Yvonne", "Zara"
+];  // 100
+
 function getFutureSundayCandidates(latestExistingDate, count = FUTURE_SUNDAY_COUNT) {
     if (!latestExistingDate || !/^\d{4}\.\d{2}\.\d{2}$/.test(latestExistingDate)) return [];
     const [y, m, d] = latestExistingDate.split('.').map(Number);
@@ -272,6 +307,124 @@ function expandDateRange(startDate, endDate, candidates) {
     const e = sorted.indexOf(endDate);
     if (s < 0 || e < 0 || s > e) return [];
     return sorted.slice(s, e + 1);
+}
+
+// --- 匿名化 helpers（USE_ANONYMIZATION 為 true 時啟用） ---
+
+// 從 schedule + leave 收集所有出現過的人名
+function _collectAllPersons(scheduleData, leaveByDate) {
+    const set = new Set();
+    (scheduleData || []).forEach(row => {
+        Object.entries(row).forEach(([k, v]) => {
+            if (k === 'date' || k === '_version') return;
+            if (Array.isArray(v)) v.forEach(n => {
+                if (typeof n === 'string' && n.trim()) set.add(n);
+            });
+        });
+    });
+    Object.values(leaveByDate || {}).forEach(arr => {
+        (arr || []).forEach(n => {
+            if (typeof n === 'string' && n.trim()) set.add(n);
+        });
+    });
+    return [...set];
+}
+
+// 建立 4 張 map：service ↔ english、person ↔ english。排序後按 index 配池避免隨機性。
+function _buildAnonMap(scheduleData, serviceItems, leaveByDate) {
+    const services = [...new Set(serviceItems || [])].sort();
+    const persons = _collectAllPersons(scheduleData, leaveByDate).sort();
+    if (services.length > JOB_TITLES.length) {
+        throw new Error(`服事項目數 (${services.length}) 超過匿名池容量 (${JOB_TITLES.length})`);
+    }
+    if (persons.length > ENGLISH_NAMES.length) {
+        throw new Error(`人員數 (${persons.length}) 超過匿名池容量 (${ENGLISH_NAMES.length})`);
+    }
+    const serviceMap = new Map();
+    const reverseService = new Map();
+    services.forEach((s, i) => {
+        serviceMap.set(s, JOB_TITLES[i]);
+        reverseService.set(JOB_TITLES[i], s);
+    });
+    const personMap = new Map();
+    const reversePerson = new Map();
+    persons.forEach((p, i) => {
+        personMap.set(p, ENGLISH_NAMES[i]);
+        reversePerson.set(ENGLISH_NAMES[i], p);
+    });
+    return { serviceMap, personMap, reverseService, reversePerson };
+}
+
+// 對自由文字（prompt / warning）做 longest-first 字串替換
+function _anonText(text, maps) {
+    if (!text || !maps) return text;
+    const pairs = [
+        ...maps.personMap.entries(),
+        ...maps.serviceMap.entries(),
+    ].filter(([k]) => k && String(k).length > 0)
+     .sort((a, b) => String(b[0]).length - String(a[0]).length);
+    let out = String(text);
+    for (const [from, to] of pairs) {
+        out = out.split(from).join(to);
+    }
+    return out;
+}
+
+// 把前端要送 LLM 的 currentSchedule JSON 字串，整份替換成英文
+function _anonymizeCurrentSchedule(currentScheduleStr, maps) {
+    let parsed;
+    try { parsed = JSON.parse(currentScheduleStr); } catch (_) { return currentScheduleStr; }
+    const sd = (parsed.scheduleData || []).map(row => {
+        const newRow = { date: row.date };
+        Object.entries(row).forEach(([k, v]) => {
+            if (k === 'date' || k === '_version') return;
+            const newK = maps.serviceMap.get(k) || k;
+            if (Array.isArray(v)) {
+                newRow[newK] = v.map(n => maps.personMap.get(n) || n);
+            } else {
+                newRow[newK] = v;
+            }
+        });
+        return newRow;
+    });
+    const si = (parsed.serviceItems || []).map(s => maps.serviceMap.get(s) || s);
+    const nu = (parsed.nonUserColumns || []).map(s => maps.serviceMap.get(s) || s);
+    return JSON.stringify({ ...parsed, scheduleData: sd, serviceItems: si, nonUserColumns: nu });
+}
+
+function _anonymizeLeaveByDate(leaveByDate, maps) {
+    const out = {};
+    Object.entries(leaveByDate || {}).forEach(([d, names]) => {
+        out[d] = (names || []).map(n => maps.personMap.get(n) || n);
+    });
+    return out;
+}
+
+// 把 LLM 回傳的 result 轉回中文。LLM 若產出池外的英文（hallucination），保持原樣讓 validator 攔截。
+function _deanonymizeResult(result, maps) {
+    if (!result || typeof result !== 'object') return result;
+    if (Array.isArray(result.scheduleData)) {
+        result.scheduleData = result.scheduleData.map(row => {
+            const newRow = { date: row.date };
+            Object.entries(row).forEach(([k, v]) => {
+                if (k === 'date') return;
+                const origK = maps.reverseService.get(k) || k;
+                if (Array.isArray(v)) {
+                    newRow[origK] = v.map(n => maps.reversePerson.get(n) || n);
+                } else {
+                    newRow[origK] = v;
+                }
+            });
+            return newRow;
+        });
+    }
+    if (Array.isArray(result.addServiceColumns)) {
+        result.addServiceColumns = result.addServiceColumns.map(s => maps.reverseService.get(s) || s);
+    }
+    if (Array.isArray(result.removeServiceColumns)) {
+        result.removeServiceColumns = result.removeServiceColumns.map(s => maps.reverseService.get(s) || s);
+    }
+    return result;
 }
 
 // --- 請假區域 helpers ---
@@ -1238,6 +1391,29 @@ export async function sendAgentRequest() {
         payload.leaveByDate = leaveByDate;
     }
 
+    // === 實驗：把 currentSchedule / leaveByDate / prompt 內所有中文匿名化成英文 ===
+    // 建一張 per-request map；response 解回時用 reverse map 還原。
+    let anonMaps = null;
+    if (scheduling && USE_ANONYMIZATION) {
+        try {
+            const csParsed = JSON.parse(payload.currentSchedule);
+            anonMaps = _buildAnonMap(
+                csParsed.scheduleData || [],
+                csParsed.serviceItems || serviceItems,
+                payload.leaveByDate || {}
+            );
+        } catch (err) {
+            addChatMessage(`❌ 匿名化建表失敗：${err.message}`, 'error', { mode: selectedMode });
+            return;
+        }
+        payload.currentSchedule = _anonymizeCurrentSchedule(payload.currentSchedule, anonMaps);
+        if (payload.leaveByDate) {
+            payload.leaveByDate = _anonymizeLeaveByDate(payload.leaveByDate, anonMaps);
+        }
+        // prompt 也可能含中文人名 / 服事名，做 longest-first 字串替換
+        payload.prompt = _anonText(payload.prompt, anonMaps);
+    }
+
     agentIsLoading = true;
     document.getElementById('agentSendBtn').disabled = true;
     showAgentLoading(selectedMode);
@@ -1260,13 +1436,18 @@ export async function sendAgentRequest() {
             const experimentFields = scheduling
                 ? { experimentStartTime, experimentRetryCount }
                 : {};
+            // retry 時的 base prompt：anon 模式用 payload.prompt（已英文）、非 anon 用原 prompt
+            const baseLLMPrompt = anonMaps ? payload.prompt : prompt;
+            const warningText = (lastResult?.warnings || [])
+                .map(w => anonMaps ? _anonText(w.message, anonMaps) : w.message)
+                .join('\n');
             const response = await fetch(AGENT_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(retryCount > 0 ? {
                     ...payload,
                     ...experimentFields,
-                    prompt: `${prompt}\n\n[系統提示] 上次產生的班表違反規則，請修正：\n${lastResult.warnings.map(w => w.message).join('\n')}`
+                    prompt: `${baseLLMPrompt}\n\n[系統提示] 上次產生的班表違反規則，請修正：\n${warningText}`
                 } : { ...payload, ...experimentFields })
             });
 
@@ -1278,6 +1459,11 @@ export async function sendAgentRequest() {
             }
 
             const result = await response.json();
+
+            // anon 模式：把 LLM 的英文回應還原成中文，後續所有邏輯（validator、setPendingChanges）用原始中文跑
+            if (anonMaps) {
+                _deanonymizeResult(result, anonMaps);
+            }
 
             // 問答型回覆（不含排班變更）直接顯示，不進入驗證/套用流程
             if (result.answerOnly || result.mode === 'answer_only' || !Array.isArray(result.scheduleData)) {
