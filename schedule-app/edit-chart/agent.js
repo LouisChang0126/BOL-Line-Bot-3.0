@@ -154,7 +154,7 @@ let _leaveRows = [{ date: '', person: '' }];
 //         response 解回來再 reverse-map 回原始中文。
 // False → 沿用原本中文流程。
 // 工程師可隨時切換來做 A/B 對照（搭配 USE_CSV_SCHEDULE）。
-const USE_ANONYMIZATION = true;
+const USE_ANONYMIZATION = false;
 
 const JOB_TITLES = [
     "worship_leader", "music_director", "lead_vocalist", "support_vocalist",
@@ -652,6 +652,35 @@ export function setupAgentSidebar() {
             }
         });
     }
+
+    // 排班規則 radio btn-group active 狀態切換（連續週次、單週最多服事數）
+    const bindRuleRadioGroup = (radioName, items) => {
+        const resolved = items.map(([btnId, radioId]) => ({
+            btn: document.getElementById(btnId),
+            radio: document.getElementById(radioId),
+        }));
+        if (resolved.some(it => !it.btn || !it.radio)) return;
+        const update = () => {
+            resolved.forEach(({ btn, radio }) => {
+                const isActive = radio.checked;
+                btn.classList.toggle('btn-primary', isActive);
+                btn.classList.toggle('btn-secondary', !isActive);
+            });
+        };
+        document.querySelectorAll(`input[name="${radioName}"]`).forEach(r => {
+            r.addEventListener('change', update);
+        });
+        update();
+    };
+    bindRuleRadioGroup('ruleConsecutiveWeeks', [
+        ['consecutiveWeeks2Btn', 'consecutiveWeeks2'],
+        ['consecutiveWeeks3Btn', 'consecutiveWeeks3'],
+    ]);
+    bindRuleRadioGroup('ruleMaxRolesLimit', [
+        ['maxRolesLimit1Btn', 'maxRolesLimit1'],
+        ['maxRolesLimit2Btn', 'maxRolesLimit2'],
+        ['maxRolesLimit3Btn', 'maxRolesLimit3'],
+    ]);
 
     // 參考範圍收合/展開
     const refRangeToggle = document.getElementById('agentReferenceRangeToggle');
@@ -1320,9 +1349,9 @@ export async function sendAgentRequest() {
     const activeRules = scheduling
         ? {
             consecutive: document.getElementById('ruleConsecutive')?.checked ?? false,
-            consecutiveWeeks: Math.max(2, parseInt(document.getElementById('ruleConsecutiveWeeks')?.value, 10) || 2),
+            consecutiveWeeks: Math.max(2, parseInt(document.querySelector('input[name="ruleConsecutiveWeeks"]:checked')?.value, 10) || 2),
             maxRoles: document.getElementById('ruleMaxRoles')?.checked ?? false,
-            maxRolesLimit: Math.max(1, parseInt(document.getElementById('ruleMaxRolesLimit')?.value, 10) || 2),
+            maxRolesLimit: Math.max(1, parseInt(document.querySelector('input[name="ruleMaxRolesLimit"]:checked')?.value, 10) || 2),
             serviceKnownPeople: document.getElementById('ruleServiceKnownPeople')?.checked ?? true,
             frequencyParity: document.getElementById('ruleFrequencyParity')?.checked ?? false
         }

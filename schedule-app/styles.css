@@ -1683,6 +1683,17 @@ body.multi-selecting-active {
   cursor: pointer;
 }
 
+/* 排班規則內的 radio btn-group：選中態用藍色，避免和全域 btn-primary 紅色混淆 */
+.rule-radio-btn.btn-primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: white;
+}
+.rule-radio-btn.btn-primary:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
 /* 聊天區域 */
 .agent-chat-area {
   flex: 1;

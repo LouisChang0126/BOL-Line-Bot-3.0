@@ -357,20 +357,50 @@
           <span id="agentRulesIcon" style="font-size: 10px; color: #64748b;">▼</span>
         </label>
         <div class="agent-rules" id="agentRulesContent">
-          <label class="agent-rule-option">
+          <div class="agent-rule-option">
             <input type="checkbox" id="ruleConsecutive" checked>
-            <span>禁止連續同服事</span>
-            <input type="number" id="ruleConsecutiveWeeks" min="2" value="2" max="3"
-              style="width: 64px; margin-left: 8px; padding: 2px 6px;">
+            <label for="ruleConsecutive" style="margin: 0; cursor: pointer;">禁止連續同服事</label>
+            <div class="btn-group consecutive-weeks-group" style="margin-left: 4px;">
+              <label class="btn btn-primary btn-group-left rule-radio-btn" id="consecutiveWeeks2Btn"
+                style="padding: 2px 10px; font-size: 12px; cursor: pointer; margin: 0;">
+                <input type="radio" name="ruleConsecutiveWeeks" value="2" checked
+                  style="position: absolute; opacity: 0; width: 0;" id="consecutiveWeeks2">
+                2
+              </label>
+              <label class="btn btn-secondary btn-group-right rule-radio-btn" id="consecutiveWeeks3Btn"
+                style="padding: 2px 10px; font-size: 12px; cursor: pointer; margin: 0;">
+                <input type="radio" name="ruleConsecutiveWeeks" value="3"
+                  style="position: absolute; opacity: 0; width: 0;" id="consecutiveWeeks3">
+                3
+              </label>
+            </div>
             <span>週</span>
-          </label>
-          <label class="agent-rule-option">
+          </div>
+          <div class="agent-rule-option">
             <input type="checkbox" id="ruleMaxRoles" checked>
-            <span>同工單週最多</span>
-            <input type="number" id="ruleMaxRolesLimit" min="1" value="2" max="3"
-              style="width: 64px; margin-left: 8px; padding: 2px 6px;">
+            <label for="ruleMaxRoles" style="margin: 0; cursor: pointer;">同工單週最多</label>
+            <div class="btn-group max-roles-group" style="margin-left: 4px;">
+              <label class="btn btn-secondary btn-group-left rule-radio-btn" id="maxRolesLimit1Btn"
+                style="padding: 2px 10px; font-size: 12px; cursor: pointer; margin: 0;">
+                <input type="radio" name="ruleMaxRolesLimit" value="1"
+                  style="position: absolute; opacity: 0; width: 0;" id="maxRolesLimit1">
+                1
+              </label>
+              <label class="btn btn-primary rule-radio-btn" id="maxRolesLimit2Btn"
+                style="padding: 2px 10px; font-size: 12px; cursor: pointer; margin: 0; border-radius: 0; border-right-width: 0;">
+                <input type="radio" name="ruleMaxRolesLimit" value="2" checked
+                  style="position: absolute; opacity: 0; width: 0;" id="maxRolesLimit2">
+                2
+              </label>
+              <label class="btn btn-secondary btn-group-right rule-radio-btn" id="maxRolesLimit3Btn"
+                style="padding: 2px 10px; font-size: 12px; cursor: pointer; margin: 0;">
+                <input type="radio" name="ruleMaxRolesLimit" value="3"
+                  style="position: absolute; opacity: 0; width: 0;" id="maxRolesLimit3">
+                3
+              </label>
+            </div>
             <span>項服事</span>
-          </label>
+          </div>
           <label class="agent-rule-option">
             <input type="checkbox" id="ruleServiceKnownPeople" checked>
             <span>僅使用該服事歷史人員</span>

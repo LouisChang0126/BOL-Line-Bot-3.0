@@ -816,6 +816,7 @@ def _log_experiment(start_time, retry_count, mode, provider, model,
     lines.append(f"wall_clock_utc:  {datetime.now(timezone.utc).isoformat()}")
     lines.append(f"start_time:      {start_time or '(none, fell back to server time)'}")
     lines.append(f"retry_count:     {retry_count}")
+    lines.append(f"time_delay:      {datetime.now(timezone.utc) - datetime.fromisoformat(start_time) if start_time else '(n/a)'}")
     lines.append(f"mode:            {mode}")
     lines.append(f"provider:        {provider}")
     lines.append(f"model:           {model}")
