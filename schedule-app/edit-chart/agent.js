@@ -309,6 +309,43 @@ function expandDateRange(startDate, endDate, candidates) {
     return sorted.slice(s, e + 1);
 }
 
+// 計算「禁止連續 N 週同服事」需要 LLM 看見的相鄰 boundary 週次。
+// 若生成週次的第一週 = 7/5、N=2，則 6/28（在現有 scheduleData 中）需被當 read-only context 送進去。
+// 同理向後 (n-1) 週也檢查（以防 LLM 動 7/5 但 7/12 已是某人 → 仍可違反）。
+// 回傳的日期一定要在 schedRows 中存在（沒資料就無從比對）。
+function _computeConsecutiveContextDates(generateWeeks, n, schedRows) {
+    if (!Array.isArray(generateWeeks) || generateWeeks.length === 0) return [];
+    const N = Math.max(0, parseInt(n, 10) || 0);
+    if (N <= 1) return [];
+    const allDates = (schedRows || []).map(r => r.date).filter(Boolean).sort();
+    const genSet = new Set(generateWeeks);
+    const sortedGen = [...generateWeeks].sort();
+    const firstGen = sortedGen[0];
+    const lastGen = sortedGen[sortedGen.length - 1];
+    const firstIdx = allDates.indexOf(firstGen);
+    const lastIdx = allDates.indexOf(lastGen);
+    const out = new Set();
+    // 前 N-1 週
+    if (firstIdx > 0) {
+        for (let i = 1; i <= N - 1; i++) {
+            const idx = firstIdx - i;
+            if (idx < 0) break;
+            const d = allDates[idx];
+            if (!genSet.has(d)) out.add(d);
+        }
+    }
+    // 後 N-1 週
+    if (lastIdx >= 0 && lastIdx < allDates.length - 1) {
+        for (let i = 1; i <= N - 1; i++) {
+            const idx = lastIdx + i;
+            if (idx >= allDates.length) break;
+            const d = allDates[idx];
+            if (!genSet.has(d)) out.add(d);
+        }
+    }
+    return [...out].sort();
+}
+
 // --- 匿名化 helpers（USE_ANONYMIZATION 為 true 時啟用） ---
 
 // 從 schedule + leave 收集所有出現過的人名
@@ -921,13 +958,17 @@ function buildScheduleIndex(rows) {
     return index;
 }
 
-function buildChangedCellSet(baseScheduleData, nextScheduleData, userServiceItems) {
+function buildChangedCellSet(baseScheduleData, nextScheduleData, userServiceItems, allowedDates) {
     const changedCells = new Set();
     const baseIndex = buildScheduleIndex(baseScheduleData);
     const nextIndex = buildScheduleIndex(nextScheduleData);
     const allDates = new Set([...baseIndex.keys(), ...nextIndex.keys()]);
+    // 若有 allowedDates（例如 generateWeeks），只在這些日期內偵測變更，
+    // 避免「LLM 沒回 context 週的 row」被誤判成「整列被清空」
+    const allowSet = (allowedDates && allowedDates.length > 0) ? new Set(allowedDates) : null;
 
     allDates.forEach(date => {
+        if (allowSet && !allowSet.has(date)) return;
         const baseRow = baseIndex.get(date) || {};
         const nextRow = nextIndex.get(date) || {};
         userServiceItems.forEach(service => {
@@ -955,7 +996,8 @@ function validateScopedChanges({
     changedCells,
     referenceWeeks = [],
     generateWeeks = [],
-    leaveByDate = {}
+    leaveByDate = {},
+    consecutiveContextWeeks = []
 }) {
     const warnings = [];
     const validatedCellsByRule = {
@@ -993,7 +1035,16 @@ function validateScopedChanges({
     // 規則1: 禁止連續 N 週同服事（只檢查包含變更格的視窗）
     if (activeRules?.consecutive) {
         const consecutiveWeeks = Math.max(2, parseInt(activeRules?.consecutiveWeeks, 10) || 2);
-        const rows = nextScheduleData;
+        // 把 base 的 boundary context 列併進來（LLM 沒回但仍是真實狀態），讓 window 跨越 generate 範圍邊界
+        const baseIdx = buildScheduleIndex(baseScheduleData);
+        const nextDateSet = new Set(nextScheduleData.map(r => r.date));
+        const augmented = [...nextScheduleData];
+        (consecutiveContextWeeks || []).forEach(d => {
+            if (nextDateSet.has(d)) return;
+            const baseRow = baseIdx.get(d);
+            if (baseRow) augmented.push(baseRow);
+        });
+        const rows = augmented.sort((a, b) => String(a.date).localeCompare(String(b.date)));
         const dateToIndex = new Map();
         rows.forEach((row, idx) => dateToIndex.set(row.date, idx));
         const seenConsecutive = new Set();
@@ -1342,9 +1393,25 @@ export async function sendAgentRequest() {
         effectiveScheduleData = [...historyViewContext.pastData, ...effectiveScheduleData];
     }
 
-    // referenceWeeks 非空時，只把指定週次送給 LLM
+    // 「禁止連續 N 週」boundary context：把生成週次的前後 (N-1) 週也納入 LLM 視野
+    // 否則 LLM 看不到 generate 週次外的近鄰，無法判斷跨邊界違規（例：6/28 已排了某人，
+    // LLM 在 7/5 又把同人放同位置 → 連續 2 週違規）
+    let consecutiveContextWeeks = [];
+    if (scheduling && activeRules.consecutive && generateWeeks.length > 0) {
+        consecutiveContextWeeks = _computeConsecutiveContextDates(
+            generateWeeks,
+            activeRules.consecutiveWeeks,
+            effectiveScheduleData
+        );
+    }
+
+    // referenceWeeks 非空時，只把指定週次送給 LLM；同時保留 boundary context 週
+    const includedDates = new Set([
+        ...(referenceWeeks.length > 0 ? referenceWeeks : []),
+        ...consecutiveContextWeeks
+    ]);
     const scheduleToSend = referenceWeeks.length > 0
-        ? effectiveScheduleData.filter(r => referenceWeeks.includes(r.date))
+        ? effectiveScheduleData.filter(r => includedDates.has(r.date))
         : effectiveScheduleData;
 
     const payload = {
@@ -1361,6 +1428,9 @@ export async function sendAgentRequest() {
     if (generateWeeks.length > 0) {
         payload.generateWeeks = generateWeeks;
         payload.suppressStructural = true;
+    }
+    if (consecutiveContextWeeks.length > 0) {
+        payload.consecutiveContextWeeks = consecutiveContextWeeks;
     }
 
     // 請假區域：每列必須日期 + 人員都有；兩個皆空就略過。組成 {date: [names]}
@@ -1473,7 +1543,12 @@ export async function sendAgentRequest() {
             }
 
             const userServiceItems = serviceItems.filter(s => !nonUserColumns.includes(s));
-            const changedCells = buildChangedCellSet(effectiveScheduleData, result.scheduleData, userServiceItems);
+            const changedCells = buildChangedCellSet(
+                effectiveScheduleData,
+                result.scheduleData,
+                userServiceItems,
+                generateWeeks.length > 0 ? generateWeeks : null
+            );
             const validation = validateScopedChanges({
                 baseScheduleData: effectiveScheduleData,
                 nextScheduleData: result.scheduleData,
@@ -1483,7 +1558,8 @@ export async function sendAgentRequest() {
                 changedCells,
                 referenceWeeks,
                 generateWeeks,
-                leaveByDate
+                leaveByDate,
+                consecutiveContextWeeks
             });
 
             if (!validation.valid && retryCount < MAX_RETRIES) {
