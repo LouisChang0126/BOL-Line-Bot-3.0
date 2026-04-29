@@ -137,6 +137,17 @@ function renderChatHistory(mode = getSelectedMode()) {
 const REFERENCE_RANGE_IDS = ['agentReferenceStart', 'agentReferenceEnd'];
 const GENERATE_RANGE_IDS = ['agentGenerateStart', 'agentGenerateEnd'];
 const FUTURE_SUNDAY_COUNT = 26;  // 生成週次下拉裡多附 N 個未來週日候選，方便建立新週
+const MAX_GENERATE_WEEKS = 13;   // 生成週次（end - start）最多 13 週
+
+function _weekDiff(a, b) {
+    if (!a || !b) return 0;
+    const m = /^(\d{4})\.(\d{2})\.(\d{2})$/;
+    const ma = m.exec(a); const mb = m.exec(b);
+    if (!ma || !mb) return 0;
+    const ta = new Date(+ma[1], +ma[2] - 1, +ma[3]).getTime();
+    const tb = new Date(+mb[1], +mb[2] - 1, +mb[3]).getTime();
+    return Math.round((tb - ta) / (7 * 24 * 3600 * 1000));
+}
 
 // 「頻率與參考班表一致」規則的相對誤差容忍度。
 // 0.50 = ±50%：例如某人在參考週次中應該排約 4 次，生成範圍內 [2.0, 6.0] 之間都算合格。
@@ -252,11 +263,19 @@ function populateReferenceRangeDropdowns() {
     if (refStartEl && !refStartEl.value && firstWeek) refStartEl.value = firstWeek;
     if (refEndEl && !refEndEl.value && lastNonEmpty) refEndEl.value = lastNonEmpty;
 
+    // 若先前狀態 start/end 距離 > MAX_GENERATE_WEEKS，先把 end 清掉，避免畫面殘留無效範圍
+    const genStartEl = document.getElementById('agentGenerateStart');
+    const genEndEl = document.getElementById('agentGenerateEnd');
+    if (genStartEl && genEndEl && genStartEl.value && genEndEl.value
+        && _weekDiff(genStartEl.value, genEndEl.value) > MAX_GENERATE_WEEKS) {
+        genEndEl.value = '';
+    }
+
     _applyRangeConstraints(...REFERENCE_RANGE_IDS);
-    _applyRangeConstraints(...GENERATE_RANGE_IDS);
+    _applyRangeConstraints(...GENERATE_RANGE_IDS, MAX_GENERATE_WEEKS);
 }
 
-function _applyRangeConstraints(startId, endId) {
+function _applyRangeConstraints(startId, endId, maxWeeks = 0) {
     const startEl = document.getElementById(startId);
     const endEl = document.getElementById(endId);
     if (!startEl || !endEl) return;
@@ -264,24 +283,35 @@ function _applyRangeConstraints(startId, endId) {
     const endVal = endEl.value;
     // 用 hidden 而非 disabled，讓不能選的日期不顯示而非灰色保留
     [...endEl.options].forEach(o => {
-        o.hidden = !!(startVal && o.value && o.value < startVal);
+        if (!o.value) { o.hidden = false; return; }
+        const tooEarly = !!(startVal && o.value < startVal);
+        const tooFar = !!(maxWeeks > 0 && startVal && _weekDiff(startVal, o.value) > maxWeeks);
+        o.hidden = tooEarly || tooFar;
     });
     [...startEl.options].forEach(o => {
-        o.hidden = !!(endVal && o.value && o.value > endVal);
+        if (!o.value) { o.hidden = false; return; }
+        const tooLate = !!(endVal && o.value > endVal);
+        const tooFar = !!(maxWeeks > 0 && endVal && _weekDiff(o.value, endVal) > maxWeeks);
+        o.hidden = tooLate || tooFar;
     });
 }
 
-function _wireRangePair(startId, endId, onChange) {
+function _wireRangePair(startId, endId, onChange, maxWeeks = 0) {
     const startEl = document.getElementById(startId);
     const endEl = document.getElementById(endId);
     if (!startEl || !endEl) return;
     const fire = () => {
-        _applyRangeConstraints(startId, endId);
+        _applyRangeConstraints(startId, endId, maxWeeks);
         if (typeof onChange === 'function') onChange();
     };
     startEl.addEventListener('change', () => {
         // 若 start 改到比 end 還晚 → 清掉 end 避免送出無效範圍
         if (startEl.value && endEl.value && startEl.value > endEl.value) {
+            endEl.value = '';
+        }
+        // 超過最大週數上限 → 清掉 end，強迫使用者重選
+        if (maxWeeks > 0 && startEl.value && endEl.value
+            && _weekDiff(startEl.value, endEl.value) > maxWeeks) {
             endEl.value = '';
         }
         fire();
@@ -290,13 +320,17 @@ function _wireRangePair(startId, endId, onChange) {
         if (startEl.value && endEl.value && startEl.value > endEl.value) {
             startEl.value = '';
         }
+        if (maxWeeks > 0 && startEl.value && endEl.value
+            && _weekDiff(startEl.value, endEl.value) > maxWeeks) {
+            startEl.value = '';
+        }
         fire();
     });
 }
 
 function setupReferenceRangeListeners() {
     _wireRangePair(...REFERENCE_RANGE_IDS);
-    _wireRangePair(...GENERATE_RANGE_IDS, () => rebuildLeaveRows());
+    _wireRangePair(...GENERATE_RANGE_IDS, () => rebuildLeaveRows(), MAX_GENERATE_WEEKS);
 }
 
 // 把 [startDate ... endDate] 範圍展開成完整日期陣列（皆需在 candidates 裡）
@@ -1378,10 +1412,15 @@ export async function sendAgentRequest() {
     const genStart = readSel('agentGenerateStart');
     const genEnd = readSel('agentGenerateEnd');
 
-    // 候選池：reference 只允許既有；generate 允許既有 + 未來週日候選
+    // 候選池：reference 跟下拉選單一致（pastData ∪ existing）；generate 允許既有 + 未來週日候選
+    // ※ 參考週次下拉是 pastData ∪ existing；若這裡只用 _existingDates 當 candidates，
+    //   使用者選到僅在 pastData 裡的日期時 expandDateRange 會回傳 []，導致後段 fallback 把整張表送出去
     const _existingDates = scheduleData.map(r => r.date);
     const _latestExisting = [..._existingDates].sort().pop() || null;
     const _futureCandidates = _latestExisting ? getFutureSundayCandidates(_latestExisting) : [];
+    const _historyCtx = getHistoryViewContext();
+    const _historyDates = (_historyCtx?.pastData || []).map(r => r.date).filter(Boolean);
+    const _refCandidates = [...new Set([..._historyDates, ..._existingDates])];
 
     if (scheduling) {
         if (!refStart || !refEnd) {
@@ -1394,7 +1433,7 @@ export async function sendAgentRequest() {
         }
     }
 
-    const referenceWeeks = expandDateRange(refStart, refEnd, _existingDates);
+    const referenceWeeks = expandDateRange(refStart, refEnd, _refCandidates);
     const generateWeeks = expandDateRange(genStart, genEnd, [..._existingDates, ..._futureCandidates]);
 
     // 生成週次：如果有不存在的，先在前端 + Firestore 建空週次後才打 API
@@ -1454,7 +1493,7 @@ export async function sendAgentRequest() {
         });
     }
 
-    const historyViewContext = getHistoryViewContext();
+    const historyViewContext = _historyCtx;
 
     // 已載入的歷史資料一律前置，讓使用者可把過去日期當 referenceWeeks 使用
     // (referenceWeeks 後續 .filter 仍會限縮到使用者實際選的範圍，不會放大送 LLM 的內容)
@@ -1483,9 +1522,23 @@ export async function sendAgentRequest() {
         ? effectiveScheduleData.filter(r => includedDates.has(r.date))
         : effectiveScheduleData;
 
+    // 送給 agent 前把每列的 nonUserColumns 拿掉，只保留人員欄位
+    // key 順序固定為「date → serviceItems 內順序」，缺的欄位補 []，
+    // 這樣每列序列化後結構完全一致，prompt cache hit rate 最大化
+    const nonUserSet = new Set(nonUserColumns || []);
+    const userColumns = (serviceItems || []).filter(s => !nonUserSet.has(s));
+    const scheduleToSendClean = scheduleToSend.map(row => {
+        const out = { date: row.date };
+        for (const s of userColumns) {
+            const v = row[s];
+            out[s] = Array.isArray(v) ? v : [];
+        }
+        return out;
+    });
+
     const payload = {
         prompt,
-        currentSchedule: JSON.stringify({ scheduleData: scheduleToSend, serviceItems, nonUserColumns }),
+        currentSchedule: JSON.stringify({ scheduleData: scheduleToSendClean }),
         selectedMode,
         activeRules,
         chatHistory

@@ -3,6 +3,7 @@ Agent Schedule Generator - Google Cloud Function
 Supports mode-based provider routing:
 - anthropic
 - openai_compatible
+- gemini
 """
 
 import json
@@ -16,6 +17,13 @@ import anthropic
 import functions_framework
 import openai
 from flask import jsonify, make_response
+
+try:
+    from google import genai as google_genai
+    from google.genai import types as google_genai_types
+except ImportError:  # pragma: no cover
+    google_genai = None
+    google_genai_types = None
 
 MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
@@ -336,6 +344,178 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
     return tool_input, (message.content or "").strip(), usage
 
 
+# Module-level Gemini client cache：跟另外兩個 provider 對稱，warm container 下重用 client。
+_GEMINI_CLIENT_CACHE = {}
+
+
+def _get_gemini_client(api_key):
+    if google_genai is None:
+        raise RuntimeError(
+            "google-genai package not installed; add 'google-genai' to requirements.txt"
+        )
+    client = _GEMINI_CLIENT_CACHE.get(api_key)
+    if client is None:
+        client = google_genai.Client(api_key=api_key)
+        _GEMINI_CLIENT_CACHE[api_key] = client
+    return client
+
+
+def _strip_additional_properties(schema):
+    """遞迴拔掉 schema 中所有的 `additionalProperties` 欄位（Gemini 的 Schema model 不收）。"""
+    if isinstance(schema, list):
+        return [_strip_additional_properties(x) for x in schema]
+    if not isinstance(schema, dict):
+        return schema
+    return {
+        k: _strip_additional_properties(v)
+        for k, v in schema.items()
+        if k != "additionalProperties"
+    }
+
+
+def _adapt_schema_for_gemini(schema, current_schedule=None):
+    """Gemini 的 Schema model 只認 `properties`（typed），對 OpenAPI 的 `additionalProperties` 不買單。
+    為了讓 row 內的 service 欄位仍然會被輸出，從 currentSchedule.serviceItems 把已知欄位
+    動態注入成具體的 array-of-string properties；沒注入到的 column 模型不會輸出。"""
+    base = _strip_additional_properties(schema)
+
+    service_items = []
+    if current_schedule:
+        try:
+            parsed = json.loads(current_schedule) if isinstance(current_schedule, str) else current_schedule
+            if isinstance(parsed, dict):
+                raw = parsed.get("serviceItems") or []
+                if isinstance(raw, list):
+                    service_items = [str(x) for x in raw if isinstance(x, str) and x.strip()]
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            service_items = []
+
+    if not service_items:
+        return base
+
+    sched_data = (base.get("properties") or {}).get("scheduleData") or {}
+    items = sched_data.get("items") or {}
+    if items.get("type") != "object":
+        return base
+
+    props = dict(items.get("properties") or {})
+    for col in service_items:
+        if col in props:
+            continue
+        props[col] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": f"List of names assigned to '{col}' service for this date (empty array if none).",
+        }
+    items["properties"] = props
+    sched_data["items"] = items
+    base.setdefault("properties", {})["scheduleData"] = sched_data
+    return base
+
+
+def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_schedule=None):
+    """provider=gemini 的呼叫；用 google-genai SDK 走 Gemini 原生 function calling。
+    current_schedule 用來動態建構 typed schema（取裡面的 serviceItems 當欄位）。"""
+    if not api_key:
+        raise ValueError("api_key is required for gemini provider")
+    tool = tool or SCHEDULE_TOOL
+    client = _get_gemini_client(api_key)
+
+    # role 映射：assistant → model；user 維持；其他都當 user。Gemini 不接受 'assistant'。
+    contents = []
+    for m in messages or []:
+        role = m.get("role", "user")
+        role = "model" if role == "assistant" else "user"
+        text = m.get("content", "")
+        if not isinstance(text, str):
+            text = str(text)
+        contents.append({"role": role, "parts": [{"text": text}]})
+
+    function_decl = google_genai_types.FunctionDeclaration(
+        name=tool["name"],
+        description=tool["description"],
+        parameters=_adapt_schema_for_gemini(tool["input_schema"], current_schedule=current_schedule),
+    )
+    gemini_tool = google_genai_types.Tool(function_declarations=[function_decl])
+    # 把 Gemini 2.5 的 thinking 關掉（Flash: 直接禁用；Pro: SDK 會 clamp 到最低值）。
+    # 萬一執行環境的 SDK 版本沒 ThinkingConfig，就 fallback 不傳這個欄位。
+    config_kwargs = {
+        "system_instruction": system_prompt,
+        "tools": [gemini_tool],
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
+    }
+    thinking_cfg_cls = getattr(google_genai_types, "ThinkingConfig", None)
+    if thinking_cfg_cls is not None:
+        config_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=0)
+    config = google_genai_types.GenerateContentConfig(**config_kwargs)
+
+    max_retries = 3
+    last_error = None
+    response = None
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+            break
+        except Exception as err:  # genai SDK 沒有統一 base error class
+            last_error = err
+            text = str(err).lower()
+            status_code = getattr(err, "status_code", None) or getattr(err, "code", None)
+            is_retryable = (
+                status_code in {429, 500, 502, 503, 504}
+                or "rate limit" in text
+                or "unavailable" in text
+                or "internal" in text
+                or "overloaded" in text
+                or "deadline" in text
+            )
+            if (not is_retryable) or attempt == max_retries - 1:
+                raise
+            backoff_seconds = (1.2 * (2 ** attempt)) + random.uniform(0, 0.4)
+            time.sleep(backoff_seconds)
+
+    if response is None:
+        raise last_error
+
+    tool_input = None
+    text_parts = []
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        for part in (getattr(content, "parts", None) or []):
+            fc = getattr(part, "function_call", None)
+            if fc is not None and getattr(fc, "name", "") == "update_schedule":
+                args = getattr(fc, "args", None)
+                if args is None:
+                    tool_input = {}
+                elif isinstance(args, dict):
+                    tool_input = args
+                else:
+                    # protobuf MapComposite / Struct → dict
+                    try:
+                        tool_input = dict(args)
+                    except Exception:
+                        tool_input = {}
+                break
+            t = getattr(part, "text", None)
+            if t:
+                text_parts.append(t)
+
+    usage_meta = getattr(response, "usage_metadata", None)
+    usage = {
+        "input_tokens": getattr(usage_meta, "prompt_token_count", 0) if usage_meta else 0,
+        "output_tokens": getattr(usage_meta, "candidates_token_count", 0) if usage_meta else 0,
+        # Gemini 專屬欄位：implicit cache 命中量、reasoning tokens、tool 定義 tokens
+        "cached_tokens": getattr(usage_meta, "cached_content_token_count", 0) if usage_meta else 0,
+        "thoughts_tokens": getattr(usage_meta, "thoughts_token_count", 0) if usage_meta else 0,
+        "tool_use_prompt_tokens": getattr(usage_meta, "tool_use_prompt_token_count", 0) if usage_meta else 0,
+    }
+    return tool_input, "\n".join(text_parts).strip(), usage
+
+
 @functions_framework.http
 def generate_agent_schedule(request):
     origin = request.headers.get("Origin", "")
@@ -466,6 +646,18 @@ def generate_agent_schedule(request):
         elif provider == "openai_compatible":
             _t0 = time.perf_counter()
             tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
+            inference_seconds["value"] = time.perf_counter() - _t0
+        elif provider == "gemini":
+            if not api_key:
+                body = {"error": "API key not configured for gemini mode"}
+                _maybe_log(body, 500)
+                return add_cors_headers(cors_response(body, 500), origin)
+            _t0 = time.perf_counter()
+            tool_input, text_response, usage = _gemini_chat(
+                api_key, model, system_prompt, messages,
+                tool=schedule_tool,
+                current_schedule=current_schedule,
+            )
             inference_seconds["value"] = time.perf_counter() - _t0
         else:
             body = {"error": f"Unsupported provider: {provider}"}
