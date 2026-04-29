@@ -1265,7 +1265,7 @@ function validateScopedChanges({
     // 期望次數 = (參考週次中該人次數 / 參考週次總數) × 生成週次總數
     // 相對誤差 = |actual − expected| / expected，超過 FREQUENCY_PARITY_TOLERANCE 視為違反
     // 特例：expected = 0（該人在參考範圍內未服事）→ 不檢查（新加入的人允許自由排）
-    if (activeRules?.frequencyParity && referenceWeeks.length > 0 && generateWeeks.length > 0) {
+    if (activeRules?.frequencyParity) {
         const refSet = new Set(referenceWeeks);
         const genSet = new Set(generateWeeks);
 
@@ -1437,7 +1437,7 @@ export async function sendAgentRequest() {
     const generateWeeks = expandDateRange(genStart, genEnd, [..._existingDates, ..._futureCandidates]);
 
     // 生成週次：如果有不存在的，先在前端 + Firestore 建空週次後才打 API
-    if (generateWeeks.length > 0) {
+    if (scheduling) {
         const existingDates = new Set(scheduleData.map(r => r.date));
         const missing = generateWeeks.filter(d => !existingDates.has(d)).sort();
         if (missing.length > 0) {
@@ -1505,7 +1505,7 @@ export async function sendAgentRequest() {
     // 否則 LLM 看不到 generate 週次外的近鄰，無法判斷跨邊界違規（例：6/28 已排了某人，
     // LLM 在 7/5 又把同人放同位置 → 連續 2 週違規）
     let consecutiveContextWeeks = [];
-    if (scheduling && activeRules.consecutive && generateWeeks.length > 0) {
+    if (scheduling && activeRules.consecutive) {
         consecutiveContextWeeks = _computeConsecutiveContextDates(
             generateWeeks,
             activeRules.consecutiveWeeks,
@@ -1513,12 +1513,9 @@ export async function sendAgentRequest() {
         );
     }
 
-    // referenceWeeks 非空時，只把指定週次送給 LLM；同時保留 boundary context 週
-    const includedDates = new Set([
-        ...(referenceWeeks.length > 0 ? referenceWeeks : []),
-        ...consecutiveContextWeeks
-    ]);
-    const scheduleToSend = referenceWeeks.length > 0
+    // 排班模式：只送 referenceWeeks + boundary context 週；其他模式（chat）送完整班表
+    const includedDates = new Set([...referenceWeeks, ...consecutiveContextWeeks]);
+    const scheduleToSend = scheduling
         ? effectiveScheduleData.filter(r => includedDates.has(r.date))
         : effectiveScheduleData;
 
@@ -1546,8 +1543,8 @@ export async function sendAgentRequest() {
 
     if (csvTextToSend) payload.attachedCsvText = csvTextToSend;
 
-    // 生成週次非空：通知後端限縮輸出範圍並 suppress addWeeks/removeWeeks tool 欄位
-    if (generateWeeks.length > 0) {
+    // 排班模式：通知後端限縮輸出範圍並 suppress addWeeks/removeWeeks tool 欄位
+    if (scheduling) {
         payload.generateWeeks = generateWeeks;
         payload.suppressStructural = true;
     }
@@ -1678,7 +1675,7 @@ export async function sendAgentRequest() {
                 effectiveScheduleData,
                 result.scheduleData,
                 userServiceItems,
-                generateWeeks.length > 0 ? generateWeeks : null
+                scheduling ? generateWeeks : null
             );
             const validation = validateScopedChanges({
                 baseScheduleData: effectiveScheduleData,
@@ -1727,9 +1724,9 @@ export async function sendAgentRequest() {
                 removeServiceColumns: result.removeServiceColumns || []
             });
 
-            // 若啟用「生成週次」限縮，多一層前端護欄：LLM 多回的日期直接丟棄
+            // 排班模式：多一層前端護欄，LLM 多回的日期（generateWeeks 之外）直接丟棄
             let nextScheduleData = result.scheduleData;
-            if (generateWeeks.length > 0) {
+            if (scheduling) {
                 const allowed = new Set(generateWeeks);
                 nextScheduleData = nextScheduleData.filter(r => allowed.has(r.date));
             }
