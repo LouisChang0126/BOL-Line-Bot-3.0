@@ -8,7 +8,6 @@ Supports mode-based provider routing:
 
 import json
 import os
-import random
 import re
 import time
 from datetime import datetime, timezone
@@ -208,6 +207,7 @@ def _get_anthropic_client(api_key, api_base_url):
         client_kwargs = {
             "api_key": api_key,
             "timeout": REQUEST_TIMEOUT_SECONDS,
+            "max_retries": 3,  # SDK 內建 408/409/429/5xx exponential backoff，2 retries = 共 3 次嘗試
         }
         if base:
             client_kwargs["base_url"] = base
@@ -218,44 +218,20 @@ def _get_anthropic_client(api_key, api_base_url):
 
 def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base_url=""):
     """provider=anthropic 的呼叫；api_base_url 為空時用官方 endpoint，
-    填非空值（例：https://api.deepseek.com/anthropic）則改打對應的 Anthropic 相容服務。"""
+    填非空值（例：https://api.deepseek.com/anthropic）則改打對應的 Anthropic 相容服務。
+    暫時性錯誤（408/409/429/5xx、連線/超時）由 SDK 內建 retry 處理。"""
     tool = tool or SCHEDULE_TOOL
     client = _get_anthropic_client(api_key, api_base_url)
-    max_retries = 3
-    retryable_status_codes = {429, 500, 502, 503, 504, 529}
-    last_error = None
-    message = None
 
-    for attempt in range(max_retries):
-        try:
-            message = client.messages.create(
-                model=model,
-                max_tokens=MAX_OUTPUT_TOKENS,
-                # thinking={"type": "disabled"},
-                system=system_prompt,
-                tools=[tool],
-                tool_choice={"type": "auto"},
-                messages=messages,
-            )
-            break
-        except anthropic.APIError as err:
-            last_error = err
-            status_code = getattr(err, "status_code", None)
-            message_text = str(err).lower()
-            is_retryable = (
-                status_code in retryable_status_codes
-                or "internal server error" in message_text
-                or "temporarily unavailable" in message_text
-                or "overloaded" in message_text
-            )
-            if (not is_retryable) or attempt == max_retries - 1:
-                raise
-
-            backoff_seconds = (1.2 * (2 ** attempt)) + random.uniform(0, 0.4)
-            time.sleep(backoff_seconds)
-
-    if message is None:
-        raise last_error
+    message = client.messages.create(
+        model=model,
+        max_tokens=MAX_OUTPUT_TOKENS,
+        thinking={"type": "disabled"},
+        system=system_prompt,
+        tools=[tool],
+        tool_choice={"type": "auto"},
+        messages=messages,
+    )
 
     tool_input = None
     text_parts = []
@@ -287,7 +263,7 @@ def _get_openai_client(api_base_url, api_key):
             api_key=api_key or "EMPTY",  # SDK 要求非空字串
             base_url=api_base_url,
             timeout=REQUEST_TIMEOUT_SECONDS,
-            max_retries=1,  # SDK 內建 429/5xx exponential backoff
+            max_retries=3,  # SDK 內建 429/5xx exponential backoff
         )
         _OPENAI_CLIENT_CACHE[key] = client
     return client
@@ -355,7 +331,16 @@ def _get_gemini_client(api_key):
         )
     client = _GEMINI_CLIENT_CACHE.get(api_key)
     if client is None:
-        client = google_genai.Client(api_key=api_key)
+        # SDK 內建 retry：3 次嘗試（含初次），對 408/429/5xx 做 exponential backoff
+        http_options = google_genai_types.HttpOptions(
+            retry_options=google_genai_types.HttpRetryOptions(
+                attempts=3,
+                http_status_codes=[408, 429, 500, 502, 503, 504],
+                initial_delay=1.2,
+                exp_base=2.0,
+            )
+        )
+        client = google_genai.Client(api_key=api_key, http_options=http_options)
         _GEMINI_CLIENT_CACHE[api_key] = client
     return client
 
@@ -449,36 +434,12 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
         config_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=0)
     config = google_genai_types.GenerateContentConfig(**config_kwargs)
 
-    max_retries = 3
-    last_error = None
-    response = None
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config,
-            )
-            break
-        except Exception as err:  # genai SDK 沒有統一 base error class
-            last_error = err
-            text = str(err).lower()
-            status_code = getattr(err, "status_code", None) or getattr(err, "code", None)
-            is_retryable = (
-                status_code in {429, 500, 502, 503, 504}
-                or "rate limit" in text
-                or "unavailable" in text
-                or "internal" in text
-                or "overloaded" in text
-                or "deadline" in text
-            )
-            if (not is_retryable) or attempt == max_retries - 1:
-                raise
-            backoff_seconds = (1.2 * (2 ** attempt)) + random.uniform(0, 0.4)
-            time.sleep(backoff_seconds)
-
-    if response is None:
-        raise last_error
+    # 暫時性錯誤（408/429/5xx）由 SDK 內建 retry 處理，見 _get_gemini_client
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=config,
+    )
 
     tool_input = None
     text_parts = []

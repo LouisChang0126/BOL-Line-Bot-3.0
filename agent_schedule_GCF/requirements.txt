@@ -1,6 +1,6 @@
 functions-framework>=3.0.0
 anthropic>=0.42.0
 openai>=1.50.0
-google-genai>=0.8.0
+google-genai>=1.27.0
 flask>=3.0.0
 flask-cors>=5.0.0

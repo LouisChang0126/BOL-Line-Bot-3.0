@@ -1616,37 +1616,24 @@ export async function sendAgentRequest() {
     document.getElementById('agentSendBtn').disabled = true;
     showAgentLoading(selectedMode);
 
-    let retryCount = 0;
-    const MAX_RETRIES = 1;
     let apiErrorRetryCount = 0;
     const MAX_API_ERROR_RETRIES = 1;
-    let lastResult = null;
 
     // Prompt Engineering 實驗：排班模式才會被後端落檔。
-    // 同一個 sendAgentRequest 裡每次 fetch 共用 experimentStartTime，retry 計數隨迴圈累加。
+    // 同一個 sendAgentRequest 裡每次 fetch 共用 experimentStartTime；只有 API error retry 會增加計數。
     const pad2 = n => String(n).padStart(2, '0');
     const _now = new Date();
     const experimentStartTime = `${_now.getFullYear()}-${pad2(_now.getMonth() + 1)}-${pad2(_now.getDate())}_${pad2(_now.getHours())}-${pad2(_now.getMinutes())}-${pad2(_now.getSeconds())}`;
 
-    while (retryCount <= MAX_RETRIES) {
+    while (apiErrorRetryCount <= MAX_API_ERROR_RETRIES) {
         try {
-            const experimentRetryCount = retryCount + apiErrorRetryCount;
             const experimentFields = scheduling
-                ? { experimentStartTime, experimentRetryCount }
+                ? { experimentStartTime, experimentRetryCount: apiErrorRetryCount }
                 : {};
-            // retry 時的 base prompt：anon 模式用 payload.prompt（已英文）、非 anon 用原 prompt
-            const baseLLMPrompt = anonMaps ? payload.prompt : prompt;
-            const warningText = (lastResult?.warnings || [])
-                .map(w => anonMaps ? _anonText(w.message, anonMaps) : w.message)
-                .join('\n');
             const response = await fetch(AGENT_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(retryCount > 0 ? {
-                    ...payload,
-                    ...experimentFields,
-                    prompt: `${baseLLMPrompt}\n\n[系統提示] 上次產生的班表違反規則，請修正：\n${warningText}`
-                } : { ...payload, ...experimentFields })
+                body: JSON.stringify({ ...payload, ...experimentFields })
             });
 
             if (!response.ok) {
@@ -1689,14 +1676,6 @@ export async function sendAgentRequest() {
                 leaveByDate,
                 consecutiveContextWeeks
             });
-
-            if (!validation.valid && retryCount < MAX_RETRIES) {
-                lastResult = validation;
-                retryCount++;
-                extendProgressDuration(180); // 規則違反重試：再延長 3 分鐘
-                await new Promise(resolve => setTimeout(resolve, 500));
-                continue;
-            }
 
             hideAgentLoading();
 
