@@ -20,7 +20,7 @@ agent_schedule_GCF/
 ```json
 {
   "prompt": "請排 7 月班表",
-  "currentSchedule": "{scheduleData, serviceItems, nonUserColumns}",
+  "currentSchedule": "{scheduleData}",
   "selectedMode": "scheduling",
   "activeRules": {
     "consecutive": true,
@@ -35,6 +35,7 @@ agent_schedule_GCF/
 
   "generateWeeks": ["2026.07.05", "2026.07.12"],
   "suppressStructural": true,
+  "consecutiveContextWeeks": ["2026.06.28", "2026.07.19"],
 
   "leaveByDate": {
     "2026.07.05": ["阿明", "小華"],
@@ -49,15 +50,16 @@ agent_schedule_GCF/
 | 欄位 | 必填 | 說明 |
 |---|---|---|
 | `prompt` | ✅ | 使用者輸入；scheduling 模式可空（前端帶預設值送出） |
-| `currentSchedule` | ✅ | JSON 字串。前端可先依 `referenceWeeks` 過濾再送 |
+| `currentSchedule` | ✅ | JSON 字串，僅含 `{scheduleData}`；前端依參考週次 + boundary context 過濾後再送 |
 | `selectedMode` | ✅ | `edit_qa` 或 `scheduling` |
 | `activeRules` | scheduling 必填 | 五條規則旗標 + 兩個門檻數字 |
 | `chatHistory` | 選 | 模式隔離的對話歷史 |
 | `attachedCsvText` | 選（僅 edit_qa） | 上傳的 CSV 參考資料 |
 | `generateWeeks` | 選（scheduling） | 限定 LLM 只能修改/輸出這些日期 |
 | `suppressStructural` | 選（scheduling） | true 時把 tool schema 的 `addWeeks` / `removeWeeks` 拿掉 |
+| `consecutiveContextWeeks` | 選（scheduling） | 生成週次前/後 (N-1) 週的鄰近日期，僅供 LLM 跨邊界判斷連續週違規，read-only 不可修改 |
 | `leaveByDate` | 選（scheduling） | `{date: [names]}`，硬性禁止指定的人在指定日期被排班；違反 → 422 |
-| `experimentStartTime` / `experimentRetryCount` | 選 | 排班模式落檔到 `Prompt_Experiment/` 用，方便 prompt engineering 比對 |
+| `experimentStartTime` / `experimentRetryCount` | 選 | 排班模式落檔到 `Prompt_Experiment/` 用，方便 prompt engineering 比對；僅 API error retry 會增加計數 |
 
 ## 模式
 
@@ -87,7 +89,7 @@ agent_schedule_GCF/
 | `maxRoles` | bool | 單週每人服事項目上限 |
 | `maxRolesLimit` | int ≥ 1 | 上一條的上限 |
 | `serviceKnownPeople` | bool | 該服事只能用歷史出現過的人員 |
-| `frequencyParity` | bool | （**目前 UI 隱藏**）每人在生成範圍的服事頻率盡量符合參考範圍的比例。容忍度 ±30%（寫死於程式碼，見 `FREQUENCY_PARITY_TOLERANCE`） |
+| `frequencyParity` | bool | （**目前 UI 隱藏**）每人在生成範圍的服事頻率盡量符合參考範圍的比例。容忍度 ±50%（寫死於程式碼，見 `FREQUENCY_PARITY_TOLERANCE`） |
 
 ## Schema 驗證與護欄
 
@@ -143,8 +145,9 @@ ALLOWED_ORIGINS = [
 
 ## 支援的 provider
 
-- `anthropic`
-- `openai_compatible`（例如 `https://api.openai.com/v1`）
+- `anthropic`（Claude；SDK 內建 retry，3 次嘗試）
+- `openai_compatible`（例如 `https://api.openai.com/v1`；SDK 內建 retry）
+- `gemini`（google-genai；SDK 內建 retry，需 `google-genai>=1.27.0`）
 
 ## 回應格式
 

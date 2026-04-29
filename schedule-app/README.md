@@ -106,7 +106,7 @@
   - 「+ 新增請假」可動態加列；超出可視範圍自動 scroll
   - 送出時驗證：每列要嘛日期 + 人員都填、要嘛兩格都空（半空狀態會擋下並顯示「第 N 列：日期/人員 未選」）
   - 同日期多列會自動合併人員清單；後端在 system prompt 注入 `Person Unavailability` 硬性規則 + `_validate_tool_input` 422 雙重把關
-- ✅ **Rule Engine**：自動檢查連續排班、單週服事上限、僅用歷史人員、請假衝突等規則，不合規時自動重試（最多 1 次規則違反 + 1 次 API 錯誤）
+- ✅ **Rule Engine**：自動檢查連續排班、單週服事上限、僅用歷史人員、請假衝突等規則，違規時把警告逐條顯示在聊天區供使用者人工檢視（不再自動重打 API）；連線/API 錯誤仍會自動重試 1 次
   - prompt 為「額外指令」，可空著只用 UI 設定送出
 - 🔒 **樂觀鎖（_version）**：所有班表寫入透過 Firestore transaction + version compare-and-set，多人同時編輯時自動偵測衝突並 alert 重新整理
 - 🔍 **Review UI**：差異高亮顯示（綠色新增、紅色移除、黃色修改），支援逐格或全部 Accept/Reject

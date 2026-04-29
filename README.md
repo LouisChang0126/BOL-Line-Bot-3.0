@@ -18,7 +18,7 @@ graph TD
     WebApp -->|AI 排班/問答請求| AgentGCF[AI Agent 後端<br/>Google Cloud Function]
     
     %% AI 整合
-    AgentGCF -->|API 呼叫| LLM[Anthropic / OpenAI API]
+    AgentGCF -->|API 呼叫| LLM[Anthropic / OpenAI / Gemini API]
     
     %% 資料庫操作
     LineBotGCF <-->|讀寫班表、使用者、調班紀錄| Firestore[(Firebase Firestore)]
@@ -47,7 +47,7 @@ graph TD
   * 讓使用者與管理員能夠透過視覺化介面瀏覽與編輯班表，並串接 Firestore 與後端 Agent API。
 * **AI 排班助理 (`agent_schedule_GCF`)**：
   * 基於 Google Cloud Function 建立的 HTTP API。
-  * 串接 Anthropic 或相容於 OpenAI 的語言模型，可根據現有班表結構、CSV 人員資料與排班規則（如：避免連續服事、限制每週服事次數等），自動生成或修改排班 JSON 資料。
+  * 串接 Anthropic、OpenAI 相容服務或 Google Gemini，可根據現有班表結構、CSV 人員資料與排班規則（如：避免連續服事、限制每週服事次數等），自動生成或修改排班 JSON 資料。
 * **資料庫 (Firebase Firestore)**：
   * 作為系統唯一的資料來源，儲存包括使用者資料 (`users`)、全域設定 (`_config`)、調班狀態紀錄 (`_shift`) 以及各場崇拜的詳細班表。
 
