@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import anthropic
 import functions_framework
-import requests
+import openai
 from flask import jsonify, make_response
 
 MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
@@ -187,17 +187,32 @@ def _build_messages(chat_history, prompt):
     return messages
 
 
+# Module-level Anthropic client cache：warm container 下重用 httpx Client，
+# 第二次以後的呼叫可省 TCP/TLS handshake（~50–200 ms）。
+_ANTHROPIC_CLIENT_CACHE = {}
+
+
+def _get_anthropic_client(api_key, api_base_url):
+    base = (api_base_url or "").strip()
+    key = (api_key, base)
+    client = _ANTHROPIC_CLIENT_CACHE.get(key)
+    if client is None:
+        client_kwargs = {
+            "api_key": api_key,
+            "timeout": REQUEST_TIMEOUT_SECONDS,
+        }
+        if base:
+            client_kwargs["base_url"] = base
+        client = anthropic.Anthropic(**client_kwargs)
+        _ANTHROPIC_CLIENT_CACHE[key] = client
+    return client
+
+
 def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base_url=""):
     """provider=anthropic 的呼叫；api_base_url 為空時用官方 endpoint，
     填非空值（例：https://api.deepseek.com/anthropic）則改打對應的 Anthropic 相容服務。"""
     tool = tool or SCHEDULE_TOOL
-    client_kwargs = {
-        "api_key": api_key,
-        "timeout": REQUEST_TIMEOUT_SECONDS,
-    }
-    if api_base_url and api_base_url.strip():
-        client_kwargs["base_url"] = api_base_url.strip()
-    client = anthropic.Anthropic(**client_kwargs)
+    client = _get_anthropic_client(api_key, api_base_url)
     max_retries = 3
     retryable_status_codes = {429, 500, 502, 503, 504, 529}
     last_error = None
@@ -208,6 +223,7 @@ def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base
             message = client.messages.create(
                 model=model,
                 max_tokens=MAX_OUTPUT_TOKENS,
+                # thinking={"type": "disabled"},
                 system=system_prompt,
                 tools=[tool],
                 tool_choice={"type": "auto"},
@@ -250,21 +266,37 @@ def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base
     return tool_input, "\n".join([t for t in text_parts if t]).strip(), usage
 
 
+# Module-level OpenAI client cache：warm container 下重用同一個 httpx Client，
+# 第二次以後的呼叫可省 TCP/TLS handshake（~50–200 ms）。
+_OPENAI_CLIENT_CACHE = {}
+
+
+def _get_openai_client(api_base_url, api_key):
+    key = (api_base_url, api_key or "")
+    client = _OPENAI_CLIENT_CACHE.get(key)
+    if client is None:
+        client = openai.OpenAI(
+            api_key=api_key or "EMPTY",  # SDK 要求非空字串
+            base_url=api_base_url,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            max_retries=1,  # SDK 內建 429/5xx exponential backoff
+        )
+        _OPENAI_CLIENT_CACHE[key] = client
+    return client
+
+
 def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=None):
     tool = tool or SCHEDULE_TOOL
     if not api_base_url:
         raise ValueError("api_base_url is required for openai_compatible provider")
 
-    endpoint = f"{api_base_url.rstrip('/')}/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
+    client = _get_openai_client(api_base_url, api_key)
     oa_messages = [{"role": "system", "content": system_prompt}] + messages
-    payload = {
-        "model": model,
-        "messages": oa_messages,
-        "tools": [{
+
+    completion = client.chat.completions.create(
+        model=model,
+        messages=oa_messages,
+        tools=[{
             "type": "function",
             "function": {
                 "name": tool["name"],
@@ -272,31 +304,19 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
                 "parameters": tool["input_schema"],
             },
         }],
-        "tool_choice": "auto",
-    }
-
-    response = requests.post(
-        endpoint,
-        headers=headers,
-        json=payload,
-        timeout=REQUEST_TIMEOUT_SECONDS,
+        tool_choice="auto",
     )
-    if response.status_code >= 400:
-        raise RuntimeError(f"OpenAI-compatible API error ({response.status_code}): {response.text}")
 
-    data = response.json()
-    choices = data.get("choices") or []
-    if not choices:
+    if not completion.choices:
         raise RuntimeError("OpenAI-compatible API returned no choices")
 
-    message = (choices[0] or {}).get("message", {})
-    tool_calls = message.get("tool_calls") or []
+    message = completion.choices[0].message
     tool_input = None
-    for call in tool_calls:
-        fn = (call or {}).get("function") or {}
-        if fn.get("name") != "update_schedule":
+    for call in (message.tool_calls or []):
+        fn = call.function
+        if fn.name != "update_schedule":
             continue
-        raw_args = fn.get("arguments", "{}")
+        raw_args = fn.arguments
         if isinstance(raw_args, str):
             try:
                 tool_input = json.loads(raw_args or "{}")
@@ -308,12 +328,12 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
             tool_input = {}
         break
 
-    usage_raw = data.get("usage") or {}
+    usage_obj = completion.usage
     usage = {
-        "input_tokens": usage_raw.get("prompt_tokens", 0),
-        "output_tokens": usage_raw.get("completion_tokens", 0),
+        "input_tokens": getattr(usage_obj, "prompt_tokens", 0) if usage_obj else 0,
+        "output_tokens": getattr(usage_obj, "completion_tokens", 0) if usage_obj else 0,
     }
-    return tool_input, (message.get("content") or "").strip(), usage
+    return tool_input, (message.content or "").strip(), usage
 
 
 @functions_framework.http
@@ -413,6 +433,8 @@ def generate_agent_schedule(request):
     )
     messages = _build_messages(chat_history, prompt)
 
+    inference_seconds = {"value": None}
+
     def _maybe_log(body, status):
         if mode != EXPERIMENT_LOG_MODE:
             return
@@ -427,6 +449,7 @@ def generate_agent_schedule(request):
                 messages=messages,
                 response_body=body,
                 status_code=status,
+                inference_seconds=inference_seconds["value"],
             )
         except Exception as log_err:
             print(f"[experiment-log] write failed: {log_err}")
@@ -437,9 +460,13 @@ def generate_agent_schedule(request):
                 body = {"error": "API key not configured for anthropic mode"}
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
+            _t0 = time.perf_counter()
             tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url)
+            inference_seconds["value"] = time.perf_counter() - _t0
         elif provider == "openai_compatible":
+            _t0 = time.perf_counter()
             tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
+            inference_seconds["value"] = time.perf_counter() - _t0
         else:
             body = {"error": f"Unsupported provider: {provider}"}
             _maybe_log(body, 500)
@@ -491,12 +518,17 @@ def generate_agent_schedule(request):
             "provider": provider,
             "model": model,
             "usage": usage,
+            "inferenceSeconds": inference_seconds["value"],
         }
         _maybe_log(body, 200)
         return add_cors_headers(cors_response(body), origin)
 
     except anthropic.APIError as e:
         body = {"error": f"Claude API error: {str(e)}"}
+        _maybe_log(body, 502)
+        return add_cors_headers(cors_response(body, 502), origin)
+    except openai.APIError as e:
+        body = {"error": f"OpenAI-compatible API error: {str(e)}"}
         _maybe_log(body, 502)
         return add_cors_headers(cors_response(body, 502), origin)
     except Exception as e:
@@ -778,9 +810,11 @@ def _sanitize_filename_part(value, fallback):
 
 
 def _log_experiment(start_time, retry_count, mode, provider, model,
-                    system_prompt, messages, response_body, status_code):
+                    system_prompt, messages, response_body, status_code,
+                    inference_seconds=None):
     """排班模式每次 HTTP 呼叫寫一份純文字 log：{start-time}-{retry}.txt。
     start_time 為空時會用 server 當下時間做後備（方便早期還沒接 client 欄位的情境）。
+    inference_seconds 為實際打 LLM API 的 wall-clock 秒數（含重試）；None 表示尚未量到。
     """
     if not EXPERIMENT_LOG_DIR:
         return
@@ -816,11 +850,14 @@ def _log_experiment(start_time, retry_count, mode, provider, model,
     lines.append(f"wall_clock_utc:  {datetime.now(timezone.utc).isoformat()}")
     lines.append(f"start_time:      {start_time or '(none, fell back to server time)'}")
     lines.append(f"retry_count:     {retry_count}")
-    lines.append(f"time_delay:      {datetime.now(timezone.utc) - datetime.fromisoformat(start_time) if start_time else '(n/a)'}")
     lines.append(f"mode:            {mode}")
     lines.append(f"provider:        {provider}")
     lines.append(f"model:           {model}")
     lines.append(f"status_code:     {status_code}")
+    if inference_seconds is None:
+        lines.append("inference_time:  (n/a)")
+    else:
+        lines.append(f"inference_time:  {inference_seconds:.3f} s")
     lines.append("")
     lines.append("--- System Prompt ---")
     lines.append(system_prompt or "")

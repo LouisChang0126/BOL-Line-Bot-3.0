@@ -862,7 +862,7 @@ function markdownToHtml(text = '') {
     return html.join('');
 }
 
-function appendChatMessageNode(text, role) {
+function appendChatMessageNode(text, role, options = {}) {
     const chatArea = document.getElementById('agentChatArea');
     if (!chatArea) return;
     const welcome = chatArea.querySelector('.agent-chat-welcome');
@@ -875,7 +875,21 @@ function appendChatMessageNode(text, role) {
     } else {
         msg.textContent = text;
     }
-    chatArea.appendChild(msg);
+
+    // 排班模式完成時，在對話框「外面」右下角顯示耗時 badge
+    const secs = Number(options.inferenceSeconds);
+    if (role === 'assistant' && Number.isFinite(secs) && secs > 0) {
+        const wrap = document.createElement('div');
+        wrap.className = 'agent-msg-wrap assistant';
+        wrap.appendChild(msg);
+        const badge = document.createElement('span');
+        badge.className = 'agent-msg-timing';
+        badge.textContent = `${secs.toFixed(1)} 秒`;
+        wrap.appendChild(badge);
+        chatArea.appendChild(wrap);
+    } else {
+        chatArea.appendChild(msg);
+    }
     chatArea.scrollTop = chatArea.scrollHeight;
 }
 
@@ -885,7 +899,7 @@ export function addChatMessage(text, role = 'user', options = {}) {
         getModeHistory(mode).push({ role, content: text });
     }
     if (mode === getSelectedMode()) {
-        appendChatMessageNode(text, role);
+        appendChatMessageNode(text, role, options);
     }
 }
 
@@ -1636,13 +1650,18 @@ export async function sendAgentRequest() {
 
             hideAgentLoading();
 
+            // 排班模式才在 explanation 右下角顯示推論耗時
+            const timingOpts = (selectedMode === 'scheduling' && Number.isFinite(Number(result.inferenceSeconds)))
+                ? { inferenceSeconds: Number(result.inferenceSeconds) }
+                : {};
+
             if (!validation.valid) {
                 // 如果有警告，優先顯示警告資訊
-                addChatMessage((result.explanation || '已產生排班建議') + `（但有 ${validation.warnings.length} 項規則警告）`, 'assistant', { mode: selectedMode });
+                addChatMessage((result.explanation || '已產生排班建議') + `（但有 ${validation.warnings.length} 項規則警告）`, 'assistant', { mode: selectedMode, ...timingOpts });
                 validation.warnings.forEach(w => addChatMessage(w.message, 'error', { mode: selectedMode }));
             } else {
                 // 有 explanation 就顯示 explanation，否則顯示預設字眼
-                addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant', { mode: selectedMode });
+                addChatMessage(result.explanation || '已產生排班建議，請檢視表格中的變更。', 'assistant', { mode: selectedMode, ...timingOpts });
             }
 
             // --- 處理結構變更 (Structural Changes) ---
