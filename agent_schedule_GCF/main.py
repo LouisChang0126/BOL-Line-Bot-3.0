@@ -207,7 +207,7 @@ def _get_anthropic_client(api_key, api_base_url):
         client_kwargs = {
             "api_key": api_key,
             "timeout": REQUEST_TIMEOUT_SECONDS,
-            "max_retries": 3,  # SDK 內建 408/409/429/5xx exponential backoff，2 retries = 共 3 次嘗試
+            "max_retries": 2,  # SDK 內建 408/409/429/5xx exponential backoff，2 retries = 共 3 次嘗試
         }
         if base:
             client_kwargs["base_url"] = base
@@ -869,16 +869,16 @@ def _validate_tool_input(tool_input, rules, leave_by_date=None):
         return False, "addWeeks/removeWeeks must be integers"
     if add_weeks < 0 or remove_weeks < 0:
         return False, "addWeeks/removeWeeks must be >= 0"
-    if add_weeks > int(rules.get("max_add_weeks", 12)):
+    if add_weeks > int(rules.get("max_add_weeks", 26)):
         return False, f"addWeeks={add_weeks} exceeds limit {rules.get('max_add_weeks')}"
-    if remove_weeks > int(rules.get("max_remove_weeks", 4)):
+    if remove_weeks > int(rules.get("max_remove_weeks", 26)):
         return False, f"removeWeeks={remove_weeks} exceeds limit {rules.get('max_remove_weeks')}"
 
     if not isinstance(add_cols, list) or not isinstance(remove_cols, list):
         return False, "addServiceColumns/removeServiceColumns must be arrays"
-    if len(add_cols) > int(rules.get("max_add_service_columns", 5)):
+    if len(add_cols) > int(rules.get("max_add_service_columns", 15)):
         return False, f"addServiceColumns size {len(add_cols)} exceeds limit"
-    if len(remove_cols) > int(rules.get("max_remove_service_columns", 3)):
+    if len(remove_cols) > int(rules.get("max_remove_service_columns", 15)):
         return False, f"removeServiceColumns size {len(remove_cols)} exceeds limit"
 
     max_col_name = int(rules.get("max_service_column_name_length", 30))
@@ -891,17 +891,17 @@ def _validate_tool_input(tool_input, rules, leave_by_date=None):
     # scheduleData
     if not isinstance(schedule_data, list):
         return False, "scheduleData must be an array"
-    max_rows = int(rules.get("max_schedule_rows", 120))
+    max_rows = int(rules.get("max_schedule_rows", 108))
     if len(schedule_data) > max_rows:
         return False, f"scheduleData has {len(schedule_data)} rows (limit {max_rows})"
 
-    date_re = re.compile(rules.get("date_regex", r"^\d{4}[-.]\d{2}[-.]\d{2}$"))
-    max_cols_per_row = int(rules.get("max_service_columns_per_row", 30))
-    max_persons = int(rules.get("max_persons_per_cell", 10))
-    max_person_len = int(rules.get("max_person_name_length", 20))
+    date_re = re.compile(rules.get("date_regex", r"^\d{4}\.\d{2}\.\d{2}$"))
+    max_cols_per_row = int(rules.get("max_service_columns_per_row", 20))
+    max_persons = int(rules.get("max_persons_per_cell", 5))
+    max_person_len = int(rules.get("max_person_name_length", 10))
 
-    # 這些是內部 metadata，不是服事欄位；LLM 萬一回傳也不視為錯誤
-    RESERVED_ROW_KEYS = {"date", "_version"}
+    # date 是 row 的 key 識別欄位，不是服事欄位；其他都當服事欄位驗證
+    RESERVED_ROW_KEYS = {"date"}
 
     # 請假名單（dict[str, set[str]]）；空 dict 等同停用本檢查
     leave_sets = {}

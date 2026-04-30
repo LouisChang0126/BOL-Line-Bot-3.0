@@ -5,3 +5,4 @@ chatBotConfig.py
 agentConfig.py
 serviceAccount.json
 Prompt_Experiment
+__playwright_test

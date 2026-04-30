@@ -158,38 +158,32 @@ const FREQUENCY_PARITY_TOLERANCE = 0.50;
 let _leaveRows = [{ date: '', person: '' }];
 
 // =====================================================
-// 實驗：把所有「服事名稱」「人員名稱」匿名化成預設英文池後再送給 LLM
+// 實驗：把人員名稱匿名化成預設英文池後再送給 LLM
 // =====================================================
 // True  → 排班模式送 LLM 前，把 currentSchedule / leaveByDate / prompt / warning
-//         內所有中文服事名 / 人名替換成 JOB_TITLES / ENGLISH_NAMES 內的英文，
-//         response 解回來再 reverse-map 回原始中文。
+//         內所有中文人名替換成 ENGLISH_NAMES 內的英文，response 解回來再 reverse-map 回原始中文。
+//         服事名稱保留中文（讓 LLM 看得到 schema 上下文，不會誤把欄位 key 當人名）。
 // False → 沿用原本中文流程。
-// 工程師可隨時切換來做 A/B 對照（搭配 USE_CSV_SCHEDULE）。
 const USE_ANONYMIZATION = false;
 
-const JOB_TITLES = [
-    "worship_leader", "music_director", "lead_vocalist", "support_vocalist",
-    "drummer", "bassist", "keyboardist", "sound_engineer", "slide_operator",
-    "mc", "intercessor", "prophet", "usher_a", "usher_b", "offering_collector",
-    "prayer_leader", "communion_server", "scripture_reader", "announcement_lead",
-    "hospitality", "security", "video_director", "lighting", "livestream", "setup_crew"
-];  // 25
-
+// 常見且省 token 的英文名（多數英文 tokenizer 一個 token就能 cover）
 const ENGLISH_NAMES = [
-    "Adam", "Brian", "Charles", "David", "Edward", "Frank", "George", "Henry",
-    "Ian", "Jack", "Kevin", "Liam", "Mark", "Nathan", "Oliver", "Patrick",
-    "Quentin", "Robert", "Samuel", "Thomas", "Ulysses", "Victor", "William",
-    "Xavier", "Yann", "Zachary", "Aaron", "Brendan", "Carlos", "Derek",
-    "Ethan", "Felix", "Gabriel", "Hugo", "Isaac", "Jason", "Kyle", "Leo",
-    "Marcus", "Nolan", "Oscar", "Peter", "Riley", "Simon", "Tyler", "Vincent",
-    "Walter", "Xander", "Yuri", "Zane",
-    "Anna", "Bella", "Catherine", "Diana", "Emily", "Fiona", "Grace",
-    "Hannah", "Iris", "Jasmine", "Kate", "Laura", "Maria", "Nina", "Olivia",
-    "Paula", "Quinn", "Rachel", "Sophia", "Tina", "Uma", "Vivian", "Wendy",
-    "Xena", "Yara", "Zoe", "Abigail", "Beatrice", "Carolyn", "Daphne",
-    "Eliza", "Faith", "Gemma", "Helen", "Ivy", "Julia", "Kelly", "Lily",
-    "Megan", "Nora", "Opal", "Phoebe", "Rose", "Stella", "Tessa", "Ursula",
-    "Vera", "Willa", "Yvonne", "Zara"
+    // 男 50
+    "Adam", "Andrew", "Ben", "Bill", "Bob", "Brad", "Brian", "Chris",
+    "Daniel", "David", "Dennis", "Donald", "Edward", "Eric", "Frank", "Gary",
+    "George", "Greg", "Jack", "Jacob", "James", "Jason", "Jerry", "Joe",
+    "John", "Joseph", "Joshua", "Justin", "Kevin", "Lee", "Mark", "Matthew",
+    "Michael", "Mike", "Paul", "Pete", "Richard", "Robert", "Ronald", "Ryan",
+    "Sam", "Samuel", "Scott", "Sean", "Steven", "Thomas", "Tim", "Tom",
+    "Tony", "William",
+    // 女 50
+    "Alice", "Amy", "Anna", "Anne", "Beth", "Betty", "Brenda", "Carol",
+    "Diana", "Donna", "Ellen", "Emily", "Emma", "Erin", "Eve", "Grace",
+    "Hannah", "Helen", "Iris", "Ivy", "Jane", "Janet", "Joan", "Julia",
+    "Karen", "Kate", "Kim", "Laura", "Lily", "Linda", "Lisa", "Maria",
+    "Mary", "Megan", "Mia", "Nancy", "Nicole", "Olivia", "Pam", "Rachel",
+    "Rose", "Ruth", "Sandra", "Sarah", "Sophia", "Sue", "Susan", "Tina",
+    "Tracy", "Wendy"
 ];  // 100
 
 function getFutureSundayCandidates(latestExistingDate, count = FUTURE_SUNDAY_COUNT) {
@@ -224,7 +218,7 @@ function _setSelectOptions(selectId, dateValues, placeholder) {
 
 function _isWeekNonEmpty(row) {
     return Object.entries(row).some(([k, v]) => {
-        if (k === 'date' || k === '_version') return false;
+        if (k === 'date') return false;
         if (Array.isArray(v)) return v.length > 0;
         if (typeof v === 'string') return v.trim().length > 0;
         return false;
@@ -387,7 +381,7 @@ function _collectAllPersons(scheduleData, leaveByDate) {
     const set = new Set();
     (scheduleData || []).forEach(row => {
         Object.entries(row).forEach(([k, v]) => {
-            if (k === 'date' || k === '_version') return;
+            if (k === 'date') return;
             if (Array.isArray(v)) v.forEach(n => {
                 if (typeof n === 'string' && n.trim()) set.add(n);
             });
@@ -401,43 +395,31 @@ function _collectAllPersons(scheduleData, leaveByDate) {
     return [...set];
 }
 
-// 建立 4 張 map：service ↔ english、person ↔ english。排序後按 index 配池避免隨機性。
+// 建立 person ↔ english 的雙向 map。排序後按 index 配池避免隨機性。
 // extraPersons：把 allPersonNames 等「全域」人名也納入，避免 user_request 提到 referenceWeeks
 // 範圍外的人名而沒被翻譯。
-function _buildAnonMap(scheduleData, serviceItems, leaveByDate, extraPersons = []) {
-    const services = [...new Set(serviceItems || [])].sort();
+function _buildAnonMap(scheduleData, leaveByDate, extraPersons = []) {
     const localPersons = _collectAllPersons(scheduleData, leaveByDate);
     const extras = (extraPersons || []).filter(n => typeof n === 'string' && n.trim());
     const persons = [...new Set([...localPersons, ...extras])].sort();
-    if (services.length > JOB_TITLES.length) {
-        throw new Error(`服事項目數 (${services.length}) 超過匿名池容量 (${JOB_TITLES.length})`);
-    }
     if (persons.length > ENGLISH_NAMES.length) {
         throw new Error(`人員數 (${persons.length}) 超過匿名池容量 (${ENGLISH_NAMES.length})`);
     }
-    const serviceMap = new Map();
-    const reverseService = new Map();
-    services.forEach((s, i) => {
-        serviceMap.set(s, JOB_TITLES[i]);
-        reverseService.set(JOB_TITLES[i], s);
-    });
     const personMap = new Map();
     const reversePerson = new Map();
     persons.forEach((p, i) => {
         personMap.set(p, ENGLISH_NAMES[i]);
         reversePerson.set(ENGLISH_NAMES[i], p);
     });
-    return { serviceMap, personMap, reverseService, reversePerson };
+    return { personMap, reversePerson };
 }
 
 // 對自由文字（prompt / warning）做 longest-first 字串替換
 function _anonText(text, maps) {
     if (!text || !maps) return text;
-    const pairs = [
-        ...maps.personMap.entries(),
-        ...maps.serviceMap.entries(),
-    ].filter(([k]) => k && String(k).length > 0)
-     .sort((a, b) => String(b[0]).length - String(a[0]).length);
+    const pairs = [...maps.personMap.entries()]
+        .filter(([k]) => k && String(k).length > 0)
+        .sort((a, b) => String(b[0]).length - String(a[0]).length);
     let out = String(text);
     for (const [from, to] of pairs) {
         out = out.split(from).join(to);
@@ -445,14 +427,12 @@ function _anonText(text, maps) {
     return out;
 }
 
-// 反向：把 LLM 回應內的英文（explanation / answer）還原成中文
+// 反向：把 LLM 回應內的英文人名還原成中文
 function _deanonText(text, maps) {
     if (!text || !maps) return text;
-    const pairs = [
-        ...maps.reversePerson.entries(),
-        ...maps.reverseService.entries(),
-    ].filter(([k]) => k && String(k).length > 0)
-     .sort((a, b) => String(b[0]).length - String(a[0]).length);
+    const pairs = [...maps.reversePerson.entries()]
+        .filter(([k]) => k && String(k).length > 0)
+        .sort((a, b) => String(b[0]).length - String(a[0]).length);
     let out = String(text);
     for (const [from, to] of pairs) {
         out = out.split(from).join(to);
@@ -460,26 +440,23 @@ function _deanonText(text, maps) {
     return out;
 }
 
-// 把前端要送 LLM 的 currentSchedule JSON 字串，整份替換成英文
+// 把前端要送 LLM 的 currentSchedule JSON 字串，把 cell 內人名替換成英文（服事名 key 維持中文）
 function _anonymizeCurrentSchedule(currentScheduleStr, maps) {
     let parsed;
     try { parsed = JSON.parse(currentScheduleStr); } catch (_) { return currentScheduleStr; }
     const sd = (parsed.scheduleData || []).map(row => {
         const newRow = { date: row.date };
         Object.entries(row).forEach(([k, v]) => {
-            if (k === 'date' || k === '_version') return;
-            const newK = maps.serviceMap.get(k) || k;
+            if (k === 'date') return;
             if (Array.isArray(v)) {
-                newRow[newK] = v.map(n => maps.personMap.get(n) || n);
+                newRow[k] = v.map(n => maps.personMap.get(n) || n);
             } else {
-                newRow[newK] = v;
+                newRow[k] = v;
             }
         });
         return newRow;
     });
-    const si = (parsed.serviceItems || []).map(s => maps.serviceMap.get(s) || s);
-    const nu = (parsed.nonUserColumns || []).map(s => maps.serviceMap.get(s) || s);
-    return JSON.stringify({ ...parsed, scheduleData: sd, serviceItems: si, nonUserColumns: nu });
+    return JSON.stringify({ ...parsed, scheduleData: sd });
 }
 
 function _anonymizeLeaveByDate(leaveByDate, maps) {
@@ -490,7 +467,7 @@ function _anonymizeLeaveByDate(leaveByDate, maps) {
     return out;
 }
 
-// 把 LLM 回傳的 result 轉回中文。LLM 若產出池外的英文（hallucination），保持原樣讓 validator 攔截。
+// 把 LLM 回傳的 result 中的英文人名轉回中文。服事名 key 一直是中文，不需要還原。
 function _deanonymizeResult(result, maps) {
     if (!result || typeof result !== 'object') return result;
     if (Array.isArray(result.scheduleData)) {
@@ -498,23 +475,16 @@ function _deanonymizeResult(result, maps) {
             const newRow = { date: row.date };
             Object.entries(row).forEach(([k, v]) => {
                 if (k === 'date') return;
-                const origK = maps.reverseService.get(k) || k;
                 if (Array.isArray(v)) {
-                    newRow[origK] = v.map(n => maps.reversePerson.get(n) || n);
+                    newRow[k] = v.map(n => maps.reversePerson.get(n) || n);
                 } else {
-                    newRow[origK] = v;
+                    newRow[k] = v;
                 }
             });
             return newRow;
         });
     }
-    if (Array.isArray(result.addServiceColumns)) {
-        result.addServiceColumns = result.addServiceColumns.map(s => maps.reverseService.get(s) || s);
-    }
-    if (Array.isArray(result.removeServiceColumns)) {
-        result.removeServiceColumns = result.removeServiceColumns.map(s => maps.reverseService.get(s) || s);
-    }
-    // LLM 寫的自由文字（explanation / answer）也可能含英文人名 / 服事名 → 字串替換還原
+    // LLM 寫的自由文字（explanation / answer）也可能含英文人名 → 字串替換還原
     if (typeof result.explanation === 'string') {
         result.explanation = _deanonText(result.explanation, maps);
     }
@@ -1446,7 +1416,7 @@ export async function sendAgentRequest() {
                 for (const dateStr of missing) {
                     const blank = {};
                     serviceItems.forEach(item => { blank[item] = []; });
-                    scheduleData.push({ date: dateStr, ...blank, _version: 0 });
+                    scheduleData.push({ date: dateStr, ...blank });
                     await saveSchedule(dateStr, blank);
                 }
                 scheduleData.sort((a, b) => a.date.localeCompare(b.date));
@@ -1477,11 +1447,7 @@ export async function sendAgentRequest() {
     });
 
     // 複製目前的 scheduleData，若有 pendingChanges 則先行合併，讓 LLM 基於最新的「草稿」繼續修改
-    // 剝除內部 metadata（_version 是樂觀鎖用，不該給 LLM 看見否則會被當作欄位回填）
-    let effectiveScheduleData = JSON.parse(JSON.stringify(scheduleData)).map(row => {
-        const { _version, ...rest } = row;
-        return rest;
-    });
+    let effectiveScheduleData = JSON.parse(JSON.stringify(scheduleData));
     if (pendingAgentChanges) {
         Object.entries(pendingAgentChanges).forEach(([date, services]) => {
             const row = effectiveScheduleData.find(r => r.date === date);
@@ -1589,7 +1555,6 @@ export async function sendAgentRequest() {
             // 也把 allPersonNames 帶進來：避免 user_request 提到 reference 範圍外的人名沒被翻
             anonMaps = _buildAnonMap(
                 csParsed.scheduleData || [],
-                csParsed.serviceItems || serviceItems,
                 payload.leaveByDate || {},
                 Array.from(allPersonNames || [])
             );
@@ -1785,27 +1750,31 @@ export async function acceptCellChange(date, service) {
     const row = scheduleData.find(r => r.date === date);
     if (!row) return;
 
-    const oldValue = Array.isArray(row[service]) ? [...row[service]] : [];
-    row[service] = [...change.new];
+    // 不在 await 前動 row[service]，等寫入成功才 commit（saveSchedule 失敗時記憶體不殘留幻影 edit）
+    const newArr = [...change.new];
+    const data = { ...row, [service]: newArr };
+    delete data.date;
 
     try {
-        const data = { ...row };
-        delete data.date;
         await saveSchedule(row.date, data);
-        pushHistory();
-        updateEditDifference('ai');
-
-        delete pendingAgentChanges[date][service];
-        if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
-
-        checkPendingComplete();
-        renderTable();
     } catch (error) {
-        row[service] = oldValue;
-        console.error('acceptCellChange failed:', error);
-        addChatMessage(`單格儲存失敗：${error.message}`, 'error');
-        renderTable();
+        // 分頁鎖定 → modal 已顯示，靜默 swallow
+        if (!error || error.message !== 'TAB_LOCKED') {
+            console.error('acceptCellChange failed:', error);
+            addChatMessage(`單格儲存失敗：${error && error.message ? error.message : error}`, 'error');
+        }
+        return;
     }
+
+    row[service] = newArr;
+    pushHistory();
+    updateEditDifference('ai');
+
+    delete pendingAgentChanges[date][service];
+    if (Object.keys(pendingAgentChanges[date]).length === 0) delete pendingAgentChanges[date];
+
+    checkPendingComplete();
+    renderTable();
 }
 
 // Reject 單格
@@ -1823,33 +1792,59 @@ export function rejectCellChange(date, service) {
 export async function acceptAllChanges() {
     if (!pendingAgentChanges) return;
 
-    try {
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
+    // 逐筆呼叫 saveSchedule，受分頁鎖保護；若 LLM 回應到使用者按 Accept 之間分頁被搶走，
+    // 第一個 saveSchedule 就會拋 TAB_LOCKED，後續 iteration 沒意義。其他 save error
+    // （網路、權限）則保留那筆 pending 給使用者重試。
+    const failedDates = [];
+    let lockedOut = false;
 
-        Object.entries(pendingAgentChanges).forEach(([date, services]) => {
-            const row = scheduleData.find(r => r.date === date);
-            if (!row) return;
-            Object.entries(services).forEach(([service, change]) => { row[service] = [...change.new]; });
-            const data = { ...row };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, row.date), data);
+    for (const [date, services] of Object.entries(pendingAgentChanges)) {
+        const row = scheduleData.find(r => r.date === date);
+        if (!row) continue;
+
+        const newRow = { ...row };
+        Object.entries(services).forEach(([service, change]) => {
+            newRow[service] = [...change.new];
         });
+        const data = { ...newRow };
+        delete data.date;
 
-        await batch.commit();
+        try {
+            await saveSchedule(date, data);
+            Object.entries(services).forEach(([service, change]) => {
+                row[service] = [...change.new];
+            });
+        } catch (err) {
+            if (err && err.message === 'TAB_LOCKED') {
+                lockedOut = true;
+                break;
+            }
+            failedDates.push(date);
+            console.error(`acceptAllChanges save failed for ${date}:`, err);
+        }
+    }
+
+    if (lockedOut) return;  // modal 已顯示
+
+    if (failedDates.length === 0) {
         pushHistory();
         updateEditDifference('ai');
-
         pendingAgentChanges = null;
         document.getElementById('agentReviewBar').classList.add('hidden');
         renderTable();
         addChatMessage('✅ 已接受所有變更', 'assistant');
         updateStatus('Agent 變更已套用');
-    } catch (error) {
-        console.error('接受變更失敗:', error);
-        addChatMessage('❌ 寫入資料庫失敗', 'error');
+    } else {
+        // 部分成功：保留失敗的 pending 給使用者重試
+        const stillPending = {};
+        failedDates.forEach(d => { if (pendingAgentChanges[d]) stillPending[d] = pendingAgentChanges[d]; });
+        Object.keys(pendingAgentChanges).forEach(d => {
+            if (!failedDates.includes(d)) delete pendingAgentChanges[d];
+        });
+        pushHistory();
+        updateEditDifference('ai');
+        renderTable();
+        addChatMessage(`⚠️ 已套用部分變更，${failedDates.length} 列儲存失敗：${failedDates.join(', ')}`, 'error');
     }
 }
 

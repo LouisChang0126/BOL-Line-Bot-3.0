@@ -40,6 +40,127 @@ function cancelUsersListener() {
     usersCacheInitPromise = null;
 }
 
+// ===========================
+// 單一編輯分頁鎖（per-collection）
+// ===========================
+// 系統假設「同一個 collection 同一時間只有一個管理員編輯」。實作方式：
+// - 每個分頁開啟時生成 tabId（sessionStorage，per-tab），同時把 tabId 寫進
+//   localStorage.editor_active_tab__{collection} —— key 包含 collection 名稱
+// - 監聽 storage event：別的分頁覆寫「同一個 collection 的 key」時才鎖定自己；
+//   不同 collection 的 key 互不影響（_service_5 / _service_4 可同時編輯）
+// - 鎖定後：所有寫入路徑開頭呼叫 _assertEditing()，未持有 active 身份直接 throw 並彈出 modal
+// - 使用者按 modal 上的「在此分頁繼續編輯」→ reload 頁面（拿到最新資料、重新 claim）
+//
+// 注意：localStorage 只在同一個瀏覽器同 origin 共享。跨裝置 / 跨瀏覽器無保護，
+// 但這個系統只有一個管理員，跨裝置同時編輯是邊角案例。
+const TAB_LOCK_STORAGE_KEY_PREFIX = 'editor_active_tab__';
+const TAB_LOCK_SESSION_KEY = 'editor_tab_id';
+
+let _myTabId = null;
+let _isLockedTab = false;
+let _tabLockStorageKey = null;  // 含 collection 後綴的完整 localStorage key
+
+function _initTabLock() {
+    try {
+        // collection 名稱在 edit-chart.html 的 inline module 已經 set 到 window 上才 import app.js
+        const collection = String(window.COLLECTION_NAME || '_default');
+        _tabLockStorageKey = TAB_LOCK_STORAGE_KEY_PREFIX + collection;
+
+        _myTabId = sessionStorage.getItem(TAB_LOCK_SESSION_KEY);
+        if (!_myTabId) {
+            _myTabId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+            sessionStorage.setItem(TAB_LOCK_SESSION_KEY, _myTabId);
+        }
+        // 一進入頁面就 claim active editor（per collection）
+        localStorage.setItem(_tabLockStorageKey, _myTabId);
+        _isLockedTab = false;
+
+        // 監聽其他分頁搶走「同一個 collection 的」active 身份；其他 collection 無視
+        window.addEventListener('storage', (e) => {
+            if (e.key !== _tabLockStorageKey) return;
+            if (e.newValue && e.newValue !== _myTabId) {
+                _enterLockedState();
+            }
+        });
+    } catch (err) {
+        // 儲存層異常（隱私模式 / quota）退回單分頁假設，不擋功能
+        console.warn('Tab lock init failed:', err);
+        _isLockedTab = false;
+    }
+}
+
+function _enterLockedState() {
+    if (_isLockedTab) return;
+    _isLockedTab = true;
+    _showTabLockOverlay();
+}
+
+/**
+ * 寫入路徑都先呼叫這個。被鎖時拋 TAB_LOCKED，呼叫端可選擇靜默 swallow（修法：UI 已經
+ * 顯示 modal、不需額外 alert）。
+ */
+function _assertEditing() {
+    if (_isLockedTab) {
+        _showTabLockOverlay();
+        throw new Error('TAB_LOCKED');
+    }
+}
+
+// 對外導出讓其他模組（agent.js 等）可以提前 gate
+export function isTabLocked() { return _isLockedTab; }
+export function assertEditing() { _assertEditing(); }
+
+function _showTabLockOverlay() {
+    let overlay = document.getElementById('tabLockOverlay');
+    if (overlay) {
+        overlay.classList.remove('hidden');
+        return;
+    }
+    overlay = document.createElement('div');
+    overlay.id = 'tabLockOverlay';
+    overlay.innerHTML = `
+        <div class="tab-lock-modal">
+            <div class="tab-lock-icon">🔒</div>
+            <h2>你已在其他分頁開啟編輯</h2>
+            <p>為避免資料衝突，同時間只能有一個分頁進行編輯</p>
+            <div class="tab-lock-btns">
+                <button id="tabLockCloseBtn" class="tab-lock-btn tab-lock-btn-secondary">關閉這個分頁</button>
+                <button id="tabLockTakeoverBtn" class="tab-lock-btn">在此分頁繼續編輯</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // 「在此分頁繼續編輯」→ reload，重新 claim active 並拿最新資料
+    const takeoverBtn = document.getElementById('tabLockTakeoverBtn');
+    if (takeoverBtn) {
+        takeoverBtn.addEventListener('click', () => {
+            try { if (_tabLockStorageKey) localStorage.setItem(_tabLockStorageKey, _myTabId); } catch (_) {}
+            window.location.reload();
+        });
+    }
+
+    // 「關閉這個分頁」→ window.close()。
+    // 注意：瀏覽器只允許關閉「由 script 開啟」的分頁；使用者直接打 URL 開的分頁會 silently fail。
+    // fallback：把頁面導到 about:blank，讓使用者明確知道關閉動作沒生效、可以手動關掉。
+    const closeBtn = document.getElementById('tabLockCloseBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            window.close();
+            // 若 window.close 被瀏覽器擋下，這行才會執行
+            setTimeout(() => {
+                if (!window.closed) {
+                    document.title = '請手動關閉此分頁';
+                    document.body.innerHTML = '<div style="padding:40px;text-align:center;font-family:system-ui">瀏覽器不允許 script 關閉這個分頁，請手動關閉。</div>';
+                }
+            }, 200);
+        });
+    }
+}
+
+// 在 module load 時就 claim
+_initTabLock();
+
 // 最大顯示/新增限制
 const MAX_FUTURE_ROWS = 52; // 未來資料最多52筆
 const MAX_PAST_ROWS = 26; // 歷史資料最多26筆
@@ -182,8 +303,6 @@ async function loadData() {
             const md = metadataDoc.data();
             serviceItems = md.serviceItems || [];
             nonUserColumns = md.nonUserColumns || [];
-            // 樂觀鎖版本：記錄載入時的 _version；saveMetadata 時會做 compare-and-set
-            window.__metadataVersion = typeof md._version === 'number' ? md._version : 0;
         } else {
             throw new Error('沒有 metadata');
         }
@@ -204,9 +323,7 @@ async function loadData() {
         querySnapshot.forEach((docRef) => {
             if (docRef.id !== '_metadata') {
                 const data = docRef.data();
-                // 樂觀鎖：保留 _version 於記憶體，不讓它被當成服事欄位顯示
                 const row = { date: docRef.id, ...data };
-                row._version = typeof data._version === 'number' ? data._version : 0;
                 scheduleData.push(row);
 
                 // 收集所有人名
@@ -351,17 +468,42 @@ async function createInitialData() {
     }
 }
 
-// 樂觀鎖衝突時統一通知並強制重新載入（讓使用者重新操作，避免互蓋）
-function _handleConflict(where) {
-    console.warn(`[optimistic-lock] conflict at ${where}`);
-    alert(`偵測到其他使用者同時編輯了「${where}」\n你的這次變更未被寫入，頁面將重新載入以取得最新資料。`);
-    // 重新整理保證拿到最新版本，避免基於過期資料再次寫入
-    window.location.reload();
+/**
+ * 多 doc 批次寫入。配合分頁鎖（_assertEditing）就足以保證單一管理員的一致性
+ *
+ * @param {Object} opts
+ * @param {Array<{date:string,data:Object}>} opts.rowUpdates - 要 set 的班表列；data 不含 date
+ * @param {Array<string>} opts.rowDeletes - 要刪除的日期
+ * @param {Object|null} opts.metadata - { serviceItems, nonUserColumns, displayConfig? }；null = 不動 metadata
+ */
+async function _bulkWrite({ rowUpdates = [], rowDeletes = [], metadata = null } = {}) {
+    _assertEditing();
+    const { writeBatch, doc } = window.firestore;
+    const db = window.db;
+    const COLLECTION_NAME = window.COLLECTION_NAME;
+    const batch = writeBatch(db);
+
+    rowUpdates.forEach(({ date, data }) => {
+        const ref = doc(db, COLLECTION_NAME, date);
+        const cleanData = { ...data };
+        delete cleanData.date;
+        batch.set(ref, cleanData);
+    });
+    rowDeletes.forEach(date => {
+        batch.delete(doc(db, COLLECTION_NAME, date));
+    });
+    if (metadata) {
+        const metaRef = doc(db, COLLECTION_NAME, '_metadata');
+        batch.set(metaRef, metadata);
+    }
+
+    await batch.commit();
 }
 
-// 儲存 metadata（含 _version 樂觀鎖：多人同時改欄位時阻擋互蓋）
+// 儲存 metadata（受分頁鎖保護）
 export async function saveMetadata() {
-    const { doc, runTransaction } = window.firestore;
+    _assertEditing();
+    const { doc, setDoc } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
@@ -374,74 +516,26 @@ export async function saveMetadata() {
     }
 
     const ref = doc(db, COLLECTION_NAME, '_metadata');
-    const expectedVersion = typeof window.__metadataVersion === 'number' ? window.__metadataVersion : 0;
-
-    try {
-        const nextVersion = await runTransaction(db, async (tx) => {
-            const snap = await tx.get(ref);
-            const currentVersion = snap.exists() && typeof snap.data()._version === 'number'
-                ? snap.data()._version : 0;
-            if (currentVersion !== expectedVersion) {
-                throw new Error('__VERSION_CONFLICT__');
-            }
-            const payload = { ...metadata, _version: currentVersion + 1 };
-            tx.set(ref, payload);
-            return currentVersion + 1;
-        });
-        window.__metadataVersion = nextVersion;
-    } catch (err) {
-        if (err && err.message === '__VERSION_CONFLICT__') {
-            _handleConflict('服事項目設定');
-            throw err;
-        }
-        throw err;
-    }
+    await setDoc(ref, metadata);
 }
 
-// 儲存班表資料（含 _version 樂觀鎖）
+// 儲存班表資料（受分頁鎖保護）
 export async function saveSchedule(dateStr, data) {
-    const { doc, runTransaction } = window.firestore;
+    _assertEditing();
+    const { doc, setDoc } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
 
-    // 找到這個日期在記憶體中的 cached _version；若不存在（新增的週次），從 0 開始
-    const row = (typeof scheduleData !== 'undefined' && Array.isArray(scheduleData))
-        ? scheduleData.find(r => r.date === dateStr) : null;
-    const expectedVersion = row && typeof row._version === 'number' ? row._version : 0;
-
-    // 移除不應寫回 Firestore 的欄位
     const saveData = { ...data };
     delete saveData.date;
-    delete saveData._version;
 
     const ref = doc(db, COLLECTION_NAME, dateStr);
-
-    try {
-        const nextVersion = await runTransaction(db, async (tx) => {
-            const snap = await tx.get(ref);
-            const currentVersion = snap.exists() && typeof snap.data()._version === 'number'
-                ? snap.data()._version : 0;
-            // 新增文件時 expectedVersion 是 0、current 也是 0 → 放行
-            // 已存在的文件：必須版本吻合才能寫
-            if (snap.exists() && currentVersion !== expectedVersion) {
-                throw new Error('__VERSION_CONFLICT__');
-            }
-            const payload = { ...saveData, _version: currentVersion + 1 };
-            tx.set(ref, payload);
-            return currentVersion + 1;
-        });
-        if (row) row._version = nextVersion;
-    } catch (err) {
-        if (err && err.message === '__VERSION_CONFLICT__') {
-            _handleConflict(dateStr);
-            throw err;
-        }
-        throw err;
-    }
+    await setDoc(ref, saveData);
 }
 
 // 刪除班表資料
 async function deleteSchedule(dateStr) {
+    _assertEditing();
     const { doc, deleteDoc } = window.firestore;
     const db = window.db;
     const COLLECTION_NAME = window.COLLECTION_NAME;
@@ -564,35 +658,34 @@ export async function doAddColumn(trimmedName, isInfo = false) {
             if (ungrouped) ungrouped.items.push(trimmedName);
         }
 
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
+        // 為每列加上新欄位空陣列
+        scheduleData.forEach(row => { row[trimmedName] = []; });
 
-        // 批次更新所有班表列
-        scheduleData.forEach(row => {
-            row[trimmedName] = [];
-            const data = { ...row };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, row.date), data);
-        });
-
-        // 批次更新 Metadata
+        const rowUpdates = scheduleData.map(row => ({ date: row.date, data: { ...row } }));
         const metadata = { serviceItems, nonUserColumns };
         if (displayConfig) metadata.displayConfig = displayConfig;
-        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
 
-        await batch.commit();
+        await _bulkWrite({ rowUpdates, metadata });
 
         pushHistory();
         updateEditDifference();
         renderTable();
         updateStatus(`${label}已新增`);
     } catch (error) {
+        // 分頁鎖定 → modal 已顯示，靜默 swallow；其他 → 回滾記憶體
+        if (error && error.message === 'TAB_LOCKED') return;
         console.error(`新增${label}失敗:`, error);
         showModalAlert(`新增${label}失敗`);
         serviceItems.pop();
         if (isInfo) nonUserColumns.pop();
+        scheduleData.forEach(row => { delete row[trimmedName]; });
+        if (displayConfig && displayConfig.groups) {
+            const ungrouped = displayConfig.groups.find(g => g.id === 'ungrouped');
+            if (ungrouped) {
+                const idx = ungrouped.items.indexOf(trimmedName);
+                if (idx > -1) ungrouped.items.splice(idx, 1);
+            }
+        }
         updateStatus('就緒');
     }
 }
@@ -631,23 +724,13 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
         const nIdx = nonUserColumns.indexOf(serviceName);
         if (nIdx > -1) nonUserColumns.splice(nIdx, 1);
 
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
+        scheduleData.forEach(row => { delete row[serviceName]; });
 
-        scheduleData.forEach(row => {
-            delete row[serviceName];
-            const data = { ...row };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, row.date), data);
-        });
-
+        const rowUpdates = scheduleData.map(row => ({ date: row.date, data: { ...row } }));
         const metadata = { serviceItems, nonUserColumns };
         if (displayConfig) metadata.displayConfig = displayConfig;
-        batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
 
-        await batch.commit();
+        await _bulkWrite({ rowUpdates, metadata });
 
         pushHistory();
         updateEditDifference();
@@ -656,6 +739,7 @@ export async function deleteServiceItem(serviceName, skipConfirm = false) {
         updateStatus('服事項目已刪除');
 
     } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
         console.error('刪除服事項目失敗:', error);
         alert('刪除服事項目失敗');
         updateStatus('就緒');
@@ -687,10 +771,6 @@ export async function applyAgentStructuralChanges({
         return;
     }
 
-    const { writeBatch, doc } = window.firestore;
-    const db = window.db;
-    const COLLECTION_NAME = window.COLLECTION_NAME;
-    const batch = writeBatch(db);
     const removedDates = [];
 
     const removable = Math.min(normalizedRemoveWeeks, scheduleData.length);
@@ -756,21 +836,20 @@ export async function applyAgentStructuralChanges({
         }
     }
 
-    removedDates.forEach(date => {
-        batch.delete(doc(db, COLLECTION_NAME, date));
-    });
-
-    scheduleData.forEach(row => {
-        const data = { ...row };
-        delete data.date;
-        batch.set(doc(db, COLLECTION_NAME, row.date), data);
-    });
-
+    const rowUpdates = scheduleData.map(row => ({ date: row.date, data: { ...row } }));
     const metadata = { serviceItems, nonUserColumns };
     if (displayConfig) metadata.displayConfig = displayConfig;
-    batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
 
-    await batch.commit();
+    try {
+        await _bulkWrite({
+            rowUpdates,
+            rowDeletes: removedDates,
+            metadata
+        });
+    } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
+        throw error;
+    }
 
     pushHistory();
     updateEditDifference();
@@ -844,37 +923,41 @@ export async function addPersonToCell(date, service, person) {
     const row = scheduleData.find(r => r.date === date);
     if (!row) return;
 
-    if (!row[service]) {
-        row[service] = [];
-    }
-
-    // 檢查是否已存在
-    if (row[service].includes(person)) {
+    const current = Array.isArray(row[service]) ? row[service] : [];
+    if (current.includes(person)) {
         alert('此人員已在此服事項目中');
         return;
     }
 
-    // 新增人員
-    row[service].push(person);
+    // 先在 local copy 上構造新陣列，不動 row[service] —— 等 saveSchedule 成功後才 commit。
+    // 否則 saveSchedule 拋錯（離線、分頁鎖定）時，記憶體會殘留沒寫進去的變更，
+    // pushHistory 也會記到幻影 edit。
+    const newArr = [...current, person];
+    const data = { ...row, [service]: newArr };
+    delete data.date;
+
+    try {
+        await saveSchedule(date, data);
+    } catch (err) {
+        // 分頁鎖定 → modal 已顯示，靜默 swallow
+        if (!err || err.message !== 'TAB_LOCKED') {
+            alert('儲存失敗：' + (err && err.message ? err.message : err));
+        }
+        return;
+    }
+
+    // 寫入成功才 commit 到記憶體
+    row[service] = newArr;
     allPersonNames.add(person);
 
-    // 儲存
-    const data = { ...row };
-    delete data.date;
-    await saveSchedule(date, data);
-
-    // 記錄歷史和差異
     pushHistory();
     updateEditDifference();
 
-    // 更新顯示（只在編輯模態框開啟時才更新）
     if (currentEditingCell) {
         renderCurrentPersonChips(currentEditingCell.date, currentEditingCell.service);
         renderPersonDropdown(currentEditingCell.date, currentEditingCell.service);
     }
     renderSingleCell(date, service);
-
-    // 刷新管理使用者按鈕警示
     checkMissingUsers();
 }
 
@@ -882,110 +965,117 @@ export async function removePerson(date, service, person) {
     const row = scheduleData.find(r => r.date === date);
     if (!row) return;
 
-    const index = row[service].indexOf(person);
-    if (index > -1) {
-        row[service].splice(index, 1);
+    const current = Array.isArray(row[service]) ? row[service] : [];
+    const index = current.indexOf(person);
+    if (index < 0) return;
 
-        // 儲存
-        const data = { ...row };
-        delete data.date;
+    // 同 addPersonToCell：先構造新陣列，等 saveSchedule 成功才 commit
+    const newArr = current.slice(0, index).concat(current.slice(index + 1));
+    const data = { ...row, [service]: newArr };
+    delete data.date;
+
+    try {
         await saveSchedule(date, data);
-
-        // 記錄歷史和差異
-        pushHistory();
-        updateEditDifference();
-
-        // 更新顯示（只更新異動的單格）
-        renderSingleCell(date, service);
-
-        // 刷新管理使用者按鈕警示
-        checkMissingUsers();
+    } catch (err) {
+        if (!err || err.message !== 'TAB_LOCKED') {
+            alert('儲存失敗：' + (err && err.message ? err.message : err));
+        }
+        return;
     }
+
+    row[service] = newArr;
+
+    pushHistory();
+    updateEditDifference();
+    renderSingleCell(date, service);
+    checkMissingUsers();
 }
 
 // ===========================
 // 拖拉功能
 // ===========================
+// 拖拉狀態：module scope（不放在 setupDragAndDrop 的 closure 內，否則重複綁定會產生
+// 多份不同步的 state）
+let _draggedData = null;
+let _dragSetupDone = false;
+
 export function setupDragAndDrop() {
-    const chips = document.querySelectorAll('.person-chip[draggable="true"]');
-    const cells = document.querySelectorAll('.service-cell[data-droppable="true"]');
+    // 用事件委派把 dragstart / dragover / drop 綁在 #scheduleTable 上，新 chip 元素
+    // （由 renderSingleCell 動態建立的）也自動有效，不需要每次 render 都重綁。
+    if (_dragSetupDone) return;
+    const table = document.getElementById('scheduleTable');
+    if (!table) return;
 
-    let draggedChip = null;
-    let draggedData = null;
-
-    // 設定拖拉開始
-    chips.forEach(chip => {
-        chip.addEventListener('dragstart', (e) => {
-            draggedChip = chip;
-            draggedData = {
-                date: chip.dataset.date,
-                service: chip.dataset.service,
-                person: chip.dataset.person
-            };
-            chip.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-        });
-
-        chip.addEventListener('dragend', (e) => {
-            chip.classList.remove('dragging');
-
-            // 移除所有 drag-over 樣式
-            cells.forEach(cell => cell.classList.remove('drag-over'));
-        });
+    table.addEventListener('dragstart', (e) => {
+        const chip = e.target.closest('.person-chip[draggable="true"]');
+        if (!chip || !table.contains(chip)) return;
+        _draggedData = {
+            date: chip.dataset.date,
+            service: chip.dataset.service,
+            person: chip.dataset.person
+        };
+        chip.classList.add('dragging');
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
     });
 
-    // 設定放置目標
-    cells.forEach(cell => {
-        cell.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            cell.classList.add('drag-over');
-        });
-
-        cell.addEventListener('dragleave', (e) => {
-            cell.classList.remove('drag-over');
-        });
-
-        cell.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            cell.classList.remove('drag-over');
-
-            if (!draggedData) return;
-
-            const targetDate = cell.dataset.date;
-            const targetService = cell.dataset.service;
-
-            // 如果是同一個格子，不做任何事
-            if (draggedData.date === targetDate && draggedData.service === targetService) {
-                return;
-            }
-
-            updateStatus('移動人員中...');
-
-            try {
-                // 從來源移除
-                await movePersonBetweenCells(
-                    draggedData.date,
-                    draggedData.service,
-                    targetDate,
-                    targetService,
-                    draggedData.person
-                );
-
-                // 新增到目標
-
-                updateStatus('人員已移動');
-
-            } catch (error) {
-                console.error('移動人員失敗:', error);
-                alert('移動人員失敗');
-                updateStatus('就緒');
-            }
-
-            draggedChip = null;
-            draggedData = null;
-        });
+    table.addEventListener('dragend', (e) => {
+        const chip = e.target.closest('.person-chip');
+        if (chip) chip.classList.remove('dragging');
+        // 清掉所有 drag-over 樣式（萬一 dragleave 沒觸發到）
+        table.querySelectorAll('.service-cell.drag-over').forEach(c => c.classList.remove('drag-over'));
     });
+
+    table.addEventListener('dragover', (e) => {
+        const cell = e.target.closest('.service-cell[data-droppable="true"]');
+        if (!cell) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        cell.classList.add('drag-over');
+    });
+
+    table.addEventListener('dragleave', (e) => {
+        const cell = e.target.closest('.service-cell');
+        if (cell) cell.classList.remove('drag-over');
+    });
+
+    table.addEventListener('drop', async (e) => {
+        const cell = e.target.closest('.service-cell[data-droppable="true"]');
+        if (!cell) return;
+        e.preventDefault();
+        cell.classList.remove('drag-over');
+
+        if (!_draggedData) return;
+
+        const targetDate = cell.dataset.date;
+        const targetService = cell.dataset.service;
+
+        // 同一格不做事
+        if (_draggedData.date === targetDate && _draggedData.service === targetService) {
+            _draggedData = null;
+            return;
+        }
+
+        const data = _draggedData;
+        _draggedData = null;
+        updateStatus('移動人員中...');
+
+        try {
+            await movePersonBetweenCells(
+                data.date,
+                data.service,
+                targetDate,
+                targetService,
+                data.person
+            );
+            updateStatus('人員已移動');
+        } catch (error) {
+            console.error('移動人員失敗:', error);
+            alert('移動人員失敗');
+            updateStatus('就緒');
+        }
+    });
+
+    _dragSetupDone = true;
 }
 
 // ===========================
@@ -1249,22 +1339,25 @@ async function cutMultiSelectedCells() {
 
     // 清空被選取的格子
     updateStatus('剪下中...');
-    try {
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
 
+    // 構造 row updates（同 row 多格 → 合併到同一個 update），不在 await 前 mutate row
+    const rowUpdatesMap = new Map();
+    for (const cell of multiSelectedCells) {
+        const row = scheduleData[cell.dateIndex];
+        if (!row) continue;
+        if (!rowUpdatesMap.has(row.date)) rowUpdatesMap.set(row.date, { ...row });
+        rowUpdatesMap.get(row.date)[cell.service] = [];
+    }
+    const rowUpdates = [...rowUpdatesMap.entries()].map(([date, data]) => ({ date, data }));
+
+    try {
+        await _bulkWrite({ rowUpdates });
+
+        // commit memory
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
-            if (row) {
-                row[cell.service] = [];
-                const data = { ...row };
-                delete data.date;
-                batch.set(doc(db, COLLECTION_NAME, row.date), data);
-            }
+            if (row) row[cell.service] = [];
         }
-        await batch.commit();
 
         pushHistory();
         updateEditDifference();
@@ -1272,6 +1365,7 @@ async function cutMultiSelectedCells() {
         renderTable();
         updateStatus('已剪下選取的格子');
     } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
         console.error('剪下失敗:', error);
         alert('剪下失敗');
         updateStatus('就緒');
@@ -1283,22 +1377,23 @@ async function deleteMultiSelectedCells() {
     if (multiSelectedCells.length === 0) return;
 
     updateStatus('清空中...');
+
+    const rowUpdatesMap = new Map();
+    for (const cell of multiSelectedCells) {
+        const row = scheduleData[cell.dateIndex];
+        if (!row) continue;
+        if (!rowUpdatesMap.has(row.date)) rowUpdatesMap.set(row.date, { ...row });
+        rowUpdatesMap.get(row.date)[cell.service] = [];
+    }
+    const rowUpdates = [...rowUpdatesMap.entries()].map(([date, data]) => ({ date, data }));
+
     try {
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
+        await _bulkWrite({ rowUpdates });
 
         for (const cell of multiSelectedCells) {
             const row = scheduleData[cell.dateIndex];
-            if (row) {
-                row[cell.service] = [];
-                const data = { ...row };
-                delete data.date;
-                batch.set(doc(db, COLLECTION_NAME, row.date), data);
-            }
+            if (row) row[cell.service] = [];
         }
-        await batch.commit();
 
         pushHistory();
         updateEditDifference();
@@ -1306,6 +1401,7 @@ async function deleteMultiSelectedCells() {
         renderTable();
         updateStatus('已清空選取的格子');
     } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
         console.error('清空失敗:', error);
         alert('清空失敗');
         updateStatus('就緒');
@@ -1618,62 +1714,63 @@ async function executePaste(startDateIndex, startServiceIndex, pastedData, separ
 
     updateStatus('匯入資料中...');
 
-    try {
-        const parsedRows = rows.map(row => row.split('\t'));
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
+    const parsedRows = rows.map(row => row.split('\t'));
 
-        // 從指定位置開始處理
-        for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
-            const cells = parsedRows[i];
-            const rowData = scheduleData[startDateIndex + i];
+    // 先在 row 副本上算出新內容（不動 in-memory），驗證通過再寫入
+    const rowUpdates = [];
+    const rowOverwrites = [];  // {rowIndex, serviceName, names}，寫入成功後 commit 到 in-memory
+    const newPersons = new Set();
 
-            // 從指定的服事項目欄位開始
-            for (let j = 0; j < cells.length && (startServiceIndex + j) < serviceItems.length; j++) {
-                const serviceName = serviceItems[startServiceIndex + j];
-                const cellValue = cells[j].trim();
+    for (let i = 0; i < parsedRows.length && (startDateIndex + i) < scheduleData.length; i++) {
+        const cells = parsedRows[i];
+        const sourceRow = scheduleData[startDateIndex + i];
+        const rowCopy = { ...sourceRow };
 
-                if (cellValue === '') {
-                    rowData[serviceName] = [];
-                } else {
-                    let names;
-                    if (separator === '') {
-                        names = [cellValue];
-                    } else {
-                        names = cellValue.split(separator).map(n => n.trim()).filter(n => n !== '');
-                    }
+        for (let j = 0; j < cells.length && (startServiceIndex + j) < serviceItems.length; j++) {
+            const serviceName = serviceItems[startServiceIndex + j];
+            const cellValue = cells[j].trim();
 
-                    if (names.some(n => n.includes('|'))) {
-                        alert('匯入失敗：人員名稱不能包含 "|" 符號');
-                        throw new Error('人員名稱包含 "|" 符號');
-                    }
-
-                    rowData[serviceName] = names;
-
-                    // 加入到所有人名集合
-                    names.forEach(name => allPersonNames.add(name));
-                }
+            let names;
+            if (cellValue === '') {
+                names = [];
+            } else if (separator === '') {
+                names = [cellValue];
+            } else {
+                names = cellValue.split(separator).map(n => n.trim()).filter(n => n !== '');
             }
 
-            // 儲存
-            const data = { ...rowData };
-            delete data.date;
-            batch.set(doc(db, COLLECTION_NAME, rowData.date), data);
+            if (names.some(n => n.includes('|'))) {
+                alert('匯入失敗：人員名稱不能包含 "|" 符號');
+                updateStatus('就緒');
+                return;
+            }
+
+            rowCopy[serviceName] = names;
+            names.forEach(n => newPersons.add(n));
+            rowOverwrites.push({ rowIndex: startDateIndex + i, serviceName, names });
         }
-        await batch.commit();
 
-        // 重建顏色映射
+        rowUpdates.push({ date: sourceRow.date, data: rowCopy });
+    }
+
+    try {
+        await _bulkWrite({ rowUpdates });
+
+        // 寫入成功才 commit 到 in-memory
+        rowOverwrites.forEach(({ rowIndex, serviceName, names }) => {
+            const r = scheduleData[rowIndex];
+            if (r) r[serviceName] = names;
+        });
+        newPersons.forEach(n => allPersonNames.add(n));
+
         rebuildPersonColorMap();
-
-        // 記錄歷史和差異
         pushHistory();
         updateEditDifference();
         renderTable();
         updateStatus('資料匯入完成');
 
     } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
         console.error('匯入資料失敗:', error);
         alert('匯入資料失敗');
         updateStatus('就緒');
@@ -1764,7 +1861,8 @@ export function setCurrentEditingCell(cell) {
 // 設定服事標題拖拉排序橋接（供 ui.js renderTableBody 呼叫）
 
 function closeModal(modalId) {
-    document.getElementById(modalId).classList.add('hidden');
+    const el = document.getElementById(modalId);
+    if (el) el.classList.add('hidden');
 }
 
 // ===========================
@@ -2325,35 +2423,30 @@ async function restoreFromHistory() {
 
     // 同步到 Firestore（僅寫入有差異的部分）
     try {
-        const { writeBatch, doc } = window.firestore;
-        const db = window.db;
-        const COLLECTION_NAME = window.COLLECTION_NAME;
-        const batch = writeBatch(db);
-
-        // 刪除不再存在的日期文件
+        const rowDeletes = [];
         for (const date of oldDates) {
-            if (!newDates.has(date)) batch.delete(doc(db, COLLECTION_NAME, date));
+            if (!newDates.has(date)) rowDeletes.push(date);
         }
 
-        // 只寫入與舊狀態不同的列
-        scheduleData.forEach(row => {
-            if (JSON.stringify(row) !== oldRowMap.get(row.date)) {
-                const data = { ...row };
-                delete data.date;
-                batch.set(doc(db, COLLECTION_NAME, row.date), data);
-            }
-        });
+        const rowUpdates = scheduleData
+            .filter(row => JSON.stringify(row) !== oldRowMap.get(row.date))
+            .map(row => ({ date: row.date, data: { ...row } }));
 
-        // 只在 metadata 有變化時寫入
         const newMetadata = JSON.stringify({ serviceItems, nonUserColumns, displayConfig });
+        let metadata = null;
         if (newMetadata !== oldMetadata) {
-            const metadata = { serviceItems, nonUserColumns };
+            metadata = { serviceItems, nonUserColumns };
             if (displayConfig) metadata.displayConfig = displayConfig;
-            batch.set(doc(db, COLLECTION_NAME, '_metadata'), metadata);
         }
 
-        await batch.commit();
+        if (rowUpdates.length > 0 || rowDeletes.length > 0 || metadata) {
+            await _bulkWrite({ rowUpdates, rowDeletes, metadata });
+        }
     } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') {
+            isRestoring = false;
+            return;
+        }
         console.error('同步到 Firestore 失敗:', error);
     }
 
@@ -2449,25 +2542,9 @@ export async function saveDisplayConfig() {
         // 儲存到全域變數
         displayConfig = JSON.parse(JSON.stringify(tempDisplayConfig));
 
-        // 儲存到 Firestore
-        const metadata = {
-            serviceItems: serviceItems,
-            displayConfig: displayConfig
-        };
+        // saveMetadata() 內部已經把 serviceItems / nonUserColumns / displayConfig 一起寫進
+        // _metadata doc，受分頁鎖保護；不需要額外 setDoc。
         await saveMetadata();
-
-        // 另外更新 displayConfig
-        const { doc, setDoc, getDoc } = window.firestore;
-        const metadataRef = doc(window.db, window.COLLECTION_NAME, '_metadata');
-        const metadataDoc = await getDoc(metadataRef);
-
-        if (metadataDoc.exists()) {
-            const existingData = metadataDoc.data();
-            await setDoc(metadataRef, {
-                ...existingData,
-                displayConfig: displayConfig
-            });
-        }
 
         closeModal('displayConfigModal');
         updateStatus('分組設定已儲存');
@@ -2615,25 +2692,39 @@ export async function movePersonBetweenCells(fromDate, fromService, toDate, toSe
         return;
     }
 
-    fromRow[fromService].splice(fromIndex, 1);
-    toRow[toService].push(person);
-
-    const { writeBatch, doc } = window.firestore;
-    const db = window.db;
-    const COLLECTION_NAME = window.COLLECTION_NAME;
-    const batch = writeBatch(db);
-
-    const fromData = { ...fromRow };
-    delete fromData.date;
-    batch.set(doc(db, COLLECTION_NAME, fromRow.date), fromData);
-
-    if (fromRow.date !== toRow.date) {
-        const toData = { ...toRow };
-        delete toData.date;
-        batch.set(doc(db, COLLECTION_NAME, toRow.date), toData);
+    // 不在 await 前 mutate 記憶體；先在副本上算好，等 _bulkWrite 成功才 commit
+    const newFromArr = fromRow[fromService].slice(0, fromIndex).concat(fromRow[fromService].slice(fromIndex + 1));
+    const sameRow = fromRow.date === toRow.date;
+    let newToArr;
+    if (sameRow) {
+        // 同一列：先從同一個 newFromArr 衍生（移除 person 後再 push）
+        newToArr = [...newFromArr, person];
+    } else {
+        newToArr = [...toRow[toService], person];
     }
 
-    await batch.commit();
+    const rowUpdates = [];
+    if (sameRow) {
+        // 同列只寫一次，包含兩個欄位的變更
+        const merged = { ...fromRow, [fromService]: newFromArr, [toService]: newToArr };
+        rowUpdates.push({ date: fromRow.date, data: merged });
+    } else {
+        rowUpdates.push({ date: fromRow.date, data: { ...fromRow, [fromService]: newFromArr } });
+        rowUpdates.push({ date: toRow.date, data: { ...toRow, [toService]: newToArr } });
+    }
+
+    try {
+        await _bulkWrite({ rowUpdates });
+    } catch (error) {
+        if (error && error.message === 'TAB_LOCKED') return;
+        console.error('移動人員失敗:', error);
+        alert('儲存失敗：' + (error && error.message ? error.message : error));
+        return;
+    }
+
+    // 寫入成功才 commit 到記憶體
+    fromRow[fromService] = newFromArr;
+    toRow[toService] = newToArr;
 
     pushHistory();
     updateEditDifference();

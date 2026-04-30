@@ -108,7 +108,7 @@
   - 同日期多列會自動合併人員清單；後端在 system prompt 注入 `Person Unavailability` 硬性規則 + `_validate_tool_input` 422 雙重把關
 - ✅ **Rule Engine**：自動檢查連續排班、單週服事上限、僅用歷史人員、請假衝突等規則，違規時把警告逐條顯示在聊天區供使用者人工檢視（不再自動重打 API）；連線/API 錯誤仍會自動重試 1 次
   - prompt 為「額外指令」，可空著只用 UI 設定送出
-- 🔒 **樂觀鎖（_version）**：所有班表寫入透過 Firestore transaction + version compare-and-set，多人同時編輯時自動偵測衝突並 alert 重新整理
+- 🔒 **單一編輯分頁鎖**：同一瀏覽器只允許一個分頁進入編輯狀態。開第二個分頁時，第一個分頁會立刻顯示「你已在其他分頁開啟編輯」遮罩 modal，鎖住所有寫入路徑；按「在此分頁繼續編輯」會 reload 該分頁奪回編輯權。實作走 sessionStorage（per-tab tabId）+ localStorage（active tab id）+ `storage` event，無 Firestore 開銷
 - 🔍 **Review UI**：差異高亮顯示（綠色新增、紅色移除、黃色修改），支援逐格或全部 Accept/Reject
 - 🛡️ **後端 schema 驗證**：LLM 回應在 Cloud Function 內過 `_validate_tool_input` 護欄；違反 → 422，前端顯示錯誤
 - 📊 **Prompt Experiment**：排班模式每次 API 呼叫會落檔到 repo 根的 `Prompt_Experiment/`（內含 `analyze.py` 可比對平均時間與 token）
@@ -176,8 +176,7 @@ schedule-app/
   主領: ["劉婕"],
   音控: ["家睿", "芯芳"],
   字幕: ["捷希"],
-  彩排: ["週六 14:00"],  // 資訊欄位範例
-  _version: 5            // 樂觀鎖版本號，每次 saveSchedule transaction +1
+  彩排: ["週六 14:00"]  // 資訊欄位範例
 }
 
 // Document ID: "_metadata"
@@ -199,8 +198,7 @@ schedule-app/
       }
     ],
     hidden: []  // 隱藏的服事項目
-  },
-  _version: 12  // metadata 也有獨立樂觀鎖
+  }
 }
 ```
 
@@ -310,6 +308,14 @@ A:
 - `3-4`：預留給未來擴充
 
 ## 📝 更新日誌
+
+### v4.4.0 (2026-04-30)
+- 🔒 **單一編輯分頁鎖取代樂觀鎖**：因為實際使用情境只有一個管理員，原本 `_version` compare-and-set 的樂觀鎖過度複雜（每條寫入路徑都要包 transaction、版本不符就強制 reload）。改為前端分頁鎖：sessionStorage 存 per-tab id、localStorage 存目前 active tab id、`storage` event 偵測搶占。所有寫入路徑開頭呼叫 `_assertEditing()`，被鎖時拋 `TAB_LOCKED` 由 modal 處理。`_versionedBulkWrite` 簡化為 `_bulkWrite`（單純 `writeBatch`）；`saveSchedule` / `saveMetadata` 改為直接 `setDoc`
+- 🐛 **修正拖拉移人 bug**：原本 `setupDragAndDrop` 用 `forEach` 直接綁 listener 在每個 chip 上，`renderSingleCell` 重建 chip DOM 時新元素沒被綁過 → 同格第二個人拖不動。改為事件委派（單一 listener 綁在 `#scheduleTable`，靠 `e.target.closest()` 分派）；`_draggedData` 改為 module scope 避免多次綁定產生不同步的 closure state
+- 🛠️ **AI Agent 後端重構**：移除排班模式違規自動重試（改成警告顯示給使用者人工檢視）；Anthropic / Gemini provider 改用 SDK 內建 retry（移除手寫 backoff loop，需 `google-genai>=1.27.0`）
+- 🐛 **修正 `saveDisplayConfig` 雙寫**：原本先 transactional `saveMetadata()` 再非 transactional `setDoc` 把 `_version` 蓋回去 → 移除多餘第二次寫入
+- 🛠️ **LINE Bot 後端強化**：`execute_shift` / `handle_shift_reject` 改用 Firestore transaction 包讀寫，避免兩個併發 postback / LINE 重送導致雙重執行；`log_usage` 改用 transaction 包 read-modify-write 確保原子性；所有 `push_message` 包 `LineBotApiError` try/except 避免被封鎖用戶讓 webhook handler 拋例外
+- 🛠️ **前端 referenceWeeks 修正**：原本下拉候選包含 pastData，但 `expandDateRange` 只用當前 `scheduleData` 當 candidate pool；使用者選歷史日期會回傳空陣列、走 fallback 把整張表送給 LLM。修為兩端候選池一致（pastData ∪ existing）
 
 ### v4.3.0 (2026-04-27)
 - 🆕 **AI 助手「請假區域」功能**（排班模式）：

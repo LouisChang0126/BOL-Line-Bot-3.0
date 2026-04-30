@@ -2171,3 +2171,71 @@ body.multi-selecting-active {
   z-index: 1000;
   pointer-events: none;
 }
+
+/* ===========================
+   分頁鎖（單一編輯分頁）
+   =========================== */
+#tabLockOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100000;  /* 蓋過所有 modal */
+}
+#tabLockOverlay.hidden { display: none; }
+#tabLockOverlay .tab-lock-modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 36px 44px;
+  max-width: 420px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+#tabLockOverlay .tab-lock-icon {
+  font-size: 56px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+#tabLockOverlay h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 0 0 12px;
+}
+#tabLockOverlay p {
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.6;
+  margin: 0 0 24px;
+}
+#tabLockOverlay .tab-lock-btns {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+#tabLockOverlay .tab-lock-btn {
+  background: #ff5a5f;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+#tabLockOverlay .tab-lock-btn:hover {
+  background: #e84852;
+}
+#tabLockOverlay .tab-lock-btn-secondary {
+  background: #fff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+#tabLockOverlay .tab-lock-btn-secondary:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
