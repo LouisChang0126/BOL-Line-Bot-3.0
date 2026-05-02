@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 助手記錄</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="../favicon-16.png">
+    <link rel="shortcut icon" href="../favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="../apple-touch-icon.png">
+    <link rel="stylesheet" href="../styles.css">
+    <style>
+        .admin-page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        .page-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            flex: 1;
+        }
+
+        .refresh-btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .refresh-btn:hover {
+            background: var(--primary-dark);
+        }
+
+        /* ===== 統計卡片 ===== */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .stat-card.wide {
+            grid-column: span 2;
+        }
+
+        .stat-card-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .stat-card-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--primary-color);
+            font-family: 'Segoe UI', system-ui;
+        }
+
+        .stat-card-sub {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .stat-bar-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .stat-bar-row {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+            gap: 8px;
+        }
+
+        .stat-bar-label {
+            min-width: 80px;
+            color: var(--text-primary);
+        }
+
+        .stat-bar-track {
+            flex: 1;
+            height: 8px;
+            background: #f1f5f9;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .stat-bar-fill {
+            height: 100%;
+            background: var(--primary-color);
+            border-radius: 4px;
+        }
+
+        .stat-bar-fill.scheduling { background: #3b82f6; }
+        .stat-bar-fill.edit_qa { background: #8b5cf6; }
+        .stat-bar-fill.anthropic { background: #d97706; }
+        .stat-bar-fill.openai_compatible { background: #10b981; }
+        .stat-bar-fill.gemini { background: #06b6d4; }
+
+        .stat-bar-count {
+            min-width: 36px;
+            text-align: right;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ===== 篩選 Tab ===== */
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-tab {
+            padding: 6px 16px;
+            border-radius: 20px;
+            border: 1.5px solid var(--border-color);
+            background: white;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--text-secondary);
+            transition: all 0.18s;
+        }
+
+        .filter-tab:hover {
+            background: var(--bg-hover);
+        }
+
+        .filter-tab.active {
+            background: var(--primary-color);
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .filter-tab.active.tab-scheduling {
+            background: #3b82f6;
+            border-color: #3b82f6;
+        }
+
+        .filter-tab.active.tab-edit_qa {
+            background: #8b5cf6;
+            border-color: #8b5cf6;
+        }
+
+        .filter-tab.active.tab-failed {
+            background: #ef4444;
+            border-color: #ef4444;
+        }
+
+        /* ===== 列表 ===== */
+        .log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .log-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .log-card.failed {
+            border-left: 4px solid #ef4444;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .log-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .log-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-right: 6px;
+        }
+
+        .badge-mode-scheduling { background: #dbeafe; color: #2563eb; }
+        .badge-mode-edit_qa { background: #f3e8ff; color: #7c3aed; }
+        .badge-status-ok { background: #dcfce7; color: #16a34a; }
+        .badge-status-fail { background: #fee2e2; color: #dc2626; }
+        .badge-provider { background: #f1f5f9; color: #475569; }
+        .badge-truncated { background: #fef3c7; color: #b45309; }
+
+        .log-prompt-preview {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .toggle-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .toggle-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .detail-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px dashed var(--border-color);
+            display: none;
+        }
+
+        .detail-section.open {
+            display: block;
+        }
+
+        .detail-block {
+            margin-bottom: 16px;
+        }
+
+        .detail-block-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .detail-block pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+            line-height: 1.5;
+            max-height: 360px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .detail-block .message-row {
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+        }
+
+        .message-role {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--primary-color);
+            margin-bottom: 4px;
+        }
+
+        .message-content {
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text-primary);
+        }
+
+        .truncate-warning {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: #92400e;
+        }
+
+        .no-logs {
+            text-align: center;
+            color: var(--text-secondary);
+            padding: 60px 20px;
+        }
+
+        .load-more-wrap {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .load-more-btn {
+            padding: 10px 24px;
+            border-radius: 10px;
+            background: white;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .load-more-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="admin-page">
+        <div class="page-header">
+            <a id="backBtn" href="../edit-chart/edit-chart.html" class="btn btn-secondary"
+                style="padding: 6px 12px;">← 返回</a>
+            <h1>🤖 AI 助手記錄</h1>
+            <button class="refresh-btn" id="refreshBtn">🔄 刷新</button>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="no-logs" style="grid-column: 1 / -1;">載入中...</div>
+        </div>
+
+        <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all">全部</button>
+            <button class="filter-tab tab-scheduling" data-filter="scheduling">📋 排班</button>
+            <button class="filter-tab tab-edit_qa" data-filter="edit_qa">💬 問答</button>
+            <button class="filter-tab tab-failed" data-filter="failed">⚠️ 失敗</button>
+        </div>
+
+        <div class="log-list" id="logList">
+            <div class="no-logs">載入中...</div>
+        </div>
+
+        <div class="load-more-wrap">
+            <button class="load-more-btn" id="loadMoreBtn" style="display: none;">載入更早的記錄</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
+        import {
+            getFirestore, collection, getDocs, query, orderBy, limit, startAfter
+        } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { firebaseConfig, RECAPTCHA_SITE_KEY } from '../firebase-config.js';
+
+        const PAGE_SIZE = 200;
+
+        let db;
+        let allLogs = [];
+        let lastSnapshot = null;        // 用於 startAfter 接續分頁
+        let hasMore = true;
+        let currentFilter = 'all';
+
+        const statsGridEl = document.getElementById('statsGrid');
+        const logListEl = document.getElementById('logList');
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+
+        async function init() {
+            const app = initializeApp(firebaseConfig);
+            initializeAppCheck(app, {
+                provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+                isTokenAutoRefreshEnabled: true
+            });
+            db = getFirestore(app);
+
+            // 動態設定返回連結（保留 ?collection= 以便回到正確的班表頁）
+            const urlParams = new URLSearchParams(window.location.search);
+            const targetCollection = urlParams.get('collection') || '';
+            if (targetCollection) {
+                document.getElementById('backBtn').href = `../edit-chart/edit-chart.html?collection=${targetCollection}`;
+            }
+
+            refreshBtn.addEventListener('click', () => reloadAll());
+            loadMoreBtn.addEventListener('click', () => loadPage(/*append=*/true));
+
+            document.querySelectorAll('.filter-tab').forEach(btn => {
+                btn.addEventListener('click', () => setFilter(btn.dataset.filter));
+            });
+
+            await reloadAll();
+        }
+
+        async function reloadAll() {
+            allLogs = [];
+            lastSnapshot = null;
+            hasMore = true;
+            statsGridEl.innerHTML = '<div class="no-logs" style="grid-column: 1 / -1;">載入中...</div>';
+            logListEl.innerHTML = '<div class="no-logs">載入中...</div>';
+            loadMoreBtn.style.display = 'none';
+            await loadPage(/*append=*/false);
+        }
+
+        async function loadPage(append) {
+            try {
+                // 用 wall_clock_utc 排序而非 __name__：Firestore 對 __name__ desc 需要明確的 composite
+                // index，但 wall_clock_utc 是一般字串欄位，預設就有自動建立的 asc/desc 單欄位索引；
+                // 兩者排出來結果相同（doc id 與 wall_clock_utc 都是 ISO 時間字串）。
+                let q;
+                if (append && lastSnapshot) {
+                    q = query(
+                        collection(db, 'agent_log'),
+                        orderBy('wall_clock_utc', 'desc'),
+                        startAfter(lastSnapshot),
+                        limit(PAGE_SIZE)
+                    );
+                } else {
+                    q = query(
+                        collection(db, 'agent_log'),
+                        orderBy('wall_clock_utc', 'desc'),
+                        limit(PAGE_SIZE)
+                    );
+                }
+
+                const snap = await getDocs(q);
+                if (snap.empty) {
+                    hasMore = false;
+                } else {
+                    lastSnapshot = snap.docs[snap.docs.length - 1];
+                    snap.forEach(d => allLogs.push({ id: d.id, ...d.data() }));
+                    hasMore = snap.size === PAGE_SIZE;
+                }
+
+                render();
+            } catch (err) {
+                console.error('載入 agent_log 失敗:', err);
+                logListEl.innerHTML = `<div class="no-logs">載入失敗：${err.message}</div>`;
+                statsGridEl.innerHTML = '';
+            }
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.filter === filter);
+            });
+            render();
+        }
+
+        function applyFilter(logs) {
+            if (currentFilter === 'all') return logs;
+            if (currentFilter === 'failed') return logs.filter(l => (l.status_code ?? 0) !== 200);
+            return logs.filter(l => l.mode === currentFilter);
+        }
+
+        function render() {
+            const filtered = applyFilter(allLogs);
+            renderStats(filtered);
+            renderList(filtered);
+            loadMoreBtn.style.display = hasMore ? 'inline-block' : 'none';
+            loadMoreBtn.disabled = !hasMore;
+            loadMoreBtn.textContent = hasMore ? '載入更早的記錄' : '已經是全部記錄了';
+        }
+
+        // ===== 統計 =====
+        function renderStats(logs) {
+            if (logs.length === 0) {
+                statsGridEl.innerHTML = '<div class="no-logs" style="grid-column: 1 / -1;">沒有符合的記錄</div>';
+                return;
+            }
+
+            const now = new Date();
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            // 週一作為一週起點
+            const startOfWeek = new Date(startOfToday);
+            const dayOfWeek = (startOfToday.getDay() + 6) % 7; // 週一 = 0
+            startOfWeek.setDate(startOfToday.getDate() - dayOfWeek);
+
+            let todayCount = 0, weekCount = 0;
+            let okCount = 0;
+            let timeSum = 0, timeN = 0;
+            const modeDist = {};
+            const providerDist = {};
+
+            logs.forEach(l => {
+                const ts = l.wall_clock_utc ? new Date(l.wall_clock_utc) : null;
+                if (ts) {
+                    if (ts >= startOfToday) todayCount++;
+                    if (ts >= startOfWeek) weekCount++;
+                }
+                if ((l.status_code ?? 0) === 200) okCount++;
+                if (typeof l.inference_time === 'number') {
+                    timeSum += l.inference_time;
+                    timeN++;
+                }
+                modeDist[l.mode || '(unknown)'] = (modeDist[l.mode || '(unknown)'] || 0) + 1;
+                providerDist[l.provider || '(unknown)'] = (providerDist[l.provider || '(unknown)'] || 0) + 1;
+            });
+
+            const total = logs.length;
+            const successRate = total > 0 ? (okCount / total * 100).toFixed(1) : '0.0';
+            const avgTime = timeN > 0 ? (timeSum / timeN).toFixed(2) : '—';
+
+            statsGridEl.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-card-title">總呼叫數（已載入）</div>
+                    <div class="stat-card-value">${total}</div>
+                    <div class="stat-card-sub">今日 ${todayCount} / 本週 ${weekCount}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-title">成功率</div>
+                    <div class="stat-card-value">${successRate}%</div>
+                    <div class="stat-card-sub">成功 ${okCount} / 失敗 ${total - okCount}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-title">平均推論時間</div>
+                    <div class="stat-card-value">${avgTime}${avgTime === '—' ? '' : ' s'}</div>
+                    <div class="stat-card-sub">基於 ${timeN} 筆有計時的記錄</div>
+                </div>
+                <div class="stat-card wide">
+                    <div class="stat-card-title">模式分布</div>
+                    ${renderBarList(modeDist, total, 'mode')}
+                </div>
+                <div class="stat-card wide">
+                    <div class="stat-card-title">Provider 分布</div>
+                    ${renderBarList(providerDist, total, 'provider')}
+                </div>
+            `;
+        }
+
+        function renderBarList(dist, total, kind) {
+            const entries = Object.entries(dist).sort((a, b) => b[1] - a[1]);
+            if (entries.length === 0) return '<div class="stat-card-sub">無資料</div>';
+            return `<div class="stat-bar-list">${entries.map(([k, n]) => {
+                const pct = total > 0 ? (n / total * 100) : 0;
+                const safeKey = k.replace(/[^a-zA-Z0-9_]/g, '_');
+                return `
+                    <div class="stat-bar-row">
+                        <span class="stat-bar-label">${escapeHtml(k)}</span>
+                        <div class="stat-bar-track">
+                            <div class="stat-bar-fill ${safeKey}" style="width: ${pct}%;"></div>
+                        </div>
+                        <span class="stat-bar-count">${n}</span>
+                    </div>
+                `;
+            }).join('')}</div>`;
+        }
+
+        // ===== 列表 =====
+        function renderList(logs) {
+            if (logs.length === 0) {
+                logListEl.innerHTML = '<div class="no-logs">沒有符合的 AI 互動記錄</div>';
+                return;
+            }
+
+            logListEl.innerHTML = logs.map(log => {
+                const isFail = (log.status_code ?? 0) !== 200;
+                const tsLabel = formatTwTime(log.wall_clock_utc);
+                const userPrompt = extractLastUserPrompt(log.messages);
+                const promptPreview = userPrompt
+                    ? escapeHtml(userPrompt.slice(0, 200))
+                    : '<em>(無 user prompt)</em>';
+                const truncBadge = (log.truncated_fields && log.truncated_fields.length > 0)
+                    ? `<span class="badge badge-truncated">⚠️ ${log.truncated_fields.length} 欄位被截斷</span>`
+                    : '';
+                const modeKey = log.mode || 'unknown';
+                const modeBadgeClass = `badge-mode-${modeKey === 'scheduling' || modeKey === 'edit_qa' ? modeKey : 'edit_qa'}`;
+                return `
+                    <div class="log-card ${isFail ? 'failed' : ''}">
+                        <div class="log-header">
+                            <div>
+                                <div class="log-title">
+                                    <span class="badge ${modeBadgeClass}">${escapeHtml(modeKey)}</span>
+                                    <span class="badge badge-provider">${escapeHtml(log.provider || '?')} / ${escapeHtml(log.model || '?')}</span>
+                                    <span class="badge ${isFail ? 'badge-status-fail' : 'badge-status-ok'}">${log.status_code ?? '?'}</span>
+                                    ${typeof log.inference_time === 'number' ? `<span class="badge badge-provider">${log.inference_time.toFixed(2)}s</span>` : ''}
+                                    ${truncBadge}
+                                </div>
+                                <div class="log-meta">${tsLabel} · doc id <code>${escapeHtml(log.id)}</code></div>
+                                <div class="log-prompt-preview">${promptPreview}</div>
+                            </div>
+                            <button class="toggle-btn" data-toggle="${log.id}">展開詳情</button>
+                        </div>
+                        <div class="detail-section" id="detail-${log.id}"></div>
+                    </div>
+                `;
+            }).join('');
+
+            // 綁展開事件(避免 inline onclick 與 escape 麻煩)
+            logListEl.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.addEventListener('click', () => toggleDetail(btn.dataset.toggle, btn));
+            });
+        }
+
+        function toggleDetail(logId, btnEl) {
+            const detailEl = document.getElementById(`detail-${logId}`);
+            if (!detailEl) return;
+            if (detailEl.classList.contains('open')) {
+                detailEl.classList.remove('open');
+                detailEl.innerHTML = '';
+                btnEl.textContent = '展開詳情';
+                return;
+            }
+            const log = allLogs.find(l => l.id === logId);
+            if (!log) return;
+            detailEl.innerHTML = renderDetail(log);
+            detailEl.classList.add('open');
+            btnEl.textContent = '收起詳情';
+        }
+
+        function renderDetail(log) {
+            let html = '';
+
+            if (log.truncated_fields && log.truncated_fields.length > 0) {
+                html += `<div class="truncate-warning">⚠️ 此筆 ${log.truncated_fields.map(escapeHtml).join('、')} 欄位已截斷，完整內容請查 Firestore Console（doc id <code>${escapeHtml(log.id)}</code>）</div>`;
+            }
+
+            html += `
+                <div class="detail-block">
+                    <div class="detail-block-title">System Prompt</div>
+                    <pre>${escapeHtml(log.system_prompt || '(空)')}</pre>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-block-title">Messages（${(log.messages || []).length} 則）</div>
+                    ${(log.messages || []).map(m => `
+                        <div class="message-row">
+                            <div class="message-role">${escapeHtml(m.role || '?')}</div>
+                            <div class="message-content">${escapeHtml(typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2))}</div>
+                        </div>
+                    `).join('') || '<em>(無 messages)</em>'}
+                </div>
+                <div class="detail-block">
+                    <div class="detail-block-title">Response Body</div>
+                    <pre>${escapeHtml(safeJsonStringify(log.response_body))}</pre>
+                </div>
+            `;
+            return html;
+        }
+
+        // ===== utils =====
+        function formatTwTime(iso) {
+            if (!iso) return '(無時間)';
+            try {
+                return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
+            } catch {
+                return iso;
+            }
+        }
+
+        function extractLastUserPrompt(messages) {
+            if (!Array.isArray(messages)) return '';
+            for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i].role === 'user') {
+                    const c = messages[i].content;
+                    return typeof c === 'string' ? c : JSON.stringify(c);
+                }
+            }
+            return '';
+        }
+
+        function safeJsonStringify(v) {
+            try {
+                return JSON.stringify(v, null, 2);
+            } catch {
+                return String(v);
+            }
+        }
+
+        function escapeHtml(s) {
+            if (s === null || s === undefined) return '';
+            return String(s)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        init();
+    </script>
+</body>
+
+</html>

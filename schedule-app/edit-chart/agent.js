@@ -1331,6 +1331,133 @@ function validateScopedChanges({
     };
 }
 
+// --- Firestore agent_log 寫入 ---
+// 後端回應的 body._debug 包含 system_prompt / messages / inference_time / mode / provider / model；
+// 我們把它跟前端自己的 timing / retry 資訊組合後寫一筆到 Firestore agent_log。
+// 失敗都 silent print，不影響主流程；後端不接 Firestore，所有寫入都在這裡。
+const AGENT_LOG_COLLECTION = 'agent_log';
+const AGENT_LOG_MAX_FIELD_BYTES = 500_000; // 單欄位 500KB 截斷上限，雙保險（Firestore single doc 上限 1MB）
+const _AGENT_LOG_DOC_ID_UNSAFE_RE = /[^0-9A-Za-z._-]/g;
+
+function _byteLengthUtf8(s) {
+    return new TextEncoder().encode(s).length;
+}
+
+function _truncateUtf8(value, maxBytes) {
+    // 回傳 [新字串, 是否被截斷]。在多 byte 字元邊界回退，避免切到一半。
+    if (value === null || value === undefined) return [value, false];
+    const s = typeof value === 'string' ? value : String(value);
+    const enc = new TextEncoder();
+    const bytes = enc.encode(s);
+    if (bytes.length <= maxBytes) return [s, false];
+    let end = maxBytes;
+    while (end > 0 && (bytes[end] & 0xC0) === 0x80) end--;
+    const cut = new TextDecoder('utf-8', { fatal: false }).decode(bytes.slice(0, end));
+    return [cut + `\n[...truncated, original ${bytes.length} bytes]`, true];
+}
+
+function _sanitizeAgentLogIdPart(value, fallback) {
+    const v = String(value || '').trim();
+    if (!v) return fallback;
+    const cleaned = v.replace(_AGENT_LOG_DOC_ID_UNSAFE_RE, '_').slice(0, 64);
+    return cleaned || fallback;
+}
+
+async function writeAgentLog({ startTime, retryCount, statusCode, debug, responseBody, selectedMode }) {
+    try {
+        if (!window.db || !window.firestore) return;
+        const { collection, doc, getDoc, setDoc } = window.firestore;
+
+        // doc id：沿用 {start-time}-{retry} 命名，字典序 ≈ 時間序
+        const fallbackStart = new Date().toISOString().replace(/[:.]/g, '-');
+        const safeStart = _sanitizeAgentLogIdPart(startTime, fallbackStart);
+        const retryInt = Number.isFinite(Number(retryCount)) ? Number(retryCount) : 0;
+        const baseId = `${safeStart}-${retryInt}`;
+        let docId = baseId;
+
+        // 同名衝突（同 start_time + retry 重送）加 _dup{i}
+        const colRef = collection(window.db, AGENT_LOG_COLLECTION);
+        for (let i = 0; i < 50; i++) {
+            const snap = await getDoc(doc(colRef, docId));
+            if (!snap.exists()) break;
+            docId = `${baseId}_dup${i + 1}`;
+            if (i === 49) docId = `${baseId}_dup${Date.now()}`;
+        }
+
+        // 欄位截斷
+        const truncated = [];
+        const dbg = debug || {};
+
+        const [spStr, spT] = _truncateUtf8(dbg.system_prompt || '', AGENT_LOG_MAX_FIELD_BYTES);
+        if (spT) truncated.push('system_prompt');
+
+        const cleanMessages = [];
+        let msgTruncated = false;
+        for (const m of (dbg.messages || [])) {
+            const role = (m && m.role) || '';
+            let content = (m && m.content !== undefined) ? m.content : '';
+            if (typeof content !== 'string') {
+                try { content = JSON.stringify(content); } catch { content = String(content); }
+            }
+            const [ct, t] = _truncateUtf8(content, AGENT_LOG_MAX_FIELD_BYTES);
+            if (t) msgTruncated = true;
+            cleanMessages.push({ role, content: ct });
+        }
+        if (msgTruncated) truncated.push('messages');
+
+        // response_body：序列化後若過大存 preview
+        let rbValue = responseBody;
+        try {
+            const rbJson = JSON.stringify(responseBody);
+            if (rbJson && _byteLengthUtf8(rbJson) > AGENT_LOG_MAX_FIELD_BYTES) {
+                const [preview] = _truncateUtf8(rbJson, AGENT_LOG_MAX_FIELD_BYTES);
+                rbValue = { _truncated: true, preview };
+                truncated.push('response_body');
+            }
+        } catch {
+            rbValue = { _unserializable: String(responseBody).slice(0, 5000) };
+        }
+
+        const payload = {
+            wall_clock_utc: new Date().toISOString(),
+            start_time: startTime || null,
+            retry_count: retryInt,
+            mode: dbg.mode || selectedMode || '',
+            provider: dbg.provider || '',
+            model: dbg.model || '',
+            status_code: Number.isFinite(Number(statusCode)) ? Number(statusCode) : null,
+            inference_time: (typeof dbg.inference_time === 'number') ? dbg.inference_time : null,
+            system_prompt: spStr,
+            messages: cleanMessages,
+            response_body: rbValue,
+            truncated_fields: truncated,
+        };
+
+        try {
+            await setDoc(doc(colRef, docId), payload);
+        } catch (writeErr) {
+            // 整 doc 寫入失敗（極端情境，超過 1MB 上限）→ fallback 寫精簡 metadata
+            console.warn('[agent-log] full write failed, fallback metadata-only:', writeErr);
+            await setDoc(doc(colRef, docId), {
+                wall_clock_utc: payload.wall_clock_utc,
+                start_time: payload.start_time,
+                retry_count: payload.retry_count,
+                mode: payload.mode,
+                provider: payload.provider,
+                model: payload.model,
+                status_code: payload.status_code,
+                inference_time: payload.inference_time,
+                system_prompt: '(omitted: full-doc write failed)',
+                messages: [],
+                response_body: { _omitted: true, reason: String(writeErr).slice(0, 500) },
+                truncated_fields: ['system_prompt', 'messages', 'response_body'],
+            });
+        }
+    } catch (e) {
+        console.warn('[agent-log] write failed:', e);
+    }
+}
+
 // --- API 呼叫 ---
 export async function sendAgentRequest() {
     const promptInput = document.getElementById('agentPromptInput');
@@ -1584,31 +1711,48 @@ export async function sendAgentRequest() {
     let apiErrorRetryCount = 0;
     const MAX_API_ERROR_RETRIES = 1;
 
-    // Prompt Engineering 實驗：排班模式才會被後端落檔。
-    // 同一個 sendAgentRequest 裡每次 fetch 共用 experimentStartTime；只有 API error retry 會增加計數。
+    // 同一個 sendAgentRequest 裡每次 fetch 共用 logStartTime，作為 Firestore agent_log doc id 的時間部分；
+    // 只有 API error retry 會增加 apiErrorRetryCount。
     const pad2 = n => String(n).padStart(2, '0');
     const _now = new Date();
-    const experimentStartTime = `${_now.getFullYear()}-${pad2(_now.getMonth() + 1)}-${pad2(_now.getDate())}_${pad2(_now.getHours())}-${pad2(_now.getMinutes())}-${pad2(_now.getSeconds())}`;
+    const logStartTime = `${_now.getFullYear()}-${pad2(_now.getMonth() + 1)}-${pad2(_now.getDate())}_${pad2(_now.getHours())}-${pad2(_now.getMinutes())}-${pad2(_now.getSeconds())}`;
 
     while (apiErrorRetryCount <= MAX_API_ERROR_RETRIES) {
         try {
-            const experimentFields = scheduling
-                ? { experimentStartTime, experimentRetryCount: apiErrorRetryCount }
-                : {};
             const response = await fetch(AGENT_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...payload, ...experimentFields })
+                body: JSON.stringify(payload)
+            });
+
+            // 統一讀 body 一次（成功失敗都讀）→ 嘗試 JSON parse → 抽 _debug → 寫 Firestore agent_log
+            const responseText = await response.text();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch {
+                result = { _raw_text: responseText };
+            }
+
+            // 從 body 抽出 _debug 並刪除（下游邏輯不要看到內部欄位）
+            const debug = (result && typeof result === 'object' && result._debug) || null;
+            if (debug) delete result._debug;
+
+            // 寫一筆 log（不論成功失敗都寫；await 確保 dashboard 能立即看到）
+            await writeAgentLog({
+                startTime: logStartTime,
+                retryCount: apiErrorRetryCount,
+                statusCode: response.status,
+                debug,
+                responseBody: result,
+                selectedMode,
             });
 
             if (!response.ok) {
-                const errorText = await response.text();
-                const apiError = new Error(`API 錯誤 (${response.status}): ${errorText}`);
+                const apiError = new Error(`API 錯誤 (${response.status}): ${typeof result === 'string' ? result : JSON.stringify(result).slice(0, 500)}`);
                 apiError.status = response.status;
                 throw apiError;
             }
-
-            const result = await response.json();
 
             // anon 模式：把 LLM 的英文回應還原成中文，後續所有邏輯（validator、setPendingChanges）用原始中文跑
             if (anonMaps) {

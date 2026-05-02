@@ -59,7 +59,7 @@ agent_schedule_GCF/
 | `suppressStructural` | 選（scheduling） | true 時把 tool schema 的 `addWeeks` / `removeWeeks` 拿掉 |
 | `consecutiveContextWeeks` | 選（scheduling） | 生成週次前/後 (N-1) 週的鄰近日期，僅供 LLM 跨邊界判斷連續週違規，read-only 不可修改 |
 | `leaveByDate` | 選（scheduling） | `{date: [names]}`，硬性禁止指定的人在指定日期被排班；違反 → 422 |
-| `experimentStartTime` / `experimentRetryCount` | 選 | 排班模式落檔到 `Prompt_Experiment/` 用，方便 prompt engineering 比對；僅 API error retry 會增加計數 |
+| `experimentStartTime` / `experimentRetryCount` | 已不使用 | 後端已不讀；前端自己持有用於組 Firestore agent_log 的 doc id |
 
 ## 模式
 
@@ -78,7 +78,7 @@ agent_schedule_GCF/
   - `USE_CSV_SCHEDULE=True` 時 `currentSchedule` 在後端轉成 CSV 餵給 LLM、回應再解回 JSON
   - `generateWeeks` 非空時加入 **Scope Constraint** 段落，限定輸出範圍；`suppressStructural=true` 時對應的 tool 欄位也會從 schema 移除
   - `leaveByDate` 非空時加入 **Person Unavailability** 段落，硬性禁止指定日期排上指定人員；後端 `_validate_tool_input` 也會把違反的 LLM 回應擋下回 422
-  - 每次呼叫會把 system prompt + messages + response 落檔到 `Prompt_Experiment/{start-time}-{retry}.txt`（可關閉，見下）
+  - 每次回應 body 會多一個 `_debug` 欄位，包含 system_prompt / messages / inference_time / mode / provider / model / status_code，由前端寫入 Firestore `agent_log`（後端不接 Firestore，見下）
 
 ## activeRules
 
@@ -204,15 +204,31 @@ ALLOWED_ORIGINS = [
 
 實測 CSV 比 JSON 約省 40% input/output tokens 與 ~38% 延遲，但首試通過率較低。請依需求切換。
 
-## Prompt Engineering 實驗紀錄
+## Agent Log（debug envelope）
 
-`scheduling` 模式每次呼叫會把以下落檔到 `Prompt_Experiment/{start-time}-{retry}.txt`：
-- system prompt（含 Scope Constraint、active rules、untrusted-wrapped schedule）
-- messages（chat history + 當次 user request）
-- response body（含 token usage）
-- LLM 原始 CSV 輸出（CSV 模式才有）
+後端不直接寫 Firestore；改在每次回應的 body 末端附加 `_debug` 欄位，內容：
 
-要關閉：環境變數 `AGENT_EXPERIMENT_LOG_DIR=""` 或刪掉 `Prompt_Experiment/` 資料夾。
+```json
+{
+  "_debug": {
+    "system_prompt": "...",
+    "messages": [{"role": "user", "content": "..."}, ...],
+    "inference_time": 12.345,
+    "mode": "scheduling",
+    "provider": "anthropic",
+    "model": "claude-opus-4-6",
+    "status_code": 200
+  }
+}
+```
+
+成功（200）與失敗（4xx/5xx）的 body 都會帶 `_debug`。前端 [`schedule-app/edit-chart/agent.js`](../schedule-app/edit-chart/agent.js) 收到回應後會：
+1. 把 `_debug` 從 body 抽出來，連同 frontend 自己的 timing / retry 資訊寫到 Firestore `agent_log`
+2. 把 `_debug` 從 body 刪除，下游處理邏輯看不到它
+
+這樣後端不需要 firebase-admin 套件、不需要 service account、cold start 也不會多花時間在 SDK init。
+
+要瀏覽記錄打開 [`schedule-app/edit-chart/agent_log_dashboard.html`](../schedule-app/edit-chart/agent_log_dashboard.html)。
 
 ## CORS
 

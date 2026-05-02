@@ -10,7 +10,6 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timezone
 
 import anthropic
 import functions_framework
@@ -32,16 +31,11 @@ REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "1
 FREQUENCY_PARITY_TOLERANCE = 0.50
 
 # =====================================================
-# Prompt Engineering 實驗紀錄（暫時）
+# Agent Debug Envelope
 # =====================================================
-# 排班模式 (selectedMode == "scheduling") 的每次 HTTP 呼叫會把 prompt/response
-# 落檔到 Prompt_Experiment/{start-time}-{retry}.txt。要停用就把環境變數
-# AGENT_EXPERIMENT_LOG_DIR 設成空字串，或直接砍掉這個資料夾。
-EXPERIMENT_LOG_DIR = os.environ.get(
-    "AGENT_EXPERIMENT_LOG_DIR",
-    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "Prompt_Experiment")),
-)
-EXPERIMENT_LOG_MODE = "scheduling"  # 只在這個 mode 紀錄
+# 每次回應前會把 system_prompt / messages / inference_time / mode / provider / model
+# 附加到 response body 的 _debug 欄位，由前端寫入 Firestore agent_log（後端不接 Firestore）。
+# 失敗只 print，不影響回應內容。
 
 _DEFAULT_SCHEMA_VALIDATION = {
     "max_add_weeks": 26,
@@ -502,13 +496,6 @@ def generate_agent_schedule(request):
     attached_csv_text = data.get("attachedCsvText", "")
     chat_history = data.get("chatHistory", [])
 
-    # Prompt Engineering 實驗用：由 client 傳來，排班模式會落檔
-    experiment_start = str(data.get("experimentStartTime", "") or "")
-    try:
-        experiment_retry = int(data.get("experimentRetryCount", 0) or 0)
-    except (TypeError, ValueError):
-        experiment_retry = 0
-
     # 「參考範圍」功能的 client 旗標
     #   generate_weeks: 限縮 LLM 能輸出的週次（非空就送進 system prompt 當 hard constraint）
     #   suppress_structural: 若為 True，從 tool schema 拿掉 addWeeks/removeWeeks
@@ -577,23 +564,22 @@ def generate_agent_schedule(request):
     inference_seconds = {"value": None}
 
     def _maybe_log(body, status):
-        if mode != EXPERIMENT_LOG_MODE:
+        """把 system_prompt / messages / inference_time 等附加到 response body 的 _debug 欄位，
+        前端會在收到回應後挑出 _debug 寫入 Firestore agent_log。後端不接 Firestore。"""
+        if not isinstance(body, dict):
             return
         try:
-            _log_experiment(
-                start_time=experiment_start,
-                retry_count=experiment_retry,
-                mode=mode,
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                messages=messages,
-                response_body=body,
-                status_code=status,
-                inference_seconds=inference_seconds["value"],
-            )
+            body["_debug"] = {
+                "system_prompt": system_prompt,
+                "messages": messages,
+                "inference_time": inference_seconds["value"],
+                "mode": mode,
+                "provider": provider,
+                "model": model,
+                "status_code": status,
+            }
         except Exception as log_err:
-            print(f"[experiment-log] write failed: {log_err}")
+            print(f"[agent-debug-attach] failed: {log_err}")
 
     try:
         if provider == "anthropic":
@@ -942,89 +928,3 @@ def _validate_tool_input(tool_input, rules, leave_by_date=None):
                     )
 
     return True, ""
-
-
-# =====================================================
-# Prompt Engineering 實驗落檔
-# =====================================================
-
-_FILENAME_UNSAFE_RE = re.compile(r"[^0-9A-Za-z._-]")
-
-
-def _sanitize_filename_part(value, fallback):
-    """把 start_time / retry 等欄位濾成檔名安全字元，避免路徑穿越或非法字元。"""
-    value = str(value or "").strip()
-    if not value:
-        return fallback
-    cleaned = _FILENAME_UNSAFE_RE.sub("_", value)
-    # 避免過長 / 過空
-    cleaned = cleaned[:64] or fallback
-    return cleaned
-
-
-def _log_experiment(start_time, retry_count, mode, provider, model,
-                    system_prompt, messages, response_body, status_code,
-                    inference_seconds=None):
-    """排班模式每次 HTTP 呼叫寫一份純文字 log：{start-time}-{retry}.txt。
-    start_time 為空時會用 server 當下時間做後備（方便早期還沒接 client 欄位的情境）。
-    inference_seconds 為實際打 LLM API 的 wall-clock 秒數（含重試）；None 表示尚未量到。
-    """
-    if not EXPERIMENT_LOG_DIR:
-        return
-
-    # fallback：client 沒傳 start_time 時，用伺服器當下時間
-    default_start = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    safe_start = _sanitize_filename_part(start_time, default_start)
-    try:
-        safe_retry = str(int(retry_count))
-    except (TypeError, ValueError):
-        safe_retry = "0"
-
-    os.makedirs(EXPERIMENT_LOG_DIR, exist_ok=True)
-    path = os.path.join(EXPERIMENT_LOG_DIR, f"{safe_start}-{safe_retry}.txt")
-
-    # 若同檔已存在（同一重試號重複觸發）加流水號避免互相覆蓋
-    if os.path.exists(path):
-        i = 1
-        while True:
-            alt = os.path.join(EXPERIMENT_LOG_DIR, f"{safe_start}-{safe_retry}_dup{i}.txt")
-            if not os.path.exists(alt):
-                path = alt
-                break
-            i += 1
-
-    try:
-        body_serialized = json.dumps(response_body, ensure_ascii=False, indent=2)
-    except (TypeError, ValueError):
-        body_serialized = repr(response_body)
-
-    lines = []
-    lines.append(f"=== Experiment Log ===")
-    lines.append(f"wall_clock_utc:  {datetime.now(timezone.utc).isoformat()}")
-    lines.append(f"start_time:      {start_time or '(none, fell back to server time)'}")
-    lines.append(f"retry_count:     {retry_count}")
-    lines.append(f"mode:            {mode}")
-    lines.append(f"provider:        {provider}")
-    lines.append(f"model:           {model}")
-    lines.append(f"status_code:     {status_code}")
-    if inference_seconds is None:
-        lines.append("inference_time:  (n/a)")
-    else:
-        lines.append(f"inference_time:  {inference_seconds:.3f} s")
-    lines.append("")
-    lines.append("--- System Prompt ---")
-    lines.append(system_prompt or "")
-    lines.append("")
-    lines.append("--- Messages (chat history + current user prompt) ---")
-    for i, m in enumerate(messages or []):
-        role = m.get("role", "?")
-        content = m.get("content", "")
-        lines.append(f"[{i}] {role}:")
-        lines.append(content if isinstance(content, str) else repr(content))
-        lines.append("")
-    lines.append("--- Response Body ---")
-    lines.append(body_serialized)
-    lines.append("")
-
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))

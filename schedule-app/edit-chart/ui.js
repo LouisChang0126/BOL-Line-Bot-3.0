@@ -659,6 +659,13 @@ export function initDisplayConfigEditor() {
         });
     }
 
+    const viewAgentLogsBtn = document.getElementById('viewAgentLogsBtn');
+    if (viewAgentLogsBtn) {
+        viewAgentLogsBtn.addEventListener('click', () => {
+            window.location.href = `./agent_log_dashboard.html?collection=${window.COLLECTION_NAME}`;
+        });
+    }
+
     const manageUsersBtn = document.getElementById('manageUsersBtn');
     if (manageUsersBtn) {
         manageUsersBtn.addEventListener('click', async () => {
