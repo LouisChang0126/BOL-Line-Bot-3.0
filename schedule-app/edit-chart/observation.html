@@ -354,9 +354,8 @@
             usersSnapshot.forEach(doc => {
                 const userData = doc.data();
                 const usageCount = userData.usage_count || {};
-                // 收集所有有資料的月份
                 Object.keys(usageCount).forEach(month => {
-                    if (Object.keys(usageCount[month]).length > 0) {
+                    if (Object.keys(usageCount[month] || {}).length > 0) {
                         availableMonths.add(month);
                     }
                 });
@@ -368,13 +367,13 @@
             // 如果沒有任何資料，顯示當前月份
             if (sortedMonths.length === 0) {
                 const now = new Date();
-                const currentMonth = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}`;
+                const currentMonth = `${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}`;
                 sortedMonths.push(currentMonth);
             }
 
             // 生成選項
             sortedMonths.forEach(monthKey => {
-                const [year, month] = monthKey.split('.');
+                const [year, month] = monthKey.split('_');
                 const option = document.createElement('option');
                 option.value = monthKey;
                 option.textContent = `${year} 年 ${parseInt(month)} 月`;
@@ -769,7 +768,7 @@
                 type: 'line',
                 data: {
                     labels: sortedMonths.map(m => {
-                        const [year, month] = m.split('.');
+                        const [year, month] = m.split('_');
                         return `${year}/${month}`;
                     }),
                     datasets: datasets

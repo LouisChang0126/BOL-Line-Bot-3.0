@@ -133,26 +133,12 @@ def log_usage(user_name, action_type):
         return
     
     try:
-        # 取得當前年月
-        month_key = now_tw().strftime("%Y.%m")
-
-        # 用 transaction 包讀寫，避免兩個併發呼叫各自讀到同一個舊值再 +1 互相覆蓋。
-        # 不能直接用 firestore.Increment + dotted field path，因為 month_key="2026.04" 帶 '.'、
-        # action_type 也可能帶 '/' 等特殊字元，Firestore 會把 path 切開造成 nested 結構錯亂。
-        user_ref = db.collection("users").document(user_name)
-
-        @firestore.transactional
-        def _bump(txn):
-            snap = user_ref.get(transaction=txn)
-            if not snap.exists:
-                return
-            usage_count = snap.to_dict().get('usage_count', {}) or {}
-            month_bucket = usage_count.get(month_key, {}) or {}
-            month_bucket[action_type] = int(month_bucket.get(action_type, 0)) + 1
-            usage_count[month_key] = month_bucket
-            txn.update(user_ref, {'usage_count': usage_count})
-
-        _bump(db.transaction())
+        # 月份 key 用 _ 取代 . 作分隔符（YYYY_MM），避免 Firestore 把 dotted field path
+        # 解析成巢狀結構，這樣可以直接用 firestore.Increment 原子加 1，免 transaction。
+        month_key = now_tw().strftime("%Y_%m")
+        db.collection("users").document(user_name).update({
+            f"usage_count.{month_key}.{action_type}": firestore.Increment(1)
+        })
     except Exception as e:
         print(f"log_usage error: {e}")
 
