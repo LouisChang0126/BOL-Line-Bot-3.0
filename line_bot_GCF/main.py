@@ -6,7 +6,7 @@ LINE Bot 服事系統 - Google Cloud Function
 
 from chatBotConfig import channel_secret, channel_access_token, line_bot_id
 from linebot import WebhookHandler, LineBotApi
-from linebot.exceptions import InvalidSignatureError
+from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import (
     FollowEvent,
     TextSendMessage,
@@ -46,6 +46,25 @@ line_bot_apis = [LineBotApi(token) for token in channel_access_token]
 # line_bot_id - 1 = 陣列索引
 handler = handlers[line_bot_id - 1] if line_bot_id >= 1 else handlers[0]
 line_bot_api = line_bot_apis[line_bot_id - 1] if line_bot_id >= 1 else line_bot_apis[0]
+
+
+def safe_push(api, user_id, messages):
+    """包一層 LineBotApiError 處理：無效的 user_id、token 失效、rate limit 等錯誤不該炸到
+    webhook handler，否則 GCF 回非 200 → LINE 平台無限重送。失敗時記 log，回傳 False。
+
+    注意：使用者封鎖 Bot 不會丟例外，LINE API 仍回 200（訊息靜默不送達），這條路抓不到。
+    若需要偵測封鎖，要另外用 get_profile 預檢或訂閱 UnfollowEvent。"""
+    if api is None or not user_id:
+        return False
+    try:
+        api.push_message(user_id, messages)
+        print(f"[push_message success] user={user_id} messages={messages}")
+        return True
+    except LineBotApiError as e:
+        status = getattr(e, "status_code", None)
+        msg = getattr(e, "message", None) or str(e)
+        print(f"[push_message failed] user={user_id} status={status} message={msg}")
+        return False
 
 
 # =====================================================
@@ -116,24 +135,24 @@ def log_usage(user_name, action_type):
     try:
         # 取得當前年月
         month_key = now_tw().strftime("%Y.%m")
-        
-        # 使用 Firestore 的原子操作增加計數
+
+        # 用 transaction 包讀寫，避免兩個併發呼叫各自讀到同一個舊值再 +1 互相覆蓋。
+        # 不能直接用 firestore.Increment + dotted field path，因為 month_key="2026.04" 帶 '.'、
+        # action_type 也可能帶 '/' 等特殊字元，Firestore 會把 path 切開造成 nested 結構錯亂。
         user_ref = db.collection("users").document(user_name)
-        user_doc = user_ref.get()
-        
-        if user_doc.exists:
-            user_data = user_doc.to_dict()
-            usage_count = user_data.get('usage_count', {})
-            
-            if month_key not in usage_count:
-                usage_count[month_key] = {}
-            
-            if action_type not in usage_count[month_key]:
-                usage_count[month_key][action_type] = 0
-            
-            usage_count[month_key][action_type] += 1
-            
-            user_ref.update({'usage_count': usage_count})
+
+        @firestore.transactional
+        def _bump(txn):
+            snap = user_ref.get(transaction=txn)
+            if not snap.exists:
+                return
+            usage_count = snap.to_dict().get('usage_count', {}) or {}
+            month_bucket = usage_count.get(month_key, {}) or {}
+            month_bucket[action_type] = int(month_bucket.get(action_type, 0)) + 1
+            usage_count[month_key] = month_bucket
+            txn.update(user_ref, {'usage_count': usage_count})
+
+        _bump(db.transaction())
     except Exception as e:
         print(f"log_usage error: {e}")
 
@@ -661,10 +680,12 @@ def send_shift_request(data_parts, mode):
         return TextSendMessage(text="該用戶尚未連線 LINE Bot，無法發送請求")
     
     if remind_msg:
-        receiver_bot_api.push_message(receiver_id, [send_message, TextSendMessage(text=remind_msg)])
+        ok = safe_push(receiver_bot_api, receiver_id, [send_message, TextSendMessage(text=remind_msg)])
     else:
-        receiver_bot_api.push_message(receiver_id, send_message)
-    
+        ok = safe_push(receiver_bot_api, receiver_id, send_message)
+    if not ok:
+        return TextSendMessage(text="無法送出請求給對方(帳號異常或系統忙碌)，請改用其他方式聯絡")
+
     return TextSendMessage(text="已詢問對方，確定後會再通知您")
 
 
@@ -703,145 +724,185 @@ def handle_shift_confirm(case_id):
 def handle_shift_reject(case_id):
     """
     處理被申請人拒絕調班/代班
-    
+
+    跟 execute_shift 一樣用 transaction 包讀寫，避免重複按拒絕／LINE 重送 postback 時把
+    通知訊息推送多次。狀態切換為 '拒絕' 在 transaction 內完成；只有第一次成功切換才會
+    執行 push 通知與 log_usage。
+
     Args:
         case_id: 調班記錄 ID
-        
+
     Returns:
         LINE message 物件
     """
-    doc = db.collection("_shift").document(case_id).get()
-    if not doc.exists:
+    shift_ref = db.collection("_shift").document(case_id)
+
+    # 'not_found' / 'rejected_already' / 'done_already' / ('rejected_now', data)
+    @firestore.transactional
+    def _txn(transaction):
+        snap = shift_ref.get(transaction=transaction)
+        if not snap.exists:
+            return ('not_found', None)
+        data = snap.to_dict()
+        if data["狀態"] == '拒絕':
+            return ('rejected_already', None)
+        if data["狀態"] != '等待':
+            return ('done_already', None)
+        transaction.update(shift_ref, {"狀態": '拒絕'})
+        return ('rejected_now', data)
+
+    try:
+        result, data = _txn(db.transaction())
+    except Exception as e:
+        print(f"handle_shift_reject transaction failed: {e}")
+        return TextSendMessage(text="系統忙碌，請稍後再試")
+
+    if result == 'not_found':
         return TextSendMessage(text="找不到這筆調班記錄")
-    
-    data = doc.to_dict()
-    
-    if data["狀態"] == '等待':
-        db.collection("_shift").document(case_id).update({"狀態": '拒絕'})
-        
-        # 通知申請人
-        requester_doc = db.collection("users").document(data['申請人']).get()
-        if requester_doc.exists:
-            requester_id = requester_doc.to_dict().get('lineId', '')
-            collection_name = get_serve_name_by_id(data.get('collection', ''))
-            
-            if data['被申請日'] == 'none':
-                notify_text = f"之前申請請 {data['被申請人']}\n代班 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
-            else:
-                notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
-            
-            if requester_id:
-                # 記錄調班/代班失敗通知
-                log_usage(data['申請人'], '調班/代班失敗通知')
-                # 使用申請人的 line_bot_id 取得正確的 LineBotApi
-                requester_bot_api = get_line_bot_api_for_user(data['申請人'])
-                if requester_bot_api:
-                    requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
-        
-        return TextSendMessage(text="已拒絕申請")
-    elif data["狀態"] == '拒絕':
+    if result == 'rejected_already':
         return TextSendMessage(text="已拒絕申請過了")
-    else:
+    if result == 'done_already':
         return TextSendMessage(text="已經調班/代班後不能更改")
+
+    # rejected_now：第一次拒絕成功 → 通知申請人（side effect 在 transaction 之外）
+    requester_doc = db.collection("users").document(data['申請人']).get()
+    if requester_doc.exists:
+        requester_id = requester_doc.to_dict().get('lineId', '')
+        collection_name = get_serve_name_by_id(data.get('collection', ''))
+
+        if data['被申請日'] == 'none':
+            notify_text = f"之前申請請 {data['被申請人']}\n代班 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
+        else:
+            notify_text = f"之前申請用 {data['申請日'][5:].replace('.', '/')} 的 {data['種類']}\n與 {data['被申請人']} 調班 {data['被申請日'][5:].replace('.', '/')}\n({collection_name})\n被對方「拒絕」\n請先跟對方私訊溝通好再申請，謝謝"
+
+        if requester_id:
+            log_usage(data['申請人'], '調班/代班失敗通知')
+            requester_bot_api = get_line_bot_api_for_user(data['申請人'])
+            if requester_bot_api:
+                safe_push(requester_bot_api, requester_id, TextSendMessage(text=notify_text))
+
+    return TextSendMessage(text="已拒絕申請")
 
 
 def execute_shift(case_id):
     """
     執行調班/代班
-    
+
+    把所有讀取（_shift 狀態、申請日 doc、被申請日 doc）+ 所有寫入（兩個日期 doc 的人員陣列、
+    _shift 狀態）包成同一個 Firestore transaction，避免兩條件：
+    (a) read-then-write race：兩個併發呼叫都通過「狀態 == 等待」檢查 → 雙重執行
+    (b) LINE 平台 at-least-once delivery：同一個 postback 重送時，第二次進來時 _shift 狀態
+        已是「成功」或「拒絕」，會在 transaction 內被擋下（自帶 idempotency）。
+    transaction 內部 raises 後會被裝飾器自動 retry；side effects（編輯記錄、push 通知）放在
+    transaction 之外做，避免重試時被執行多次。
+
     Args:
         case_id: 調班記錄 ID
         
     Returns:
         LINE message 物件
     """
-    doc = db.collection("_shift").document(case_id).get()
-    if not doc.exists:
+    today = now_tw().strftime("%Y.%m.%d")
+    shift_ref = db.collection("_shift").document(case_id)
+
+    # transaction 內回傳的結果型別（用 tuple 簡化）
+    # ('not_found', None, ...) / ('rejected_already', data, ...) / ...
+    # ('apply_invalidated', data, apply_persons, None, None)
+    # ('target_invalidated', data, apply_persons, target_persons, None)
+    # ('success', data, apply_persons, target_persons, (new_apply, new_target))
+
+    @firestore.transactional
+    def _txn(transaction):
+        shift_snap = shift_ref.get(transaction=transaction)
+        if not shift_snap.exists:
+            return ('not_found', None, None, None, None)
+        data = shift_snap.to_dict()
+
+        # 狀態 gate：在 transaction 內讀取保證 idempotency（重送請求進來時這裡會擋下）
+        if data["狀態"] != '等待':
+            if data["狀態"] == '拒絕':
+                return ('rejected_already', data, None, None, None)
+            return ('done_already', data, None, None, None)
+
+        collection_id = data.get('collection', 'service')
+        serve_type = data['種類']
+
+        apply_ref = db.collection(collection_id).document(data['申請日'])
+        apply_snap = apply_ref.get(transaction=transaction)
+        if not apply_snap.exists:
+            return ('apply_doc_missing', data, None, None, None)
+        apply_persons = apply_snap.to_dict().get(serve_type, [])
+
+        # 申請人已被換掉、或申請日已過 → 標記拒絕
+        if data['申請人'] not in apply_persons or data['申請日'] < today:
+            transaction.update(shift_ref, {"狀態": '拒絕'})
+            return ('apply_invalidated', data, apply_persons, None, None)
+
+        target_persons = None
+        new_target = None
+
+        if data['被申請日'] != 'none':
+            # 調班模式
+            target_ref = db.collection(collection_id).document(data['被申請日'])
+            target_snap = target_ref.get(transaction=transaction)
+            if not target_snap.exists:
+                return ('target_doc_missing', data, apply_persons, None, None)
+            target_persons = target_snap.to_dict().get(serve_type, [])
+
+            if data['被申請人'] not in target_persons or data['被申請日'] < today:
+                transaction.update(shift_ref, {"狀態": '拒絕'})
+                return ('target_invalidated', data, apply_persons, target_persons, None)
+
+            new_apply = [data['被申請人'] if p == data['申請人'] else p for p in apply_persons]
+            new_target = [data['申請人'] if p == data['被申請人'] else p for p in target_persons]
+            transaction.update(apply_ref, {serve_type: new_apply})
+            transaction.update(target_ref, {serve_type: new_target})
+        else:
+            # 代班模式
+            new_apply = [data['被申請人'] if p == data['申請人'] else p for p in apply_persons]
+            transaction.update(apply_ref, {serve_type: new_apply})
+
+        transaction.update(shift_ref, {"狀態": '成功'})
+        return ('success', data, apply_persons, target_persons, (new_apply, new_target))
+
+    try:
+        result, data, apply_persons, target_persons, applied = _txn(db.transaction())
+    except Exception as e:
+        print(f"execute_shift transaction failed: {e}")
+        return TextSendMessage(text="系統忙碌，請稍後再試")
+
+    # ── 各種非成功結果的回應（side effects 都在 transaction 之外，避免 retry 重複執行）──
+    if result == 'not_found':
         return TextSendMessage(text="找不到這筆調班記錄")
-    
-    data = doc.to_dict()
-    
-    if data["狀態"] != '等待':
-        if data["狀態"] == '拒絕':
-            return TextSendMessage(text="已拒絕後不能更改")
+    if result == 'rejected_already':
+        return TextSendMessage(text="已拒絕後不能更改")
+    if result == 'done_already':
         return TextSendMessage(text="已成功調班過了")
-    
-    collection_id = data.get('collection', 'service')  # 相容舊資料
-    serve_type = data['種類']
-    now_taiwan = now_tw()
-    today = now_taiwan.strftime("%Y.%m.%d")
-    
-    # 檢查並執行調班
-    apply_doc = db.collection(collection_id).document(data['申請日']).get()
-    if not apply_doc.exists:
+    if result == 'apply_doc_missing':
         return TextSendMessage(text="找不到申請日的服事資料")
-    
-    apply_data = apply_doc.to_dict()
-    apply_persons = apply_data.get(serve_type, [])
-    
-    # 檢查申請人是否還在申請日的服事中（直接檢查陣列）
-    if data['申請人'] not in apply_persons or data['申請日'] < today:
-        db.collection("_shift").document(case_id).update({"狀態": '拒絕'})
+    if result == 'target_doc_missing':
+        return TextSendMessage(text="找不到被申請日的服事資料")
+    if result == 'apply_invalidated':
         notify_requester_failure(data, "因時間已過或你已經跟第三人調班了")
         return TextSendMessage(text="你或對方已經跟第三人調班/代班了，此調班失敗")
-    
-    if data['被申請日'] != 'none':
-        # 調班模式
-        target_doc = db.collection(collection_id).document(data['被申請日']).get()
-        if not target_doc.exists:
-            return TextSendMessage(text="找不到被申請日的服事資料")
-        
-        target_data = target_doc.to_dict()
-        target_persons = target_data.get(serve_type, [])
-        
-        # 檢查被申請人是否還在被申請日的服事中（直接檢查陣列）
-        if data['被申請人'] not in target_persons or data['被申請日'] < today:
-            db.collection("_shift").document(case_id).update({"狀態": '拒絕'})
-            notify_requester_failure(data, "因對方已經跟第三人調班了")
-            return TextSendMessage(text="你或對方已經跟第三人調班/代班了，此調班失敗")
-        
-        # 執行調班
-        new_apply = [data['被申請人'] if p == data['申請人'] else p for p in apply_persons]
-        new_target = [data['申請人'] if p == data['被申請人'] else p for p in target_persons]
-        
-        db.collection(collection_id).document(data['申請日']).update({serve_type: new_apply})
-        db.collection(collection_id).document(data['被申請日']).update({serve_type: new_target})
-    else:
-        # 代班模式
-        new_apply = [data['被申請人'] if p == data['申請人'] else p for p in apply_persons]
-        db.collection(collection_id).document(data['申請日']).update({serve_type: new_apply})
-    
-    # 更新狀態
-    db.collection("_shift").document(case_id).update({"狀態": '成功'})
-    
+    if result == 'target_invalidated':
+        notify_requester_failure(data, "因對方已經跟第三人調班了")
+        return TextSendMessage(text="你或對方已經跟第三人調班/代班了，此調班失敗")
+
+    # ── 成功路徑 ──
+    new_apply, new_target = applied
+    serve_type = data['種類']
+    collection_id = data.get('collection', 'service')
+
     # 記錄到編輯記錄 (_edit_chart_log)
     try:
         log_time = now_tw().strftime("%Y.%m.%d.%H.%M.%S")
-        difference = {}
-        
+        difference = {
+            data['申請日']: {serve_type: {'old': apply_persons, 'new': new_apply}}
+        }
         if data['被申請日'] != 'none':
-            # 調班模式：兩個日期都有變更
-            difference[data['申請日']] = {
-                serve_type: {
-                    'old': apply_persons,
-                    'new': new_apply
-                }
-            }
-            difference[data['被申請日']] = {
-                serve_type: {
-                    'old': target_persons,
-                    'new': new_target
-                }
-            }
-        else:
-            # 代班模式：只有申請日有變更
-            difference[data['申請日']] = {
-                serve_type: {
-                    'old': apply_persons,
-                    'new': new_apply
-                }
-            }
-        
+            difference[data['被申請日']] = {serve_type: {'old': target_persons, 'new': new_target}}
+
         db.collection("_edit_chart_log").document(log_time).set({
             'serve-id': collection_id,
             'source': 'linebot',
@@ -850,10 +911,10 @@ def execute_shift(case_id):
         })
     except Exception as e:
         print(f"寫入編輯記錄失敗: {e}")
-    
+
     # 通知申請人成功
     notify_requester_success(data)
-    
+
     return TextSendMessage(text="已成功調班/代班")
 
 
@@ -875,7 +936,7 @@ def notify_requester_success(data):
             # 使用申請人的 line_bot_id 取得正確的 LineBotApi
             requester_bot_api = get_line_bot_api_for_user(data['申請人'])
             if requester_bot_api:
-                requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
+                safe_push(requester_bot_api, requester_id, TextSendMessage(text=notify_text))
 
 
 def notify_requester_failure(data, reason):
@@ -896,7 +957,7 @@ def notify_requester_failure(data, reason):
             # 使用申請人的 line_bot_id 取得正確的 LineBotApi
             requester_bot_api = get_line_bot_api_for_user(data['申請人'])
             if requester_bot_api:
-                requester_bot_api.push_message(requester_id, TextSendMessage(text=notify_text))
+                safe_push(requester_bot_api, requester_id, TextSendMessage(text=notify_text))
 
 
 def remind_same_week_serve(user_name, date, exclude_collection=None):
