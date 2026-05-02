@@ -461,6 +461,8 @@
                     dateGroups[date] = [];
                 }
                 Object.entries(services).forEach(([service, value]) => {
+                    // 跳過底線前綴的內部 metadata（例如 _deleted 表示整週被刪除）
+                    if (service.startsWith('_')) return;
                     // 支援新格式 { old, new }
                     const oldValue = value.old || [];
                     const newValue = value.new || [];
@@ -545,6 +547,8 @@
                     const updates = {};
 
                     for (const [service, value] of Object.entries(services)) {
+                        // 跳過底線前綴的內部 metadata（例如 _deleted），避免被當成服事欄位寫回 Firestore
+                        if (service.startsWith('_')) continue;
                         updates[service] = value.old || [];
                     }
 
