@@ -131,12 +131,42 @@
             font-variant-numeric: tabular-nums;
         }
 
-        /* ===== 篩選 Tab ===== */
+        /* ===== 篩選列 ===== */
+        .filter-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
         .filter-tabs {
             display: flex;
             gap: 8px;
-            margin-bottom: 20px;
             flex-wrap: wrap;
+        }
+
+        .serve-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .serve-filter select {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 13px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .badge-serve {
+            background: #ecfdf5;
+            color: #047857;
         }
 
         .filter-tab {
@@ -357,8 +387,7 @@
 <body>
     <div class="admin-page">
         <div class="page-header">
-            <a id="backBtn" href="../edit-chart/edit-chart.html" class="btn btn-secondary"
-                style="padding: 6px 12px;">← 返回</a>
+            <a href="index.html" class="btn btn-secondary" style="padding: 6px 12px;">← 返回</a>
             <h1>🤖 AI 助手記錄</h1>
             <button class="refresh-btn" id="refreshBtn">🔄 刷新</button>
         </div>
@@ -367,11 +396,19 @@
             <div class="no-logs" style="grid-column: 1 / -1;">載入中...</div>
         </div>
 
-        <div class="filter-tabs">
-            <button class="filter-tab active" data-filter="all">全部</button>
-            <button class="filter-tab tab-scheduling" data-filter="scheduling">📋 排班</button>
-            <button class="filter-tab tab-edit_qa" data-filter="edit_qa">💬 問答</button>
-            <button class="filter-tab tab-failed" data-filter="failed">⚠️ 失敗</button>
+        <div class="filter-row">
+            <div class="filter-tabs">
+                <button class="filter-tab active" data-filter="all">全部</button>
+                <button class="filter-tab tab-scheduling" data-filter="scheduling">📋 排班</button>
+                <button class="filter-tab tab-edit_qa" data-filter="edit_qa">💬 問答</button>
+                <button class="filter-tab tab-failed" data-filter="failed">⚠️ 失敗</button>
+            </div>
+            <div class="serve-filter">
+                <label for="serveFilter">崇拜：</label>
+                <select id="serveFilter">
+                    <option value="all">全部崇拜</option>
+                </select>
+            </div>
         </div>
 
         <div class="log-list" id="logList">
@@ -387,7 +424,7 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { initializeAppCheck, ReCaptchaV3Provider } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-check.js';
         import {
-            getFirestore, collection, getDocs, query, orderBy, limit, startAfter
+            getFirestore, collection, doc, getDoc, getDocs, query, orderBy, limit, startAfter
         } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { firebaseConfig, RECAPTCHA_SITE_KEY } from '../firebase-config.js';
 
@@ -398,11 +435,14 @@
         let lastSnapshot = null;        // 用於 startAfter 接續分頁
         let hasMore = true;
         let currentFilter = 'all';
+        let currentServeFilter = 'all';
+        const serveMap = {}; // { collectionId: { name, emoji } } 從 _config/serve-list 載入
 
         const statsGridEl = document.getElementById('statsGrid');
         const logListEl = document.getElementById('logList');
         const loadMoreBtn = document.getElementById('loadMoreBtn');
         const refreshBtn = document.getElementById('refreshBtn');
+        const serveFilterEl = document.getElementById('serveFilter');
 
         async function init() {
             const app = initializeApp(firebaseConfig);
@@ -412,13 +452,6 @@
             });
             db = getFirestore(app);
 
-            // 動態設定返回連結（保留 ?collection= 以便回到正確的班表頁）
-            const urlParams = new URLSearchParams(window.location.search);
-            const targetCollection = urlParams.get('collection') || '';
-            if (targetCollection) {
-                document.getElementById('backBtn').href = `../edit-chart/edit-chart.html?collection=${targetCollection}`;
-            }
-
             refreshBtn.addEventListener('click', () => reloadAll());
             loadMoreBtn.addEventListener('click', () => loadPage(/*append=*/true));
 
@@ -426,7 +459,50 @@
                 btn.addEventListener('click', () => setFilter(btn.dataset.filter));
             });
 
+            serveFilterEl.addEventListener('change', (e) => {
+                currentServeFilter = e.target.value;
+                render();
+            });
+
+            await loadServeList();
             await reloadAll();
+        }
+
+        async function loadServeList() {
+            try {
+                const snap = await getDoc(doc(db, '_config', 'serve-list'));
+                if (!snap.exists()) return;
+                const serves = snap.data().serves || [];
+                for (const s of serves) {
+                    if (s && s.id) {
+                        serveMap[s.id] = { name: s.name || s.id, emoji: s.emoji || '' };
+                    }
+                }
+            } catch (err) {
+                console.warn('載入 _config/serve-list 失敗:', err);
+            }
+        }
+
+        function formatServe(id) {
+            if (!id) return '(未指定)';
+            const info = serveMap[id];
+            if (!info) return id;
+            return `${info.emoji ? info.emoji + ' ' : ''}${info.name}`;
+        }
+
+        function refreshServeFilterOptions() {
+            // 把 logs 中出現過的 serve-id（即使 _config 沒有也要列出來）合進選項
+            const seen = new Set();
+            allLogs.forEach(l => { if (l['serve-id']) seen.add(l['serve-id']); });
+            // 從 serveMap 取出順序，但允許 logs 自己帶入 _config 沒登記的 id
+            const ids = Array.from(new Set([...Object.keys(serveMap), ...seen]));
+            const prev = currentServeFilter;
+            serveFilterEl.innerHTML = '<option value="all">全部崇拜</option>' +
+                ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(formatServe(id))}</option>`).join('');
+            // 還原前次選擇（若仍存在）
+            if (ids.includes(prev)) serveFilterEl.value = prev;
+            else serveFilterEl.value = 'all';
+            currentServeFilter = serveFilterEl.value;
         }
 
         async function reloadAll() {
@@ -469,6 +545,7 @@
                     hasMore = snap.size === PAGE_SIZE;
                 }
 
+                refreshServeFilterOptions();
                 render();
             } catch (err) {
                 console.error('載入 agent_log 失敗:', err);
@@ -486,9 +563,13 @@
         }
 
         function applyFilter(logs) {
-            if (currentFilter === 'all') return logs;
-            if (currentFilter === 'failed') return logs.filter(l => (l.status_code ?? 0) !== 200);
-            return logs.filter(l => l.mode === currentFilter);
+            let out = logs;
+            if (currentServeFilter !== 'all') {
+                out = out.filter(l => (l['serve-id'] || '') === currentServeFilter);
+            }
+            if (currentFilter === 'all') return out;
+            if (currentFilter === 'failed') return out.filter(l => (l.status_code ?? 0) !== 200);
+            return out.filter(l => l.mode === currentFilter);
         }
 
         function render() {
@@ -603,11 +684,16 @@
                     : '';
                 const modeKey = log.mode || 'unknown';
                 const modeBadgeClass = `badge-mode-${modeKey === 'scheduling' || modeKey === 'edit_qa' ? modeKey : 'edit_qa'}`;
+                const serveId = log['serve-id'] || '';
+                const serveBadge = serveId
+                    ? `<span class="badge badge-serve">⛪ ${escapeHtml(formatServe(serveId))}</span>`
+                    : '<span class="badge badge-serve">(未指定崇拜)</span>';
                 return `
                     <div class="log-card ${isFail ? 'failed' : ''}">
                         <div class="log-header">
                             <div>
                                 <div class="log-title">
+                                    ${serveBadge}
                                     <span class="badge ${modeBadgeClass}">${escapeHtml(modeKey)}</span>
                                     <span class="badge badge-provider">${escapeHtml(log.provider || '?')} / ${escapeHtml(log.model || '?')}</span>
                                     <span class="badge ${isFail ? 'badge-status-fail' : 'badge-status-ok'}">${log.status_code ?? '?'}</span>

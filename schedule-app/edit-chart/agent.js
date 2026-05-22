@@ -1363,7 +1363,7 @@ function _sanitizeAgentLogIdPart(value, fallback) {
     return cleaned || fallback;
 }
 
-async function writeAgentLog({ startTime, retryCount, statusCode, debug, responseBody, selectedMode }) {
+async function writeAgentLog({ startTime, retryCount, statusCode, debug, responseBody, selectedMode, serveId }) {
     try {
         if (!window.db || !window.firestore) return;
         const { collection, doc, getDoc, setDoc } = window.firestore;
@@ -1422,6 +1422,7 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
             wall_clock_utc: new Date().toISOString(),
             start_time: startTime || null,
             retry_count: retryInt,
+            'serve-id': serveId || '', // 對應的崇拜 collection（如 _service_1），與 _edit_chart_log 同欄位名
             mode: dbg.mode || selectedMode || '',
             provider: dbg.provider || '',
             model: dbg.model || '',
@@ -1442,6 +1443,7 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
                 wall_clock_utc: payload.wall_clock_utc,
                 start_time: payload.start_time,
                 retry_count: payload.retry_count,
+                'serve-id': payload['serve-id'],
                 mode: payload.mode,
                 provider: payload.provider,
                 model: payload.model,
@@ -1746,6 +1748,7 @@ export async function sendAgentRequest() {
                 debug,
                 responseBody: result,
                 selectedMode,
+                serveId: window.COLLECTION_NAME || '',
             });
 
             if (!response.ok) {
