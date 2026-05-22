@@ -304,8 +304,8 @@
           <option value="edit_qa" selected>編輯 / 問答</option>
           <option value="scheduling">排班</option>
         </select>
-        <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">思考</span>
-        <label class="toggle-switch" title="開啟讓 LLM 在回答前思考（會增加延遲與費用）">
+        <label class="agent-config-label" style="margin-bottom: 0; white-space: nowrap;">思考</label>
+        <label class="toggle-switch" title="開啟思考(花3倍的時間與費用換更高的品質)">
           <input type="checkbox" id="thinkingToggle">
           <span class="toggle-slider"></span>
         </label>
@@ -430,12 +430,10 @@
           <span id="agentLeaveIcon" style="font-size: 10px; color: #64748b;">▶</span>
         </label>
         <div class="agent-rules" id="agentLeaveContent" style="display: none;">
-          <div id="agentLeaveScrollContainer"
-            style="max-height: 180px; overflow-y: auto; padding-right: 4px;">
-            <div id="agentLeaveRows" style="display: flex; flex-direction: column; gap: 6px;">
-              <!-- 動態填入；至少有一列 -->
-            </div>
+          <div id="agentLeaveRows" style="display: flex; flex-direction: column; gap: 6px;">
+            <!-- 動態填入；至少有一列 -->
           </div>
+          <datalist id="agentLeavePersonOptions"><!-- 動態填入人名選項 --></datalist>
           <button type="button" id="agentLeaveAddBtn"
             style="margin-top: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;
                    background: #f1f5f9; color: #475569; border: 1px dashed #cbd5e1;

@@ -158,8 +158,9 @@ function _weekDiff(a, b) {
 // 工程師調整這個常數即可改寬/緊。
 const FREQUENCY_PARITY_TOLERANCE = 0.50;
 
-// 請假區域：每列一筆 {date, person}，皆從下拉選擇。預設一列空白。
-let _leaveRows = [{ date: '', person: '' }];
+// 請假區域：每列一筆 {person, dates: []}。person 用搜尋型 input + datalist，dates 是多選週次。
+// 預設一列空白。送出前 pivot 成 {date: [persons]} 給後端 leaveByDate。
+let _leaveRows = [{ person: '', dates: [] }];
 
 // =====================================================
 // 實驗：把人員名稱匿名化成預設英文池後再送給 LLM
@@ -515,85 +516,178 @@ function _getGenerateRangeDates() {
     return expandDateRange(genStart, genEnd, [...existingDates, ...futureCandidates]);
 }
 
+// YYYY.MM.DD → MM/DD，多日用「、」串接；給請假區域的按鈕 label 用
+function _formatLeaveDatesLabel(dates) {
+    return (dates || [])
+        .map(d => {
+            const m = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(d || '');
+            return m ? `${m[2]}/${m[3]}` : d;
+        })
+        .join('、');
+}
+
 function rebuildLeaveRows() {
     const container = document.getElementById('agentLeaveRows');
     if (!container) return;
 
     if (!_leaveRows || _leaveRows.length === 0) {
-        _leaveRows = [{ date: '', person: '' }];
+        _leaveRows = [{ person: '', dates: [] }];
     }
 
     const dateOptions = _getGenerateRangeDates();
     const personOptions = Array.from(allPersonNames || []).sort();
 
-    // 若舊 row 的 date 已不在新範圍 → 清掉該欄（保留 person，使用者可重選日期）
+    // 若舊 row 的某些 dates 已不在新範圍 → 過濾掉（保留 person，使用者可重選）
     _leaveRows.forEach(r => {
-        if (r.date && !dateOptions.includes(r.date)) r.date = '';
+        if (Array.isArray(r.dates)) {
+            r.dates = r.dates.filter(d => dateOptions.includes(d));
+        } else {
+            r.dates = [];
+        }
+        // 相容舊資料：若還有單一 date 欄位（不該有），併進 dates 後丟掉
+        if (typeof r.date === 'string') {
+            if (r.date && dateOptions.includes(r.date) && !r.dates.includes(r.date)) {
+                r.dates.push(r.date);
+            }
+            delete r.date;
+        }
     });
 
-    const datePlaceholder = dateOptions.length === 0 ? '請先選擇生成週次' : '日期';
-    const dateOptHtml = dateOptions
-        .map(d => `<option value="${d}">${d}</option>`).join('');
-    const personOptHtml = personOptions
-        .map(n => `<option value="${_escapeAttr(n)}">${_escapeAttr(n)}</option>`).join('');
+    // datalist 給人名搜尋用（共用一個，避免每列重複）
+    const datalist = document.getElementById('agentLeavePersonOptions');
+    if (datalist) {
+        datalist.innerHTML = personOptions
+            .map(n => `<option value="${_escapeAttr(n)}"></option>`).join('');
+    }
 
-    container.innerHTML = _leaveRows.map((_, i) => `
-        <div class="agent-leave-row" data-idx="${i}"
-            style="display:flex; align-items:center; gap:6px;">
-            <select class="agent-leave-date" data-idx="${i}"
-                style="flex:1; min-width:0; padding:4px 6px; font-size:12px; font-family:monospace;">
-                <option value="">${datePlaceholder}</option>
-                ${dateOptHtml}
-            </select>
-            <select class="agent-leave-person" data-idx="${i}"
-                style="flex:1; min-width:0; padding:4px 6px; font-size:12px;">
-                <option value="">人員</option>
-                ${personOptHtml}
-            </select>
-            <button type="button" class="agent-leave-remove" data-idx="${i}"
-                title="移除此列"
-                style="cursor:pointer; background:none; border:none; color:#94a3b8; font-size:16px; padding:0 4px; line-height:1;">×</button>
-        </div>
-    `).join('');
+    const datePlaceholder = dateOptions.length === 0 ? '請先選擇生成週次' : '未選日期';
 
-    // 還原已選值（innerHTML 重建後 select.value 會被 reset）
+    container.innerHTML = _leaveRows.map((row, i) => {
+        const selectedDates = row.dates || [];
+        const buttonLabel = selectedDates.length === 0
+            ? datePlaceholder
+            : _formatLeaveDatesLabel(selectedDates);
+        const optionsHtml = dateOptions.length === 0
+            ? '<div class="agent-leave-dates-empty">請先選擇生成週次</div>'
+            : dateOptions.map(d => `
+                <label class="agent-leave-dates-option">
+                    <input type="checkbox" value="${d}" data-idx="${i}">
+                    <span>${d}</span>
+                </label>
+            `).join('');
+        return `
+            <div class="agent-leave-row" data-idx="${i}">
+                <input class="agent-leave-person" list="agentLeavePersonOptions"
+                    data-idx="${i}" placeholder="輸入或選擇人名"
+                    autocomplete="off">
+                <div class="agent-leave-dates" data-idx="${i}">
+                    <button type="button" class="agent-leave-dates-button" data-idx="${i}"
+                        aria-expanded="false">
+                        <span class="agent-leave-dates-label">${buttonLabel}</span>
+                        <span class="caret">▾</span>
+                    </button>
+                    <div class="agent-leave-dates-popup" data-idx="${i}" hidden>
+                        ${optionsHtml}
+                    </div>
+                </div>
+                <button type="button" class="agent-leave-remove" data-idx="${i}"
+                    title="移除此列">×</button>
+            </div>
+        `;
+    }).join('');
+
+    // 還原已選值（innerHTML 重建後欄位會被 reset）
     _leaveRows.forEach((r, i) => {
-        const dEl = container.querySelector(`.agent-leave-date[data-idx="${i}"]`);
         const pEl = container.querySelector(`.agent-leave-person[data-idx="${i}"]`);
-        if (dEl && r.date) dEl.value = r.date;
         if (pEl && r.person) pEl.value = r.person;
+        (r.dates || []).forEach(d => {
+            const cb = container.querySelector(
+                `.agent-leave-dates-popup[data-idx="${i}"] input[type="checkbox"][value="${d}"]`
+            );
+            if (cb) cb.checked = true;
+        });
     });
 
-    // 綁事件：選值寫回 state
-    container.querySelectorAll('.agent-leave-date').forEach(el => {
-        el.addEventListener('change', () => {
-            const idx = parseInt(el.dataset.idx, 10);
-            if (Number.isFinite(idx) && _leaveRows[idx]) _leaveRows[idx].date = el.value;
-        });
-    });
+    // 綁事件：人名輸入
     container.querySelectorAll('.agent-leave-person').forEach(el => {
-        el.addEventListener('change', () => {
+        el.addEventListener('input', () => {
             const idx = parseInt(el.dataset.idx, 10);
-            if (Number.isFinite(idx) && _leaveRows[idx]) _leaveRows[idx].person = el.value;
+            if (Number.isFinite(idx) && _leaveRows[idx]) _leaveRows[idx].person = el.value.trim();
         });
     });
+
+    // 綁事件：日期下拉按鈕（toggle popup；同時關掉其他 popup）
+    container.querySelectorAll('.agent-leave-dates-button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = btn.dataset.idx;
+            const popup = container.querySelector(`.agent-leave-dates-popup[data-idx="${idx}"]`);
+            const isOpen = popup && !popup.hidden;
+            // 先關掉所有 popup
+            container.querySelectorAll('.agent-leave-dates-popup').forEach(p => { p.hidden = true; });
+            container.querySelectorAll('.agent-leave-dates-button').forEach(b => {
+                b.setAttribute('aria-expanded', 'false');
+            });
+            if (popup && !isOpen) {
+                popup.hidden = false;
+                btn.setAttribute('aria-expanded', 'true');
+            }
+        });
+    });
+
+    // 綁事件：checkbox 變更 → 更新 state + 重新計算 button label
+    container.querySelectorAll('.agent-leave-dates-popup input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const idx = parseInt(cb.dataset.idx, 10);
+            if (!Number.isFinite(idx) || !_leaveRows[idx]) return;
+            const popup = cb.closest('.agent-leave-dates-popup');
+            const selected = Array.from(popup.querySelectorAll('input[type="checkbox"]:checked'))
+                .map(x => x.value);
+            _leaveRows[idx].dates = selected;
+            const labelEl = container.querySelector(
+                `.agent-leave-dates-button[data-idx="${idx}"] .agent-leave-dates-label`
+            );
+            if (labelEl) {
+                labelEl.textContent = selected.length === 0
+                    ? (dateOptions.length === 0 ? '請先選擇生成週次' : '未選日期')
+                    : _formatLeaveDatesLabel(selected);
+            }
+        });
+    });
+
+    // 阻止點 popup 內部時冒泡關閉
+    container.querySelectorAll('.agent-leave-dates-popup').forEach(popup => {
+        popup.addEventListener('click', (e) => e.stopPropagation());
+    });
+
+    // 綁事件：移除列
     container.querySelectorAll('.agent-leave-remove').forEach(el => {
         el.addEventListener('click', () => {
             const idx = parseInt(el.dataset.idx, 10);
             if (!Number.isFinite(idx) || !_leaveRows[idx]) return;
             _leaveRows.splice(idx, 1);
-            if (_leaveRows.length === 0) _leaveRows.push({ date: '', person: '' });
+            if (_leaveRows.length === 0) _leaveRows.push({ person: '', dates: [] });
             rebuildLeaveRows();
         });
     });
 }
 
+// 全域點擊外部時關閉所有日期 popup（只綁一次）
+if (typeof window !== 'undefined' && !window.__agentLeaveOutsideClickBound) {
+    window.__agentLeaveOutsideClickBound = true;
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.agent-leave-dates')) {
+            document.querySelectorAll('.agent-leave-dates-popup').forEach(p => { p.hidden = true; });
+            document.querySelectorAll('.agent-leave-dates-button').forEach(b => {
+                b.setAttribute('aria-expanded', 'false');
+            });
+        }
+    });
+}
+
 function _addLeaveRow() {
-    _leaveRows.push({ date: '', person: '' });
+    _leaveRows.push({ person: '', dates: [] });
     rebuildLeaveRows();
-    // 滾到底，讓使用者看到新加的列
-    const sc = document.getElementById('agentLeaveScrollContainer');
-    if (sc) sc.scrollTop = sc.scrollHeight;
 }
 
 // --- 側邊欄控制 ---
@@ -1653,20 +1747,27 @@ export async function sendAgentRequest() {
         payload.consecutiveContextWeeks = consecutiveContextWeeks;
     }
 
-    // 請假區域：每列必須日期 + 人員都有；兩個皆空就略過。組成 {date: [names]}
+    // 請假區域：每列 {person, dates: []}。完全空 → 略過；只填人沒選日期 / 只選日期沒填人 → 錯誤。
+    // pivot 成 {date: [persons]} 給後端 leaveByDate
     const leaveByDate = {};
     if (scheduling) {
         const leaveErrors = [];
         _leaveRows.forEach((row, i) => {
-            const d = (row.date || '').trim();
             const p = (row.person || '').trim();
-            if (!d && !p) return;                       // 完全空 → 略過
-            if (!d || !p) {
-                leaveErrors.push(`第 ${i + 1} 列：${!d ? '日期' : '人員'} 未選`);
+            const dates = Array.isArray(row.dates) ? row.dates.filter(Boolean) : [];
+            if (!p && dates.length === 0) return;       // 完全空 → 略過
+            if (!p) {
+                leaveErrors.push(`第 ${i + 1} 列：人員未填`);
                 return;
             }
-            if (!leaveByDate[d]) leaveByDate[d] = [];
-            if (!leaveByDate[d].includes(p)) leaveByDate[d].push(p);
+            if (dates.length === 0) {
+                leaveErrors.push(`第 ${i + 1} 列：未選任何週次`);
+                return;
+            }
+            dates.forEach(d => {
+                if (!leaveByDate[d]) leaveByDate[d] = [];
+                if (!leaveByDate[d].includes(p)) leaveByDate[d].push(p);
+            });
         });
         if (leaveErrors.length > 0) {
             addChatMessage(
