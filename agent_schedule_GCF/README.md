@@ -218,7 +218,9 @@ ALLOWED_ORIGINS = [
     "mode": "scheduling",
     "provider": "anthropic",
     "model": "claude-opus-4-6",
-    "status_code": 200
+    "status_code": 200,
+    "enable_thinking": true,
+    "thinking": "(LLM 的 thinking / reasoning 文字；anthropic 來自 thinking content blocks，gemini 來自 include_thoughts=True 的 thought parts，openai_compatible 來自 reasoning_content；無 thinking 就是空字串)"
   }
 }
 ```

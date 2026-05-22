@@ -1489,6 +1489,9 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
         const [spStr, spT] = _truncateUtf8(dbg.system_prompt || '', AGENT_LOG_MAX_FIELD_BYTES);
         if (spT) truncated.push('system_prompt');
 
+        const [thinkStr, thinkT] = _truncateUtf8(dbg.thinking || '', AGENT_LOG_MAX_FIELD_BYTES);
+        if (thinkT) truncated.push('thinking');
+
         const cleanMessages = [];
         let msgTruncated = false;
         for (const m of (dbg.messages || [])) {
@@ -1528,6 +1531,7 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
             status_code: Number.isFinite(Number(statusCode)) ? Number(statusCode) : null,
             inference_time: (typeof dbg.inference_time === 'number') ? dbg.inference_time : null,
             system_prompt: spStr,
+            thinking: thinkStr,
             messages: cleanMessages,
             response_body: rbValue,
             truncated_fields: truncated,
@@ -1546,12 +1550,14 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
                 mode: payload.mode,
                 provider: payload.provider,
                 model: payload.model,
+                enable_thinking: payload.enable_thinking,
                 status_code: payload.status_code,
                 inference_time: payload.inference_time,
                 system_prompt: '(omitted: full-doc write failed)',
+                thinking: '(omitted: full-doc write failed)',
                 messages: [],
                 response_body: { _omitted: true, reason: String(writeErr).slice(0, 500) },
-                truncated_fields: ['system_prompt', 'messages', 'response_body'],
+                truncated_fields: ['system_prompt', 'thinking', 'messages', 'response_body'],
             });
         }
     } catch (e) {

@@ -240,19 +240,29 @@ def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base
 
     tool_input = None
     text_parts = []
+    thinking_parts = []
     for block in message.content:
         block_type = getattr(block, "type", None)
         if block_type == "tool_use" and getattr(block, "name", "") == "update_schedule":
             tool_input = getattr(block, "input", None) or {}
-            break
+            continue
         if block_type == "text":
             text_parts.append(getattr(block, "text", ""))
+        elif block_type == "thinking":
+            t = getattr(block, "thinking", "") or getattr(block, "text", "")
+            if t:
+                thinking_parts.append(t)
 
     usage = {
         "input_tokens": getattr(getattr(message, "usage", None), "input_tokens", 0),
         "output_tokens": getattr(getattr(message, "usage", None), "output_tokens", 0),
     }
-    return tool_input, "\n".join([t for t in text_parts if t]).strip(), usage
+    return (
+        tool_input,
+        "\n".join([t for t in text_parts if t]).strip(),
+        usage,
+        "\n".join(thinking_parts).strip(),
+    )
 
 
 # Module-level OpenAI client cache：warm container 下重用同一個 httpx Client，
@@ -322,7 +332,9 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
         "input_tokens": getattr(usage_obj, "prompt_tokens", 0) if usage_obj else 0,
         "output_tokens": getattr(usage_obj, "completion_tokens", 0) if usage_obj else 0,
     }
-    return tool_input, (message.content or "").strip(), usage
+    # reasoning models (o1/o3 等) 把思考內容放在 reasoning_content；非 reasoning 模型沒這個欄位
+    thinking_text = getattr(message, "reasoning_content", "") or ""
+    return tool_input, (message.content or "").strip(), usage, str(thinking_text).strip()
 
 
 # Module-level Gemini client cache：跟另外兩個 provider 對稱，warm container 下重用 client。
@@ -440,7 +452,16 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
     thinking_cfg_cls = getattr(google_genai_types, "ThinkingConfig", None)
     if thinking_cfg_cls is not None:
         budget = -1 if enable_thinking else 0
-        config_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=budget)
+        cfg_kwargs = {"thinking_budget": budget}
+        if enable_thinking:
+            # 預設模型只回 budget 用量，不回實際 thought 文字；要拿到 thought 必須 include_thoughts=True
+            # 舊版 SDK 沒這個欄位 → TypeError，退回不傳此 kwarg
+            try:
+                config_kwargs["thinking_config"] = thinking_cfg_cls(**cfg_kwargs, include_thoughts=True)
+            except TypeError:
+                config_kwargs["thinking_config"] = thinking_cfg_cls(**cfg_kwargs)
+        else:
+            config_kwargs["thinking_config"] = thinking_cfg_cls(**cfg_kwargs)
     config = google_genai_types.GenerateContentConfig(**config_kwargs)
 
     # 暫時性錯誤（408/429/5xx）由 SDK 內建 retry 處理，見 _get_gemini_client
@@ -452,6 +473,7 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
 
     tool_input = None
     text_parts = []
+    thinking_parts = []
     candidates = getattr(response, "candidates", None) or []
     if candidates:
         content = getattr(candidates[0], "content", None)
@@ -469,9 +491,13 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
                         tool_input = dict(args)
                     except Exception:
                         tool_input = {}
-                break
+                continue
             t = getattr(part, "text", None)
-            if t:
+            if not t:
+                continue
+            if bool(getattr(part, "thought", False)):
+                thinking_parts.append(t)
+            else:
                 text_parts.append(t)
 
     usage_meta = getattr(response, "usage_metadata", None)
@@ -483,7 +509,12 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
         "thoughts_tokens": getattr(usage_meta, "thoughts_token_count", 0) if usage_meta else 0,
         "tool_use_prompt_tokens": getattr(usage_meta, "tool_use_prompt_token_count", 0) if usage_meta else 0,
     }
-    return tool_input, "\n".join(text_parts).strip(), usage
+    return (
+        tool_input,
+        "\n".join(text_parts).strip(),
+        usage,
+        "\n".join(thinking_parts).strip(),
+    )
 
 
 @functions_framework.http
@@ -578,9 +609,10 @@ def generate_agent_schedule(request):
     messages = _build_messages(chat_history, prompt)
 
     inference_seconds = {"value": None}
+    thinking_text = {"value": ""}
 
     def _maybe_log(body, status):
-        """把 system_prompt / messages / inference_time 等附加到 response body 的 _debug 欄位，
+        """把 system_prompt / messages / inference_time / thinking 等附加到 response body 的 _debug 欄位，
         前端會在收到回應後挑出 _debug 寫入 Firestore agent_log。後端不接 Firestore。"""
         if not isinstance(body, dict):
             return
@@ -594,6 +626,7 @@ def generate_agent_schedule(request):
                 "model": model,
                 "status_code": status,
                 "enable_thinking": enable_thinking,
+                "thinking": thinking_text["value"] or "",
             }
         except Exception as log_err:
             print(f"[agent-debug-attach] failed: {log_err}")
@@ -605,25 +638,28 @@ def generate_agent_schedule(request):
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
             _t0 = time.perf_counter()
-            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url, enable_thinking=enable_thinking)
+            tool_input, text_response, usage, thinking = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url, enable_thinking=enable_thinking)
             inference_seconds["value"] = time.perf_counter() - _t0
+            thinking_text["value"] = thinking
         elif provider == "openai_compatible":
             _t0 = time.perf_counter()
-            tool_input, text_response, usage = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
+            tool_input, text_response, usage, thinking = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
             inference_seconds["value"] = time.perf_counter() - _t0
+            thinking_text["value"] = thinking
         elif provider == "gemini":
             if not api_key:
                 body = {"error": "API key not configured for gemini mode"}
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
             _t0 = time.perf_counter()
-            tool_input, text_response, usage = _gemini_chat(
+            tool_input, text_response, usage, thinking = _gemini_chat(
                 api_key, model, system_prompt, messages,
                 tool=schedule_tool,
                 current_schedule=current_schedule,
                 enable_thinking=enable_thinking,
             )
             inference_seconds["value"] = time.perf_counter() - _t0
+            thinking_text["value"] = thinking
         else:
             body = {"error": f"Unsupported provider: {provider}"}
             _maybe_log(body, 500)
@@ -797,13 +833,23 @@ def build_system_prompt(current_schedule, active_rules, attached_csv_text, selec
             "\n"
         )
 
-    # Person Unavailability：leave_by_date 非空時注入「該日期不得排這些人」硬性規則
+    # Person Unavailability：leave_by_date 非空時注入「該人哪幾週請假」硬性規則
+    # UI 上是「一個人填多週請假」的形狀，這裡把後端收到的 {date: [names]} pivot 回
+    # {person: [dates]}，讓 system prompt 與 UI 心智模型一致，模型一眼能看出每個人請假涵蓋哪些週。
     unavailability_block = ""
     if leave_by_date:
-        lines = [f"- {d}: {', '.join(ns)}" for d, ns in sorted(leave_by_date.items())]
+        person_to_dates = {}
+        for d, ns in leave_by_date.items():
+            for n in ns:
+                person_to_dates.setdefault(n, []).append(d)
+        lines = [
+            f"- {p}: {', '.join(sorted(set(dates)))}"
+            for p, dates in sorted(person_to_dates.items())
+        ]
         unavailability_block = (
             "## Person Unavailability (HARD REQUIREMENT)\n"
-            "On the following dates, the listed people are UNAVAILABLE and MUST NOT be assigned to ANY service for that date:\n"
+            "Each line lists a person and the dates they are UNAVAILABLE. "
+            "These people MUST NOT be assigned to ANY service on the listed dates:\n"
             + "\n".join(lines) + "\n\n"
         )
 

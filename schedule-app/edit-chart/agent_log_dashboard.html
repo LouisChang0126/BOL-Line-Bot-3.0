@@ -382,6 +382,147 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+
+        /* ===== 模型定價面板 ===== */
+        .pricing-panel {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+            display: none;
+        }
+
+        .pricing-panel.open {
+            display: block;
+        }
+
+        .pricing-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .pricing-header h2 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .pricing-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+
+        .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .pricing-table th,
+        .pricing-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+            text-align: left;
+        }
+
+        .pricing-table th {
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: #f8fafc;
+        }
+
+        .pricing-table input[type="number"] {
+            width: 90px;
+            padding: 4px 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .pricing-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 12px;
+        }
+
+        .badge-cost {
+            background: #fffbeb;
+            color: #b45309;
+        }
+
+        /* ===== Schedule Data 區塊 / 表格 / Thinking ===== */
+        .schedule-block {
+            margin-top: 12px;
+        }
+
+        .view-toggle {
+            display: inline-flex;
+            gap: 4px;
+            margin-left: 8px;
+        }
+
+        .view-toggle button {
+            padding: 4px 10px;
+            border: 1px solid var(--border-color);
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+        }
+
+        .view-toggle button.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .schedule-table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            max-height: 420px;
+        }
+
+        .schedule-table {
+            border-collapse: collapse;
+            font-size: 12px;
+            min-width: 100%;
+        }
+
+        .schedule-table th,
+        .schedule-table td {
+            border: 1px solid var(--border-color);
+            padding: 6px 8px;
+            text-align: left;
+            vertical-align: top;
+            white-space: nowrap;
+        }
+
+        .schedule-table th {
+            background: #f1f5f9;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            font-weight: 600;
+        }
+
+        .schedule-table td.date-cell {
+            font-variant-numeric: tabular-nums;
+            color: var(--text-secondary);
+            background: #fafafa;
+        }
+
+        .thinking-pre {
+            background: #1e1b4b;
+            color: #ddd6fe;
+        }
     </style>
 </head>
 
@@ -390,7 +531,23 @@
         <div class="page-header">
             <a href="index.html" class="btn btn-secondary" style="padding: 6px 12px;">← 返回</a>
             <h1>🤖 AI 助手記錄</h1>
+            <button class="refresh-btn" id="pricingBtn" style="background:#fbbf24;">💵 模型定價</button>
             <button class="refresh-btn" id="refreshBtn">🔄 刷新</button>
+        </div>
+
+        <div class="pricing-panel" id="pricingPanel">
+            <div class="pricing-header">
+                <h2>💵 模型定價（USD / 1M tokens）</h2>
+            </div>
+            <div class="pricing-hint">
+                估計花費 = (input_tokens × input 單價 + output_tokens × output 單價) / 1,000,000。<br>
+                資料儲存於瀏覽器 localStorage，僅你本機可見。
+            </div>
+            <div id="pricingTableWrap"></div>
+            <div class="pricing-actions">
+                <button class="btn btn-secondary" id="pricingResetBtn">回復預設值</button>
+                <button class="btn btn-primary" id="pricingSaveBtn">儲存</button>
+            </div>
         </div>
 
         <div class="stats-grid" id="statsGrid">
@@ -431,6 +588,67 @@
 
         const PAGE_SIZE = 200;
 
+        // ===== 模型定價（localStorage 持久化） =====
+        // 預設參考值（USD / 1M tokens）。若你的合約價不同，按「模型定價」按鈕修改。
+        const PRICING_STORAGE_KEY = 'agent_log_pricing_v1';
+        const DEFAULT_PRICING = {
+            // Anthropic
+            'claude-opus-4-7': { input: 5, output: 25 },
+            'claude-sonnet-4-6': { input: 3, output: 15 },
+            // OpenAI
+            // 'gpt-5': { input: 2, output: 8 },
+            // Gemini
+            'gemini-3.1-pro-preview': { input: 2, output: 12 },
+            'gemini-3.5-flash': { input: 1.5, output: 9 },
+            'gemini-3-flash': { input: 0.5, output: 3 },
+            // DeepSeek
+            'deepseek-v4-pro': { input: 0.43, output: 0.87 },
+            'deepseek-v4-flash': { input: 0.11, output: 0.22 },
+        };
+
+        function loadPricing() {
+            try {
+                const raw = localStorage.getItem(PRICING_STORAGE_KEY);
+                if (!raw) return { ...DEFAULT_PRICING };
+                const parsed = JSON.parse(raw);
+                // 與預設合併（讓使用者保留自訂的同時也撿到新加入的預設模型）
+                return { ...DEFAULT_PRICING, ...parsed };
+            } catch {
+                return { ...DEFAULT_PRICING };
+            }
+        }
+
+        function savePricing(p) {
+            try {
+                localStorage.setItem(PRICING_STORAGE_KEY, JSON.stringify(p));
+            } catch (err) {
+                console.warn('pricing save failed:', err);
+            }
+        }
+
+        let pricing = loadPricing();
+
+        function estimateCostUSD(log) {
+            const body = log.response_body;
+            const usage = (body && typeof body === 'object') ? body.usage : null;
+            if (!usage || typeof usage !== 'object') return null;
+            const inTok = Number(usage.input_tokens) || 0;
+            const outTok = Number(usage.output_tokens) || 0;
+            if (inTok === 0 && outTok === 0) return null;
+            const model = log.model || '';
+            const price = pricing[model];
+            if (!price) return null;
+            const cost = (inTok * (Number(price.input) || 0) + outTok * (Number(price.output) || 0)) / 1_000_000;
+            return cost;
+        }
+
+        function formatCost(usd) {
+            if (usd === null || usd === undefined || !Number.isFinite(usd)) return null;
+            if (usd < 0.0001) return `≈$0`;
+            if (usd < 0.01) return `$${usd.toFixed(4)}`;
+            return `$${usd.toFixed(3)}`;
+        }
+
         let db;
         let allLogs = [];
         let lastSnapshot = null;        // 用於 startAfter 接續分頁
@@ -444,6 +662,11 @@
         const loadMoreBtn = document.getElementById('loadMoreBtn');
         const refreshBtn = document.getElementById('refreshBtn');
         const serveFilterEl = document.getElementById('serveFilter');
+        const pricingBtn = document.getElementById('pricingBtn');
+        const pricingPanel = document.getElementById('pricingPanel');
+        const pricingTableWrap = document.getElementById('pricingTableWrap');
+        const pricingSaveBtn = document.getElementById('pricingSaveBtn');
+        const pricingResetBtn = document.getElementById('pricingResetBtn');
 
         async function init() {
             const app = initializeApp(firebaseConfig);
@@ -455,6 +678,35 @@
 
             refreshBtn.addEventListener('click', () => reloadAll());
             loadMoreBtn.addEventListener('click', () => loadPage(/*append=*/true));
+
+            pricingBtn.addEventListener('click', () => {
+                const isOpen = pricingPanel.classList.toggle('open');
+                if (isOpen) renderPricingTable();
+            });
+            pricingSaveBtn.addEventListener('click', () => {
+                const next = {};
+                pricingTableWrap.querySelectorAll('tr[data-model]').forEach(tr => {
+                    const m = tr.dataset.model;
+                    const inEl = tr.querySelector('.pricing-input-in');
+                    const outEl = tr.querySelector('.pricing-input-out');
+                    const inVal = Number(inEl.value);
+                    const outVal = Number(outEl.value);
+                    if (Number.isFinite(inVal) && Number.isFinite(outVal) && (inVal > 0 || outVal > 0)) {
+                        next[m] = { input: inVal, output: outVal };
+                    }
+                });
+                pricing = { ...DEFAULT_PRICING, ...next };
+                savePricing(next);
+                pricingPanel.classList.remove('open');
+                render();
+            });
+            pricingResetBtn.addEventListener('click', () => {
+                if (!confirm('確定要回復所有模型的預設定價？你目前的自訂值會被清除。')) return;
+                localStorage.removeItem(PRICING_STORAGE_KEY);
+                pricing = { ...DEFAULT_PRICING };
+                renderPricingTable();
+                render();
+            });
 
             document.querySelectorAll('.filter-tab').forEach(btn => {
                 btn.addEventListener('click', () => setFilter(btn.dataset.filter));
@@ -489,6 +741,35 @@
             const info = serveMap[id];
             if (!info) return id;
             return `${info.emoji ? info.emoji + ' ' : ''}${info.name}`;
+        }
+
+        function renderPricingTable() {
+            // 模型來源：預設清單 ∪ 已載入 logs 出現過的模型
+            const seenModels = new Set(Object.keys(pricing));
+            allLogs.forEach(l => { if (l.model) seenModels.add(l.model); });
+            const models = Array.from(seenModels).sort();
+            const rows = models.map(m => {
+                const p = pricing[m] || { input: 0, output: 0 };
+                return `
+                    <tr data-model="${escapeHtml(m)}">
+                        <td><code>${escapeHtml(m)}</code></td>
+                        <td><input type="number" step="0.01" min="0" class="pricing-input-in" value="${Number(p.input) || 0}"></td>
+                        <td><input type="number" step="0.01" min="0" class="pricing-input-out" value="${Number(p.output) || 0}"></td>
+                    </tr>
+                `;
+            }).join('');
+            pricingTableWrap.innerHTML = `
+                <table class="pricing-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Input ($/MTok)</th>
+                            <th>Output ($/MTok)</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="3" style="text-align:center;color:var(--text-secondary);padding:16px;">尚無模型資料</td></tr>'}</tbody>
+                </table>
+            `;
         }
 
         function refreshServeFilterOptions() {
@@ -599,6 +880,7 @@
             let todayCount = 0, weekCount = 0;
             let okCount = 0;
             let timeSum = 0, timeN = 0;
+            let costSum = 0, costN = 0, costMissingModels = new Set();
             const modeDist = {};
             const providerDist = {};
 
@@ -615,11 +897,23 @@
                 }
                 modeDist[l.mode || '(unknown)'] = (modeDist[l.mode || '(unknown)'] || 0) + 1;
                 providerDist[l.provider || '(unknown)'] = (providerDist[l.provider || '(unknown)'] || 0) + 1;
+
+                const cost = estimateCostUSD(l);
+                if (cost !== null) {
+                    costSum += cost;
+                    costN++;
+                } else if (l.model && !pricing[l.model]) {
+                    costMissingModels.add(l.model);
+                }
             });
 
             const total = logs.length;
             const successRate = total > 0 ? (okCount / total * 100).toFixed(1) : '0.0';
             const avgTime = timeN > 0 ? (timeSum / timeN).toFixed(2) : '—';
+            const costLabel = costN > 0 ? `$${costSum.toFixed(4)}` : '—';
+            const costSub = costMissingModels.size > 0
+                ? `缺少定價：${Array.from(costMissingModels).join(', ')}`
+                : `基於 ${costN} 筆有 usage 與定價的記錄`;
 
             statsGridEl.innerHTML = `
                 <div class="stat-card">
@@ -636,6 +930,11 @@
                     <div class="stat-card-title">平均推論時間</div>
                     <div class="stat-card-value">${avgTime}${avgTime === '—' ? '' : ' s'}</div>
                     <div class="stat-card-sub">基於 ${timeN} 筆有計時的記錄</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-title">💵 估計總花費</div>
+                    <div class="stat-card-value">${costLabel}</div>
+                    <div class="stat-card-sub">${escapeHtml(costSub)}</div>
                 </div>
                 <div class="stat-card wide">
                     <div class="stat-card-title">模式分布</div>
@@ -687,8 +986,11 @@
                 const modeBadgeClass = `badge-mode-${modeKey === 'scheduling' || modeKey === 'edit_qa' ? modeKey : 'edit_qa'}`;
                 const serveId = log['serve-id'] || '';
                 const serveBadge = serveId
-                    ? `<span class="badge badge-serve">⛪ ${escapeHtml(formatServe(serveId))}</span>`
+                    ? `<span class="badge badge-serve">${escapeHtml(formatServe(serveId))}</span>`
                     : '<span class="badge badge-serve">(未指定崇拜)</span>';
+                const cost = estimateCostUSD(log);
+                const costLbl = formatCost(cost);
+                const costBadge = costLbl ? `<span class="badge badge-cost">💵 ${costLbl}</span>` : '';
                 return `
                     <div class="log-card ${isFail ? 'failed' : ''}">
                         <div class="log-header">
@@ -700,6 +1002,7 @@
                                     <span class="badge ${isFail ? 'badge-status-fail' : 'badge-status-ok'}">${log.status_code ?? '?'}</span>
                                     ${typeof log.inference_time === 'number' ? `<span class="badge badge-provider">${log.inference_time.toFixed(2)}s</span>` : ''}
                                     ${log.enable_thinking ? '<span class="badge badge-thinking">🧠 思考</span>' : ''}
+                                    ${costBadge}
                                     ${truncBadge}
                                 </div>
                                 <div class="log-meta">${tsLabel} · doc id <code>${escapeHtml(log.id)}</code></div>
@@ -734,6 +1037,58 @@
             btnEl.textContent = '收起詳情';
         }
 
+        function extractScheduleData(responseBody) {
+            if (!responseBody || typeof responseBody !== 'object') return null;
+            if (!Array.isArray(responseBody.scheduleData)) return null;
+            return responseBody.scheduleData;
+        }
+
+        function responseBodyForDisplay(responseBody) {
+            // 把 scheduleData 從 response_body 拿掉（換成 "..."），讓上方 JSON 不要塞滿整片
+            if (!responseBody || typeof responseBody !== 'object') return responseBody;
+            if (!Array.isArray(responseBody.scheduleData)) return responseBody;
+            return { ...responseBody, scheduleData: '...' };
+        }
+
+        function renderScheduleTable(scheduleData) {
+            if (!Array.isArray(scheduleData) || scheduleData.length === 0) {
+                return '<div style="padding:12px;color:var(--text-secondary);">(空)</div>';
+            }
+            // 蒐集所有欄位（date 永遠第一欄；其他欄位以第一筆出現順序保留，新欄位往後接）
+            const colOrder = [];
+            const colSet = new Set();
+            scheduleData.forEach(row => {
+                if (!row || typeof row !== 'object') return;
+                Object.keys(row).forEach(k => {
+                    if (k === 'date') return;
+                    if (!colSet.has(k)) { colSet.add(k); colOrder.push(k); }
+                });
+            });
+            const cols = ['date', ...colOrder];
+            const thead = `<thead><tr>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`;
+            const tbody = `<tbody>${scheduleData.map(row => {
+                if (!row || typeof row !== 'object') {
+                    return `<tr><td colspan="${cols.length}"><em>(invalid row)</em></td></tr>`;
+                }
+                return `<tr>${cols.map(c => {
+                    const v = row[c];
+                    const cls = c === 'date' ? 'date-cell' : '';
+                    let cell;
+                    if (Array.isArray(v)) {
+                        cell = v.map(x => escapeHtml(String(x))).join('、');
+                    } else if (v === null || v === undefined) {
+                        cell = '';
+                    } else if (typeof v === 'object') {
+                        cell = escapeHtml(JSON.stringify(v));
+                    } else {
+                        cell = escapeHtml(String(v));
+                    }
+                    return `<td class="${cls}">${cell || '&nbsp;'}</td>`;
+                }).join('')}</tr>`;
+            }).join('')}</tbody>`;
+            return `<div class="schedule-table-wrap"><table class="schedule-table">${thead}${tbody}</table></div>`;
+        }
+
         function renderDetail(log) {
             let html = '';
 
@@ -746,6 +1101,20 @@
                     <div class="detail-block-title">System Prompt</div>
                     <pre>${escapeHtml(log.system_prompt || '(空)')}</pre>
                 </div>
+            `;
+
+            // Thinking 區塊：只在有內容時顯示
+            const thinking = (log.thinking || '').trim();
+            if (thinking) {
+                html += `
+                    <div class="detail-block">
+                        <div class="detail-block-title">🧠 Thinking</div>
+                        <pre class="thinking-pre">${escapeHtml(thinking)}</pre>
+                    </div>
+                `;
+            }
+
+            html += `
                 <div class="detail-block">
                     <div class="detail-block-title">Messages（${(log.messages || []).length} 則）</div>
                     ${(log.messages || []).map(m => `
@@ -755,13 +1124,57 @@
                         </div>
                     `).join('') || '<em>(無 messages)</em>'}
                 </div>
+            `;
+
+            const scheduleData = extractScheduleData(log.response_body);
+            const bodyForDisplay = responseBodyForDisplay(log.response_body);
+
+            html += `
                 <div class="detail-block">
                     <div class="detail-block-title">Response Body</div>
-                    <pre>${escapeHtml(safeJsonStringify(log.response_body))}</pre>
+                    <pre>${escapeHtml(safeJsonStringify(bodyForDisplay))}</pre>
                 </div>
             `;
+
+            if (scheduleData !== null) {
+                html += `
+                    <div class="detail-block schedule-block">
+                        <div class="detail-block-title">
+                            Schedule Data（${scheduleData.length} 列）
+                            <span class="view-toggle" data-target="${log.id}">
+                                <button type="button" class="view-toggle-btn active" data-view="table" data-target="${log.id}">表格</button>
+                                <button type="button" class="view-toggle-btn" data-view="json" data-target="${log.id}">JSON</button>
+                            </span>
+                        </div>
+                        <div id="schedule-view-${log.id}">${renderScheduleTable(scheduleData)}</div>
+                    </div>
+                `;
+            }
+
             return html;
         }
+
+        // 委派事件：JSON / 表格 切換
+        logListEl.addEventListener('click', (e) => {
+            const btn = e.target.closest('.view-toggle-btn');
+            if (!btn) return;
+            const logId = btn.dataset.target;
+            const view = btn.dataset.view;
+            const log = allLogs.find(l => l.id === logId);
+            if (!log) return;
+            const scheduleData = extractScheduleData(log.response_body);
+            if (scheduleData === null) return;
+            const viewEl = document.getElementById(`schedule-view-${logId}`);
+            const toggleWrap = btn.parentElement;
+            toggleWrap.querySelectorAll('.view-toggle-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.view === view);
+            });
+            if (view === 'table') {
+                viewEl.innerHTML = renderScheduleTable(scheduleData);
+            } else {
+                viewEl.innerHTML = `<pre>${escapeHtml(safeJsonStringify(scheduleData))}</pre>`;
+            }
+        });
 
         // ===== utils =====
         function formatTwTime(iso) {
