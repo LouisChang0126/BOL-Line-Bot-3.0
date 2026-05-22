@@ -2037,25 +2037,63 @@ function setupEventListeners() {
                     // 儲存 metadata
                     updates.push(saveMetadata());
 
+                    // 同步更新歷史班表資料 (最多 100 週)
+                    try {
+                        const { collection, getDocs, query, where, orderBy } = window.firestore;
+                        const db = window.db;
+                        const COLLECTION_NAME = window.COLLECTION_NAME;
+                        const currentSundayStr = formatDateString(getCurrentSunday());
+
+                        const minPastDate = new Date(getCurrentSunday());
+                        minPastDate.setDate(minPastDate.getDate() - (100 * 7));
+                        const minPastDateStr = formatDateString(minPastDate);
+
+                        const pastQ = query(
+                            collection(db, COLLECTION_NAME),
+                            where('__name__', '>=', minPastDateStr),
+                            where('__name__', '<', currentSundayStr),
+                            orderBy('__name__')
+                        );
+                        const pastSnapshot = await getDocs(pastQ);
+                        pastSnapshot.forEach(docRef => {
+                            if (docRef.id === '_metadata') return;
+                            const data = docRef.data();
+                            if (!(oldName in data)) return;
+
+                            const newData = { ...data };
+                            newData[newName] = data[oldName];
+                            delete newData[oldName];
+                            updates.push(saveSchedule(docRef.id, newData));
+
+                            // 同步更新已載入的 pastData 記憶體
+                            const pastRow = pastData.find(r => r.date === docRef.id);
+                            if (pastRow) {
+                                pastRow[newName] = pastRow[oldName];
+                                delete pastRow[oldName];
+                            }
+                        });
+                    } catch (err) {
+                        console.warn('更新歷史班表服事名稱失敗:', err);
+                    }
+
                     // 同步更新 users collection 的 serve_types
                     try {
                         const { collection, getDocs, query, where, doc, setDoc } = window.firestore;
                         const db = window.db;
                         const COLLECTION_NAME = window.COLLECTION_NAME;
 
-                        // 只撈出有該崇拜 serve_types 的 users
+                        // 直接查詢含有此服事名稱的 users
                         const usersQuery = query(
                             collection(db, 'users'),
-                            where(`serve_types.${COLLECTION_NAME}`, '!=', null)
+                            where(`serve_types.${COLLECTION_NAME}`, 'array-contains', oldName)
                         );
                         const usersSnapshot = await getDocs(usersQuery);
                         usersSnapshot.forEach(docRef => {
                             const userData = docRef.data();
-                            const serveTypes = userData.serve_types;
+                            const serveTypes = userData.serve_types || {};
                             const arr = serveTypes[COLLECTION_NAME];
-                            if (!Array.isArray(arr) || !arr.includes(oldName)) return;
+                            if (!Array.isArray(arr)) return;
 
-                            // 有此服事名稱，替換為新名稱
                             updates.push(setDoc(doc(db, 'users', docRef.id), {
                                 ...userData,
                                 serve_types: {
