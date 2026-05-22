@@ -59,6 +59,7 @@ agent_schedule_GCF/
 | `suppressStructural` | 選（scheduling） | true 時把 tool schema 的 `addWeeks` / `removeWeeks` 拿掉 |
 | `consecutiveContextWeeks` | 選（scheduling） | 生成週次前/後 (N-1) 週的鄰近日期，僅供 LLM 跨邊界判斷連續週違規，read-only 不可修改 |
 | `leaveByDate` | 選（scheduling） | `{date: [names]}`，硬性禁止指定的人在指定日期被排班；違反 → 422 |
+| `enableThinking` | 選 | true 時開啟 LLM 思考：Anthropic `thinking={"type":"enabled","budget_tokens":N}`、Gemini `thinking_budget=-1`（dynamic）；OpenAI 相容 provider 此旗標目前 no-op（用 reasoning model 名稱才會生效）。預設 false |
 | `experimentStartTime` / `experimentRetryCount` | 已不使用 | 後端已不讀；前端自己持有用於組 Firestore agent_log 的 doc id |
 
 ## 模式

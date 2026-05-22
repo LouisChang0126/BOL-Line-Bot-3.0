@@ -1653,6 +1653,44 @@ body.multi-selecting-active {
   cursor: pointer;
 }
 
+/* Toggle switch（給 AI 助手「思考」開關用，未來其他開關也可重用） */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-switch .toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #cbd5e1;
+  border-radius: 18px;
+  transition: background 0.15s;
+}
+.toggle-switch .toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.15s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: #2563eb;
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+}
+.toggle-switch input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
 .agent-select:focus {
   outline: none;
   border-color: var(--primary-color);

@@ -26,6 +26,10 @@ except ImportError:  # pragma: no cover
 MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
 
+# enableThinking=True 時，Anthropic 用的 thinking budget tokens 上限。
+# 必須 < MAX_OUTPUT_TOKENS（thinking 與 output 共用 max_tokens 配額）。
+ANTHROPIC_THINKING_BUDGET_TOKENS = int(os.environ.get("AGENT_ANTHROPIC_THINKING_BUDGET_TOKENS", "4096"))
+
 # 「頻率與參考班表一致」規則的相對誤差容忍度（system prompt 用）。
 # 0.50 = ±50%。需與 schedule-app/edit-chart/agent.js 的 FREQUENCY_PARITY_TOLERANCE 對齊。
 FREQUENCY_PARITY_TOLERANCE = 0.50
@@ -210,17 +214,24 @@ def _get_anthropic_client(api_key, api_base_url):
     return client
 
 
-def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base_url=""):
+def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base_url="", enable_thinking=False):
     """provider=anthropic 的呼叫；api_base_url 為空時用官方 endpoint，
     填非空值（例：https://api.deepseek.com/anthropic）則改打對應的 Anthropic 相容服務。
+    enable_thinking=True 時開啟 extended thinking，budget 由 ANTHROPIC_THINKING_BUDGET_TOKENS 控制。
     暫時性錯誤（408/409/429/5xx、連線/超時）由 SDK 內建 retry 處理。"""
     tool = tool or SCHEDULE_TOOL
     client = _get_anthropic_client(api_key, api_base_url)
 
+    thinking_param = (
+        {"type": "enabled", "budget_tokens": ANTHROPIC_THINKING_BUDGET_TOKENS}
+        if enable_thinking
+        else {"type": "disabled"}
+    )
+
     message = client.messages.create(
         model=model,
         max_tokens=MAX_OUTPUT_TOKENS,
-        thinking={"type": "disabled"},
+        thinking=thinking_param,
         system=system_prompt,
         tools=[tool],
         tool_choice={"type": "auto"},
@@ -392,9 +403,10 @@ def _adapt_schema_for_gemini(schema, current_schedule=None):
     return base
 
 
-def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_schedule=None):
+def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_schedule=None, enable_thinking=False):
     """provider=gemini 的呼叫；用 google-genai SDK 走 Gemini 原生 function calling。
-    current_schedule 用來動態建構 typed schema（取裡面的 serviceItems 當欄位）。"""
+    current_schedule 用來動態建構 typed schema（取裡面的 serviceItems 當欄位）。
+    enable_thinking=True 時讓模型走 dynamic thinking（自行決定預算），False 時關掉。"""
     if not api_key:
         raise ValueError("api_key is required for gemini provider")
     tool = tool or SCHEDULE_TOOL
@@ -416,8 +428,10 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
         parameters=_adapt_schema_for_gemini(tool["input_schema"], current_schedule=current_schedule),
     )
     gemini_tool = google_genai_types.Tool(function_declarations=[function_decl])
-    # 把 Gemini 2.5 的 thinking 關掉（Flash: 直接禁用；Pro: SDK 會 clamp 到最低值）。
-    # 萬一執行環境的 SDK 版本沒 ThinkingConfig，就 fallback 不傳這個欄位。
+    # Gemini 2.5 的 thinking：
+    #   enable_thinking=True  → thinking_budget=-1（dynamic，模型自選；Pro 至少 128）
+    #   enable_thinking=False → thinking_budget=0（Flash 直接禁用；Pro SDK 會 clamp 到最低值）
+    # 萬一執行環境的 SDK 版本沒 ThinkingConfig，就 fallback 不傳這個欄位（讓 SDK 用模型預設）。
     config_kwargs = {
         "system_instruction": system_prompt,
         "tools": [gemini_tool],
@@ -425,7 +439,8 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
     }
     thinking_cfg_cls = getattr(google_genai_types, "ThinkingConfig", None)
     if thinking_cfg_cls is not None:
-        config_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=0)
+        budget = -1 if enable_thinking else 0
+        config_kwargs["thinking_config"] = thinking_cfg_cls(thinking_budget=budget)
     config = google_genai_types.GenerateContentConfig(**config_kwargs)
 
     # 暫時性錯誤（408/429/5xx）由 SDK 內建 retry 處理，見 _get_gemini_client
@@ -495,6 +510,7 @@ def generate_agent_schedule(request):
     active_rules = data.get("activeRules", {})
     attached_csv_text = data.get("attachedCsvText", "")
     chat_history = data.get("chatHistory", [])
+    enable_thinking = bool(data.get("enableThinking", False))
 
     # 「參考範圍」功能的 client 旗標
     #   generate_weeks: 限縮 LLM 能輸出的週次（非空就送進 system prompt 當 hard constraint）
@@ -577,6 +593,7 @@ def generate_agent_schedule(request):
                 "provider": provider,
                 "model": model,
                 "status_code": status,
+                "enable_thinking": enable_thinking,
             }
         except Exception as log_err:
             print(f"[agent-debug-attach] failed: {log_err}")
@@ -588,7 +605,7 @@ def generate_agent_schedule(request):
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
             _t0 = time.perf_counter()
-            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url)
+            tool_input, text_response, usage = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url, enable_thinking=enable_thinking)
             inference_seconds["value"] = time.perf_counter() - _t0
         elif provider == "openai_compatible":
             _t0 = time.perf_counter()
@@ -604,6 +621,7 @@ def generate_agent_schedule(request):
                 api_key, model, system_prompt, messages,
                 tool=schedule_tool,
                 current_schedule=current_schedule,
+                enable_thinking=enable_thinking,
             )
             inference_seconds["value"] = time.perf_counter() - _t0
         else:

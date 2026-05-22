@@ -261,6 +261,7 @@
         .badge-status-fail { background: #fee2e2; color: #dc2626; }
         .badge-provider { background: #f1f5f9; color: #475569; }
         .badge-truncated { background: #fef3c7; color: #b45309; }
+        .badge-thinking { background: #ede9fe; color: #6d28d9; }
 
         .log-prompt-preview {
             font-size: 13px;
@@ -698,6 +699,7 @@
                                     <span class="badge badge-provider">${escapeHtml(log.provider || '?')} / ${escapeHtml(log.model || '?')}</span>
                                     <span class="badge ${isFail ? 'badge-status-fail' : 'badge-status-ok'}">${log.status_code ?? '?'}</span>
                                     ${typeof log.inference_time === 'number' ? `<span class="badge badge-provider">${log.inference_time.toFixed(2)}s</span>` : ''}
+                                    ${log.enable_thinking ? '<span class="badge badge-thinking">🧠 思考</span>' : ''}
                                     ${truncBadge}
                                 </div>
                                 <div class="log-meta">${tsLabel} · doc id <code>${escapeHtml(log.id)}</code></div>

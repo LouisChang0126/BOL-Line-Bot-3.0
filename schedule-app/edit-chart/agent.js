@@ -32,6 +32,10 @@ function getSelectedMode() {
     return document.getElementById('modeSelect')?.value || MODE_EDIT_QA;
 }
 
+function isThinkingEnabled() {
+    return !!document.getElementById('thinkingToggle')?.checked;
+}
+
 function getModeHistory(mode = getSelectedMode()) {
     if (!modeChatHistory[mode]) {
         modeChatHistory[mode] = [];
@@ -1426,6 +1430,7 @@ async function writeAgentLog({ startTime, retryCount, statusCode, debug, respons
             mode: dbg.mode || selectedMode || '',
             provider: dbg.provider || '',
             model: dbg.model || '',
+            enable_thinking: !!dbg.enable_thinking,
             status_code: Number.isFinite(Number(statusCode)) ? Number(statusCode) : null,
             inference_time: (typeof dbg.inference_time === 'number') ? dbg.inference_time : null,
             system_prompt: spStr,
@@ -1633,7 +1638,8 @@ export async function sendAgentRequest() {
         currentSchedule: JSON.stringify({ scheduleData: scheduleToSendClean }),
         selectedMode,
         activeRules,
-        chatHistory
+        chatHistory,
+        enableThinking: isThinkingEnabled()
     };
 
     if (csvTextToSend) payload.attachedCsvText = csvTextToSend;
