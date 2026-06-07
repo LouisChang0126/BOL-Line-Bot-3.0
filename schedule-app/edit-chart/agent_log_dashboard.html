@@ -444,6 +444,39 @@
             font-variant-numeric: tabular-nums;
         }
 
+        .exchange-rate-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .exchange-rate-row label {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .exchange-rate-row input[type="number"] {
+            width: 100px;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 13px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .exchange-rate-row .hint {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-left: auto;
+        }
+
         .pricing-actions {
             display: flex;
             gap: 8px;
@@ -540,8 +573,13 @@
                 <h2>💵 模型定價（USD / 1M tokens）</h2>
             </div>
             <div class="pricing-hint">
-                估計花費 = (input_tokens × input 單價 + output_tokens × output 單價) / 1,000,000。<br>
+                估計花費 = (input_tokens × input 單價 + output_tokens × output 單價) / 1,000,000，再以匯率換算成台幣。<br>
                 資料儲存於瀏覽器 localStorage，僅你本機可見。
+            </div>
+            <div class="exchange-rate-row">
+                <label for="exchangeRateInput">USD → TWD 匯率</label>
+                <input type="number" step="0.01" min="0" id="exchangeRateInput">
+                <span class="hint">預設 31.5；改動後按下方「儲存」生效</span>
             </div>
             <div id="pricingTableWrap"></div>
             <div class="pricing-actions">
@@ -626,7 +664,31 @@
             }
         }
 
+        // ===== USD → TWD 匯率（localStorage 持久化） =====
+        const EXCHANGE_STORAGE_KEY = 'agent_log_exchange_rate_v1';
+        const DEFAULT_EXCHANGE_RATE = 31.5;
+
+        function loadExchangeRate() {
+            try {
+                const raw = localStorage.getItem(EXCHANGE_STORAGE_KEY);
+                if (!raw) return DEFAULT_EXCHANGE_RATE;
+                const n = Number(raw);
+                return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXCHANGE_RATE;
+            } catch {
+                return DEFAULT_EXCHANGE_RATE;
+            }
+        }
+
+        function saveExchangeRate(rate) {
+            try {
+                localStorage.setItem(EXCHANGE_STORAGE_KEY, String(rate));
+            } catch (err) {
+                console.warn('exchange rate save failed:', err);
+            }
+        }
+
         let pricing = loadPricing();
+        let exchangeRate = loadExchangeRate();
 
         function estimateCostUSD(log) {
             const body = log.response_body;
@@ -642,11 +704,14 @@
             return cost;
         }
 
+        // 顯示用：USD 金額換算成 TWD 並格式化（NT$x.xx）
         function formatCost(usd) {
             if (usd === null || usd === undefined || !Number.isFinite(usd)) return null;
-            if (usd < 0.0001) return `≈$0`;
-            if (usd < 0.01) return `$${usd.toFixed(4)}`;
-            return `$${usd.toFixed(3)}`;
+            const twd = usd * exchangeRate;
+            if (twd < 0.01) return `≈NT$0`;
+            if (twd < 1) return `NT$${twd.toFixed(2)}`;
+            if (twd < 100) return `NT$${twd.toFixed(2)}`;
+            return `NT$${twd.toFixed(0)}`;
         }
 
         let db;
@@ -667,6 +732,7 @@
         const pricingTableWrap = document.getElementById('pricingTableWrap');
         const pricingSaveBtn = document.getElementById('pricingSaveBtn');
         const pricingResetBtn = document.getElementById('pricingResetBtn');
+        const exchangeRateInput = document.getElementById('exchangeRateInput');
 
         async function init() {
             const app = initializeApp(firebaseConfig);
@@ -681,7 +747,10 @@
 
             pricingBtn.addEventListener('click', () => {
                 const isOpen = pricingPanel.classList.toggle('open');
-                if (isOpen) renderPricingTable();
+                if (isOpen) {
+                    renderPricingTable();
+                    exchangeRateInput.value = exchangeRate;
+                }
             });
             pricingSaveBtn.addEventListener('click', () => {
                 const next = {};
@@ -697,13 +766,22 @@
                 });
                 pricing = { ...DEFAULT_PRICING, ...next };
                 savePricing(next);
+
+                // 匯率：非正數 → 退回預設值（避免被使用者打成 0 害除錯困難）
+                const rateVal = Number(exchangeRateInput.value);
+                exchangeRate = (Number.isFinite(rateVal) && rateVal > 0) ? rateVal : DEFAULT_EXCHANGE_RATE;
+                saveExchangeRate(exchangeRate);
+
                 pricingPanel.classList.remove('open');
                 render();
             });
             pricingResetBtn.addEventListener('click', () => {
-                if (!confirm('確定要回復所有模型的預設定價？你目前的自訂值會被清除。')) return;
+                if (!confirm('確定要回復所有模型的預設定價與匯率？你目前的自訂值會被清除。')) return;
                 localStorage.removeItem(PRICING_STORAGE_KEY);
+                localStorage.removeItem(EXCHANGE_STORAGE_KEY);
                 pricing = { ...DEFAULT_PRICING };
+                exchangeRate = DEFAULT_EXCHANGE_RATE;
+                exchangeRateInput.value = exchangeRate;
                 renderPricingTable();
                 render();
             });
@@ -910,10 +988,16 @@
             const total = logs.length;
             const successRate = total > 0 ? (okCount / total * 100).toFixed(1) : '0.0';
             const avgTime = timeN > 0 ? (timeSum / timeN).toFixed(2) : '—';
-            const costLabel = costN > 0 ? `$${costSum.toFixed(4)}` : '—';
-            const costSub = costMissingModels.size > 0
+            const costTwd = costSum * exchangeRate;
+            const costLabel = costN > 0
+                ? (costTwd < 1 ? `NT$${costTwd.toFixed(2)}` : (costTwd < 100 ? `NT$${costTwd.toFixed(2)}` : `NT$${costTwd.toFixed(0)}`))
+                : '—';
+            const costSubBase = costMissingModels.size > 0
                 ? `缺少定價：${Array.from(costMissingModels).join(', ')}`
                 : `基於 ${costN} 筆有 usage 與定價的記錄`;
+            const costSub = costN > 0
+                ? `${costSubBase}（≈ $${costSum.toFixed(4)} USD，匯率 ${exchangeRate}）`
+                : costSubBase;
 
             statsGridEl.innerHTML = `
                 <div class="stat-card">

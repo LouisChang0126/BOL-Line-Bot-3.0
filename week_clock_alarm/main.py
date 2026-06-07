@@ -136,11 +136,24 @@ def reminder_all_serves():
             # 跳過非服事項目的欄位
             if not isinstance(persons, list):
                 continue
-            
+
             for person in persons:
-                if person not in person_serves:
-                    person_serves[person] = []
-                person_serves[person].append(f"{display_name}-{serve_type}")
+                # Firestore document id 限制：不允許空字串、'/'、'.'、'..'、開頭結尾 '__'。
+                # 班表 cell 若殘留空 chip 或被填入 "小明/小華" 之類的合併名稱，下面
+                # db.collection("users").document(person) 會丟 ValueError，因此這裡先擋掉。
+                if not isinstance(person, str):
+                    continue
+                name = person.strip()
+                if not name or '/' in name or name in ('.', '..'):
+                    if name:
+                        print(f"略過無效人名 {name!r}（崇拜={display_name}, 服事={serve_type}）")
+                    continue
+                if name.startswith('__') and name.endswith('__'):
+                    print(f"略過保留字人名 {name!r}（崇拜={display_name}, 服事={serve_type}）")
+                    continue
+                if name not in person_serves:
+                    person_serves[name] = []
+                person_serves[name].append(f"{display_name}-{serve_type}")
     
     # 3. 檢查每個有服事的用戶今天是否要被提醒，並發送訊息
     today_weekday = today.weekday()  # Monday=0, Sunday=6
