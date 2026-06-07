@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover
     google_genai = None
     google_genai_types = None
 
-MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "16384"))
+MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "32768"))
 REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
 
 # enableThinking=True 時，Anthropic 用的 thinking budget tokens 上限。
@@ -257,11 +257,13 @@ def _anthropic_chat(api_key, model, system_prompt, messages, tool=None, api_base
         "input_tokens": getattr(getattr(message, "usage", None), "input_tokens", 0),
         "output_tokens": getattr(getattr(message, "usage", None), "output_tokens", 0),
     }
+    stop_reason = getattr(message, "stop_reason", "") or ""
     return (
         tool_input,
         "\n".join([t for t in text_parts if t]).strip(),
         usage,
         "\n".join(thinking_parts).strip(),
+        str(stop_reason),
     )
 
 
@@ -334,7 +336,15 @@ def _openai_compatible_chat(api_base_url, api_key, model, system_prompt, message
     }
     # reasoning models (o1/o3 等) 把思考內容放在 reasoning_content；非 reasoning 模型沒這個欄位
     thinking_text = getattr(message, "reasoning_content", "") or ""
-    return tool_input, (message.content or "").strip(), usage, str(thinking_text).strip()
+    # OpenAI 的 finish_reason: "stop" / "length" / "tool_calls" / "content_filter"，"length" = 撞 max_tokens
+    finish_reason = getattr(completion.choices[0], "finish_reason", "") or ""
+    return (
+        tool_input,
+        (message.content or "").strip(),
+        usage,
+        str(thinking_text).strip(),
+        str(finish_reason),
+    )
 
 
 # Module-level Gemini client cache：跟另外兩個 provider 對稱，warm container 下重用 client。
@@ -509,11 +519,18 @@ def _gemini_chat(api_key, model, system_prompt, messages, tool=None, current_sch
         "thoughts_tokens": getattr(usage_meta, "thoughts_token_count", 0) if usage_meta else 0,
         "tool_use_prompt_tokens": getattr(usage_meta, "tool_use_prompt_token_count", 0) if usage_meta else 0,
     }
+    # Gemini 的 finish_reason 是 enum（FinishReason.STOP / MAX_TOKENS / SAFETY ...）；str() 取得名字
+    finish_reason = ""
+    if candidates:
+        fr = getattr(candidates[0], "finish_reason", None)
+        if fr is not None:
+            finish_reason = getattr(fr, "name", None) or str(fr)
     return (
         tool_input,
         "\n".join(text_parts).strip(),
         usage,
         "\n".join(thinking_parts).strip(),
+        finish_reason,
     )
 
 
@@ -610,10 +627,11 @@ def generate_agent_schedule(request):
 
     inference_seconds = {"value": None}
     thinking_text = {"value": ""}
+    stop_reason_box = {"value": ""}
 
     def _maybe_log(body, status):
-        """把 system_prompt / messages / inference_time / thinking 等附加到 response body 的 _debug 欄位，
-        前端會在收到回應後挑出 _debug 寫入 Firestore agent_log。後端不接 Firestore。"""
+        """把 system_prompt / messages / inference_time / thinking / stop_reason 等附加到 response body
+        的 _debug 欄位，前端會在收到回應後挑出 _debug 寫入 Firestore agent_log。後端不接 Firestore。"""
         if not isinstance(body, dict):
             return
         try:
@@ -627,9 +645,19 @@ def generate_agent_schedule(request):
                 "status_code": status,
                 "enable_thinking": enable_thinking,
                 "thinking": thinking_text["value"] or "",
+                "stop_reason": stop_reason_box["value"] or "",
             }
         except Exception as log_err:
             print(f"[agent-debug-attach] failed: {log_err}")
+
+    # 各 provider 對「撞到 max_tokens 而被截斷」用不同字串表示：
+    #   anthropic        : stop_reason == "max_tokens"
+    #   openai_compatible: finish_reason == "length"
+    #   gemini           : finish_reason == "MAX_TOKENS"（enum 名）
+    _TRUNCATED_STOP_REASONS = {"max_tokens", "length", "max_output_tokens"}
+
+    def _is_truncated(stop_reason: str) -> bool:
+        return str(stop_reason or "").lower() in _TRUNCATED_STOP_REASONS
 
     try:
         if provider == "anthropic":
@@ -638,21 +666,23 @@ def generate_agent_schedule(request):
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
             _t0 = time.perf_counter()
-            tool_input, text_response, usage, thinking = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url, enable_thinking=enable_thinking)
+            tool_input, text_response, usage, thinking, stop_reason = _anthropic_chat(api_key, model, system_prompt, messages, tool=schedule_tool, api_base_url=api_base_url, enable_thinking=enable_thinking)
             inference_seconds["value"] = time.perf_counter() - _t0
             thinking_text["value"] = thinking
+            stop_reason_box["value"] = stop_reason
         elif provider == "openai_compatible":
             _t0 = time.perf_counter()
-            tool_input, text_response, usage, thinking = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
+            tool_input, text_response, usage, thinking, stop_reason = _openai_compatible_chat(api_base_url, api_key, model, system_prompt, messages, tool=schedule_tool)
             inference_seconds["value"] = time.perf_counter() - _t0
             thinking_text["value"] = thinking
+            stop_reason_box["value"] = stop_reason
         elif provider == "gemini":
             if not api_key:
                 body = {"error": "API key not configured for gemini mode"}
                 _maybe_log(body, 500)
                 return add_cors_headers(cors_response(body, 500), origin)
             _t0 = time.perf_counter()
-            tool_input, text_response, usage, thinking = _gemini_chat(
+            tool_input, text_response, usage, thinking, stop_reason = _gemini_chat(
                 api_key, model, system_prompt, messages,
                 tool=schedule_tool,
                 current_schedule=current_schedule,
@@ -660,12 +690,33 @@ def generate_agent_schedule(request):
             )
             inference_seconds["value"] = time.perf_counter() - _t0
             thinking_text["value"] = thinking
+            stop_reason_box["value"] = stop_reason
         else:
             body = {"error": f"Unsupported provider: {provider}"}
             _maybe_log(body, 500)
             return add_cors_headers(cors_response(body, 500), origin)
 
         if not tool_input:
+            # 治本：模型撞 max_tokens 沒寫完 tool_use 時，回 502 + 真實原因，
+            # 不要再悄悄掉成「目前無需修改排班，這題以問答模式回覆。」的 answer_only。
+            if _is_truncated(stop_reason_box["value"]):
+                body = {
+                    "error": "Model ran out of output tokens before emitting a tool call",
+                    "detail": (
+                        f"stop_reason={stop_reason_box['value']!r}, "
+                        f"output_tokens={usage.get('output_tokens')}, "
+                        f"max_tokens={MAX_OUTPUT_TOKENS}. "
+                        "請縮小生成週次 (generateWeeks) 或調高 AGENT_MAX_OUTPUT_TOKENS 後重試。"
+                    ),
+                    "stop_reason": stop_reason_box["value"],
+                    "modeKey": mode,
+                    "provider": provider,
+                    "model": model,
+                    "usage": usage,
+                }
+                _maybe_log(body, 502)
+                return add_cors_headers(cors_response(body, 502), origin)
+
             answer_text = text_response or "目前無需修改排班，這題以問答模式回覆。"
             body = {
                 "mode": "answer_only",

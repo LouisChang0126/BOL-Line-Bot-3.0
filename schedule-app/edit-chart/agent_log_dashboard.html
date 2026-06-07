@@ -262,6 +262,8 @@
         .badge-provider { background: #f1f5f9; color: #475569; }
         .badge-truncated { background: #fef3c7; color: #b45309; }
         .badge-thinking { background: #ede9fe; color: #6d28d9; }
+        .badge-stop-bad { background: #fee2e2; color: #b91c1c; }
+        .badge-stop-info { background: #e0f2fe; color: #075985; }
 
         .log-prompt-preview {
             font-size: 13px;
@@ -1075,6 +1077,16 @@
                 const cost = estimateCostUSD(log);
                 const costLbl = formatCost(cost);
                 const costBadge = costLbl ? `<span class="badge badge-cost">💵 ${costLbl}</span>` : '';
+
+                // stop_reason 各家命名不同；正常結束的隱藏，異常的醒目顯示
+                const stop = (log.stop_reason || '').toString();
+                const stopNormal = ['', 'end_turn', 'stop', 'STOP', 'tool_use', 'tool_calls', 'tool_use_or_tool_calls'];
+                const stopBad = ['max_tokens', 'length', 'MAX_TOKENS', 'max_output_tokens'];
+                let stopBadge = '';
+                if (stop && !stopNormal.includes(stop)) {
+                    const isBad = stopBad.map(s => s.toLowerCase()).includes(stop.toLowerCase());
+                    stopBadge = `<span class="badge ${isBad ? 'badge-stop-bad' : 'badge-stop-info'}">⛔ ${escapeHtml(stop)}</span>`;
+                }
                 return `
                     <div class="log-card ${isFail ? 'failed' : ''}">
                         <div class="log-header">
@@ -1086,6 +1098,7 @@
                                     <span class="badge ${isFail ? 'badge-status-fail' : 'badge-status-ok'}">${log.status_code ?? '?'}</span>
                                     ${typeof log.inference_time === 'number' ? `<span class="badge badge-provider">${log.inference_time.toFixed(2)}s</span>` : ''}
                                     ${log.enable_thinking ? '<span class="badge badge-thinking">🧠 思考</span>' : ''}
+                                    ${stopBadge}
                                     ${costBadge}
                                     ${truncBadge}
                                 </div>
