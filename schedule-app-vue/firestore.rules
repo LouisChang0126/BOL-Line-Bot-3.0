@@ -1,0 +1,63 @@
+rules_version = '2';
+
+// ────────────────────────────────────────────────────────────────────
+// Firestore 安全規則（搭配 schedule-app-vue 的登入 + 允許名單）
+//
+// 核心原則：
+//   - 公開端「讀」班表 / 崇拜清單 →  允許（網站本來就是給大眾看的）
+//   - 任何「寫」與敏感資料 →  只有允許名單內的 Google 帳號可以
+//   - 允許名單存在 `_config/admins`（{ emails: [...] }），可隨時增減免重新部署
+//
+// 注意：LINE Bot / 鬧鐘等後端用 Firebase Admin SDK，會「繞過」這些規則，不受影響。
+//       前端寫入（管理員編輯、AI agent_log）才會經過這裡。
+// ────────────────────────────────────────────────────────────────────
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/_config/admins)
+        && get(/databases/$(database)/documents/_config/admins)
+             .data.emails.hasAny([request.auth.token.email]);
+    }
+
+    // 崇拜清單：公開讀、管理員寫
+    match /_config/serve-list {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    // 其餘 _config（含 admins 本身）：只有管理員可讀寫，避免外洩允許名單
+    match /_config/{document} {
+      allow read, write: if isAdmin();
+    }
+
+    // 使用者：允許「單筆 get」(個人班表選擇頁需要)，但「list 全部」僅限管理員，
+    // 防止有人一次撈走所有人的 login_token / lineId。寫入僅限管理員。
+    match /users/{userName} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // AI 呼叫記錄：僅管理員可讀寫（含 system prompt 等內容）
+    match /agent_log/{doc} {
+      allow read, write: if isAdmin();
+    }
+
+    // 編輯記錄：僅管理員可讀寫
+    match /_edit_chart_log/{doc} {
+      allow read, write: if isAdmin();
+    }
+
+    // 班表 collection（_service_1 ~ _service_5，含每個 collection 內的 _metadata）：
+    // 公開讀、管理員寫。最多 5 場崇拜（與前端 MAX_SERVES 一致）。
+    match /_service_1/{doc} { allow read: if true; allow write: if isAdmin(); }
+    match /_service_2/{doc} { allow read: if true; allow write: if isAdmin(); }
+    match /_service_3/{doc} { allow read: if true; allow write: if isAdmin(); }
+    match /_service_4/{doc} { allow read: if true; allow write: if isAdmin(); }
+    match /_service_5/{doc} { allow read: if true; allow write: if isAdmin(); }
+
+    // 預設拒絕其它一切（沒有 catch-all allow，避免敏感 collection 被誤開）
+  }
+}

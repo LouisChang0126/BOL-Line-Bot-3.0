@@ -1,0 +1,29 @@
+{
+  "name": "schedule-app-vue",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "教會服事班表系統 — TypeScript + Vue 3 重構版",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc -b"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.1",
+    "firebase": "^10.13.0",
+    "pinia": "^2.2.2",
+    "vue": "^3.5.10",
+    "vue-router": "^4.4.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "@types/node": "^22.7.4",
+    "@vue/tsconfig": "^0.5.1",
+    "typescript": "~5.5.4",
+    "vite": "^5.4.8",
+    "vue-tsc": "^2.1.6"
+  }
+}
