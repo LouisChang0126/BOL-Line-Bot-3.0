@@ -1,0 +1,18 @@
+# Overrides the auto-generated .gcloudignore.
+# CRITICAL: agentConfig.py is in .gitignore (contains secrets) but MUST be uploaded to
+# the Cloud Run container — main.py reads API keys from it. Without this file, gcloud
+# would inherit .gitignore and silently deploy with no API keys.
+
+.git/
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+
+# Local-only files (not needed in container)
+local_server.py
+README.md

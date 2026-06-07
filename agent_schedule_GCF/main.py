@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover
     google_genai_types = None
 
 MAX_OUTPUT_TOKENS = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "32768"))
-REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "180"))
+REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AGENT_REQUEST_TIMEOUT_SECONDS", "360"))
 
 # enableThinking=True 時，Anthropic 用的 thinking budget tokens 上限。
 # 必須 < MAX_OUTPUT_TOKENS（thinking 與 output 共用 max_tokens 配額）。
@@ -358,15 +358,24 @@ def _get_gemini_client(api_key):
         )
     client = _GEMINI_CLIENT_CACHE.get(api_key)
     if client is None:
+        # google-genai SDK 的 HttpOptions.timeout 單位是「毫秒」，與另兩家 SDK 收秒不同。
+        # 跟 anthropic / openai 的 REQUEST_TIMEOUT_SECONDS 對齊，避免 Gemini 走預設 hang 住。
         # SDK 內建 retry：3 次嘗試（含初次），對 408/429/5xx 做 exponential backoff
-        http_options = google_genai_types.HttpOptions(
-            retry_options=google_genai_types.HttpRetryOptions(
+        http_options_kwargs = {
+            "timeout": REQUEST_TIMEOUT_SECONDS * 1000,
+            "retry_options": google_genai_types.HttpRetryOptions(
                 attempts=3,
                 http_status_codes=[408, 429, 500, 502, 503, 504],
                 initial_delay=1.2,
                 exp_base=2.0,
-            )
-        )
+            ),
+        }
+        try:
+            http_options = google_genai_types.HttpOptions(**http_options_kwargs)
+        except TypeError:
+            # 舊版 SDK 沒 timeout 欄位 → 退回不傳，由 SDK 用預設
+            http_options_kwargs.pop("timeout", None)
+            http_options = google_genai_types.HttpOptions(**http_options_kwargs)
         client = google_genai.Client(api_key=api_key, http_options=http_options)
         _GEMINI_CLIENT_CACHE[api_key] = client
     return client
