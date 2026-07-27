@@ -9,7 +9,6 @@ import { useEditorStore } from '@/stores/editor'
 import { useAgentStore } from '@/stores/agent'
 import { useServesStore } from '@/stores/serves'
 import ScheduleTable from '@/components/editor/ScheduleTable.vue'
-import EditPersonModal from '@/components/editor/EditPersonModal.vue'
 import EditServiceModal from '@/components/editor/EditServiceModal.vue'
 import AddColumnModal from '@/components/editor/AddColumnModal.vue'
 import DisplayConfigModal from '@/components/editor/DisplayConfigModal.vue'
@@ -26,7 +25,6 @@ const loadError = ref('')
 const title = ref('教會服事班表')
 const emoji = ref('⛪')
 
-const editPerson = ref<{ open: boolean; date: string; service: string }>({ open: false, date: '', service: '' })
 const editService = ref<{ open: boolean; name: string }>({ open: false, name: '' })
 const addColumnOpen = ref(false)
 const displayConfigOpen = ref(false)
@@ -77,9 +75,6 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function onEditPerson(date: string, service: string) {
-  editPerson.value = { open: true, date, service }
-}
 function onEditService(name: string) {
   editService.value = { open: true, name }
 }
@@ -151,18 +146,13 @@ function reclaim() {
           </div>
         </div>
 
-        <ScheduleTable @edit-person="onEditPerson" @edit-service="onEditService" />
+        <ScheduleTable @edit-service="onEditService" />
       </div>
     </div>
 
     <AgentSidebar :open="sidebarOpen" @close="sidebarOpen = false" />
 
     <!-- Modals -->
-    <EditPersonModal
-      v-model="editPerson.open"
-      :date="editPerson.date"
-      :service="editPerson.service"
-    />
     <EditServiceModal v-model="editService.open" :service-name="editService.name" />
     <AddColumnModal v-model="addColumnOpen" />
     <DisplayConfigModal v-model="displayConfigOpen" />
