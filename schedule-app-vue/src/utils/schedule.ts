@@ -8,6 +8,31 @@ export function cellOf(row: ScheduleRow | undefined, service: string): string[] 
   return Array.isArray(v) ? v : []
 }
 
+/**
+ * 計算「把某人從 A 格拖到 B 格」之後，兩格各自的新內容。
+ *
+ * 抽成純函式的原因：原本這段算在 store 裡，同列（同日期）時誤把「來源格移除後
+ * 剩下的人」當成目標格內容，導致同列拖拉會把同格的其他人一起複製過去。
+ * 純函式才能對各種人數排列組合做完整測試。
+ *
+ * 注意：來源與目標為「同一格」時會被判為 duplicate，呼叫端應先自行排除。
+ */
+export type MoveOutcome =
+  | { ok: true; fromCell: string[]; toCell: string[] }
+  | { ok: false; reason: 'not-found' | 'duplicate' }
+
+export function computeMove(fromCell: string[], toCell: string[], person: string): MoveOutcome {
+  const i = fromCell.indexOf(person)
+  if (i === -1) return { ok: false, reason: 'not-found' }
+  if (toCell.includes(person)) return { ok: false, reason: 'duplicate' }
+  return {
+    ok: true,
+    fromCell: fromCell.slice(0, i).concat(fromCell.slice(i + 1)),
+    // 一律以「目標格原有內容」為基底，與同列/跨列無關
+    toCell: [...toCell, person],
+  }
+}
+
 /** 該週是否有任何非空白服事內容 */
 export function isWeekNonEmpty(row: ScheduleRow): boolean {
   return Object.entries(row).some(([k, v]) => {
@@ -59,8 +84,14 @@ export function getVisibleServiceItems(
   const ungrouped = displayConfig.groups.find((g) => g.id === 'ungrouped')
   if (ungrouped) for (const item of ungrouped.items) ordered.push(item)
 
-  // 防禦：serviceItems 中未被任何群組涵蓋者，補在最後
-  for (const item of serviceItems) if (!ordered.includes(item)) ordered.push(item)
+  // 防禦：serviceItems 中「不屬於任何群組」的孤兒項目，補在最後。
+  // 注意必須比對「有沒有被任一群組收錄」，不能比對 ordered——否則被取消勾選的
+  // 群組項目會在這裡又被補回來，導致群組過濾器完全失效（只會變成換順序）。
+  const grouped = new Set<string>()
+  for (const g of displayConfig.groups) for (const item of g.items) grouped.add(item)
+  for (const item of serviceItems) {
+    if (!grouped.has(item) && !ordered.includes(item)) ordered.push(item)
+  }
 
   const seen = new Set<string>()
   return ordered.filter((s) => {

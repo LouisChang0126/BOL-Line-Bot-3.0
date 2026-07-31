@@ -2,8 +2,8 @@
    Airbnb 風格設計系統
    =========================== */
 
-/* 引入 Google Fonts - Inter */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* Google Fonts (Inter) 改由 index.html 的 <link> 載入。
+   @import 會等這支 CSS 下載解析完才開始抓字體（串行阻塞），改成 <link> 才能並行。 */
 
 /* ===========================
    CSS 變數 - 色彩系統

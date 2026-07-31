@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 
 /**
  * 路由表。
@@ -90,6 +89,9 @@ router.beforeEach(async (to) => {
   // 開發專用：VITE_DEV_BYPASS_AUTH=true 時略過登入檢查（僅 dev build 生效，正式環境永遠無效）
   if (import.meta.env.DEV && import.meta.env.VITE_DEV_BYPASS_AUTH === 'true') return true
 
+  // 動態 import：auth store 會連帶拉進整包 Firebase SDK（90KB gzip）。
+  // 靜態 import 會讓公開頁（首頁 / 查看班表）也得先下載它，故只在真正需要時才載入。
+  const { useAuthStore } = await import('@/stores/auth')
   const auth = useAuthStore()
   await auth.whenReady()
 

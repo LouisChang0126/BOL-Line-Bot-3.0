@@ -9,10 +9,16 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { loadServeList } from '@/services/serves'
-import { loadFutureRows, loadMetadata, loadPastRows } from '@/services/schedule'
+import {
+  fetchFutureRows,
+  fetchMetadata,
+  fetchPastRows,
+  fetchServeList,
+  readServeListCache,
+  writeServeListCache,
+} from '@/services/publicScheduleRest'
 import { cellOf, defaultVisibleGroupIds, getVisibleServiceItems } from '@/utils/schedule'
-import { formatDisplayDate } from '@/utils/dates'
+import { formatDateString, formatDisplayDate, getCurrentSunday } from '@/utils/dates'
 import type { DisplayConfig, ScheduleRow, Serve } from '@/types'
 
 /** 舊版 view.html 的顯示上限（未來 26 筆、歷史 5 週） */
@@ -75,7 +81,14 @@ async function onTogglePast() {
   if (showPast.value && !pastLoaded.value) {
     pastLoaded.value = true
     try {
-      pastRows.value = await loadPastRows(collectionName.value, MAX_PAST_ROWS)
+      const currentSunday = getCurrentSunday()
+      const minDate = new Date(currentSunday)
+      minDate.setDate(minDate.getDate() - MAX_PAST_ROWS * 7)
+      pastRows.value = await fetchPastRows(
+        collectionName.value,
+        formatDateString(minDate),
+        formatDateString(currentSunday),
+      )
     } catch (e) {
       console.log('無過去資料或載入失敗:', e)
       pastRows.value = []
@@ -88,31 +101,66 @@ function showError(title: string, message: string) {
   errorMsg.value = message
 }
 
+/** 套用某個崇拜：抓 metadata + 未來班表並填進畫面 */
+async function applyServe(found: Serve) {
+  serve.value = found
+  collectionName.value = found.id
+  document.title = `${found.name}班表`
+
+  const from = formatDateString(getCurrentSunday())
+  const [meta, rows] = await Promise.all([
+    fetchMetadata(found.id),
+    fetchFutureRows(found.id, from, MAX_DISPLAY_ROWS),
+  ])
+  serviceItems.value = meta?.serviceItems ?? []
+  displayConfig.value = meta?.displayConfig ?? null
+  futureRows.value = rows
+
+  for (const id of defaultVisibleGroupIds(displayConfig.value)) {
+    if (!(id in groupVisible)) groupVisible[id] = true
+  }
+  for (const g of filterGroups.value) if (!(g.id in groupVisible)) groupVisible[g.id] = false
+}
+
 onMounted(async () => {
+  // 樂觀路徑：若快取已知這個崇拜名稱對應的 collection id，就不必等 serve-list
+  // 回來才發第二個查詢——直接平行發，省掉一整段往返。
+  const cached = readServeListCache()?.find((s) => s.name === serviceName.value) ?? null
+  const optimistic = cached ? applyServe(cached).catch(() => {}) : null
+
+  let serves: Serve[]
   try {
-    const serves = await loadServeList()
-    if (serves.length === 0) {
-      showError('尚未設定', '請先到管理頁面新增崇拜')
-      return
-    }
-    const found = serves.find((s) => s.name === serviceName.value)
-    if (!found) {
-      showError('找不到班表', `無效的崇拜名稱: ${serviceName.value || '(未指定)'}`)
-      return
-    }
-    serve.value = found
-    collectionName.value = found.id
-    document.title = `${found.name}班表`
-
-    const [meta, rows] = await Promise.all([loadMetadata(found.id), loadFutureRows(found.id)])
-    serviceItems.value = meta?.serviceItems ?? []
-    displayConfig.value = meta?.displayConfig ?? null
-    futureRows.value = rows.slice(0, MAX_DISPLAY_ROWS)
-
-    for (const id of defaultVisibleGroupIds(displayConfig.value)) groupVisible[id] = true
-    for (const g of filterGroups.value) if (!(g.id in groupVisible)) groupVisible[g.id] = false
+    serves = await fetchServeList()
+    writeServeListCache(serves)
   } catch (e) {
     console.error('初始化失敗:', e)
+    // 樂觀路徑若已經把資料畫出來，就別用錯誤頁蓋掉它
+    if (!cached) showError('載入失敗', '請檢查網路連線後重試')
+    return
+  }
+
+  if (serves.length === 0) {
+    showError('尚未設定', '請先到管理頁面新增崇拜')
+    return
+  }
+  const found = serves.find((s) => s.name === serviceName.value)
+  if (!found) {
+    showError('找不到班表', `無效的崇拜名稱: ${serviceName.value || '(未指定)'}`)
+    return
+  }
+
+  await optimistic
+  // 快取命中且 id 沒變 → 樂觀路徑的資料就是對的，不用重打一次
+  if (cached && cached.id === found.id) {
+    serve.value = found
+    document.title = `${found.name}班表`
+    return
+  }
+  try {
+    await applyServe(found)
+  } catch (e) {
+    console.error('初始化失敗:', e)
+    showError('載入失敗', '請檢查網路連線後重試')
   }
 })
 </script>

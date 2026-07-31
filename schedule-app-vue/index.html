@@ -9,6 +9,96 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
   <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+  <!-- 提前建立連線：Firestore 的 DNS/TLS 交握可與 JS 下載並行，省下首次查詢的等待 -->
+  <link rel="preconnect" href="https://firestore.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!--
+    字體改由這裡載入，不再用 main.css 的 @import。
+    @import 會等主 CSS 下載並解析完才開始抓字體（串行）；改成 <link> 後兩者並行。
+  -->
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" />
+
+  <!--
+    查看班表頁的資料預抓（early fetch）。
+
+    為什麼要放在這裡：原本要等 JS 下載完、Vue 啟動後才發第一個查詢，兩件事是「串行」的
+    （手機實測：JS 到 DOMContentLoaded 約 950ms，之後才花 630ms 抓資料）。
+    這段 inline script 在 HTML 一解析就執行，讓查詢與 JS 下載並行，Vue 啟動時資料多半已就緒。
+
+    安全設計：這裡只負責「提早發出請求」，所有驗證與後備都在 Vue 端（publicScheduleRest.ts）：
+      - 環境變數沒被 Vite 替換、或任何例外 → 不設 window.__preload，Vue 端照原本流程自己抓
+      - `from` 日期一併帶出去，Vue 端會比對；不一致（例如剛好跨日）就丟棄預抓結果重新查
+  -->
+  <script>
+    (function () {
+      try {
+        var path = location.pathname
+        if (path !== '/view' && path !== '/view.html') return
+
+        var KEY = '%VITE_FIREBASE_API_KEY%'
+        var PROJ = '%VITE_FIREBASE_PROJECT_ID%'
+        if (!KEY || KEY.charAt(0) === '%' || !PROJ || PROJ.charAt(0) === '%') return
+
+        var DOCS = 'projects/' + PROJ + '/databases/(default)/documents'
+        var BASE = 'https://firestore.googleapis.com/v1/' + DOCS
+        var json = function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)) }
+
+        var pre = { serveList: fetch(BASE + '/_config/serve-list?key=' + KEY).then(json) }
+        pre.serveList.catch(function () {})
+
+        // 若 localStorage 已知這個崇拜對應的 collection，連班表本身也一起提前抓
+        var name = new URLSearchParams(location.search).get('service') || ''
+        var cached = JSON.parse(localStorage.getItem('public-serve-list-v1') || 'null')
+        var hit = null
+        if (cached && cached.length) {
+          for (var i = 0; i < cached.length; i++) {
+            if (cached[i] && cached[i].name === name) { hit = cached[i]; break }
+          }
+        }
+        if (!hit) { window.__preload = pre; return }
+
+        // 當前週日（UTC+8）；與 utils/dates.ts 的 getCurrentSunday 同邏輯，
+        // 算出的字串會交給 Vue 端比對，不一致就整包作廢，因此不會因為這裡算錯而顯示到錯的資料。
+        var now = new Date()
+        var utc8 = new Date(now.getTime() + 8 * 3600 * 1000 + now.getTimezoneOffset() * 60000)
+        var sunday = new Date(utc8)
+        if (utc8.getDay() !== 0) sunday.setDate(utc8.getDate() + (7 - utc8.getDay()))
+        sunday.setHours(0, 0, 0, 0)
+        var p2 = function (n) { return String(n).padStart(2, '0') }
+        var from = sunday.getFullYear() + '.' + p2(sunday.getMonth() + 1) + '.' + p2(sunday.getDate())
+
+        pre.id = hit.id
+        pre.from = from
+        pre.meta = fetch(BASE + '/' + hit.id + '/_metadata?key=' + KEY).then(json)
+        pre.rows = fetch(BASE + ':runQuery?key=' + KEY, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            structuredQuery: {
+              from: [{ collectionId: hit.id }],
+              where: {
+                fieldFilter: {
+                  field: { fieldPath: '__name__' },
+                  op: 'GREATER_THAN_OR_EQUAL',
+                  value: { referenceValue: DOCS + '/' + hit.id + '/' + from }
+                }
+              },
+              orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+              limit: 26
+            }
+          })
+        }).then(json)
+        pre.meta.catch(function () {})
+        pre.rows.catch(function () {})
+        window.__preload = pre
+      } catch (e) {
+        /* 預抓純屬加速，失敗就交給 Vue 端正常流程 */
+      }
+    })()
+  </script>
 </head>
 
 <body>

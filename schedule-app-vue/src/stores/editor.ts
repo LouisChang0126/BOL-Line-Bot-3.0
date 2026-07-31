@@ -31,7 +31,7 @@ import {
   getCurrentSunday,
   parseDateString,
 } from '@/utils/dates'
-import { cellOf } from '@/utils/schedule'
+import { cellOf, computeMove } from '@/utils/schedule'
 import type { DisplayConfig, ScheduleMetadata, ScheduleRow, UserDoc } from '@/types'
 
 const MAX_HISTORY_SIZE = 20
@@ -285,16 +285,14 @@ export const useEditorStore = defineStore('editor', () => {
     const toRow = scheduleData.value.find((r) => r.date === toDate)
     if (!fromRow || !toRow) return false
     if (fromDate === toDate && fromService === toService) return false
-    const fromArr = cellOf(fromRow, fromService)
-    const i = fromArr.indexOf(person)
-    if (i === -1) return false
-    if (cellOf(toRow, toService).includes(person)) {
-      window.alert('目標格已經有這位同工')
+    const outcome = computeMove(cellOf(fromRow, fromService), cellOf(toRow, toService), person)
+    if (!outcome.ok) {
+      if (outcome.reason === 'duplicate') window.alert('目標格已經有這位同工')
       return false
     }
     const sameRow = fromRow.date === toRow.date
-    const newFromArr = fromArr.slice(0, i).concat(fromArr.slice(i + 1))
-    const newToArr = sameRow ? [...newFromArr, person] : [...cellOf(toRow, toService), person]
+    const newFromArr = outcome.fromCell
+    const newToArr = outcome.toCell
 
     try {
       assertEditing()
