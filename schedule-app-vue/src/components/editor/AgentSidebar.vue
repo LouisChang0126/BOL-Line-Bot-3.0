@@ -1,14 +1,60 @@
 <script setup lang="ts">
 /** AI 助手側邊欄（舊版 agent.js 的 UI）：模式、規則、參考/生成範圍、請假、對話、送出。 */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import { useAgentStore } from '@/stores/agent'
 
-defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 
 const agent = useAgentStore()
 const prompt = ref('')
+
+// ── 拖曳調整寬度（對應舊版 agent.js setupResizer）────────
+const DEFAULT_WIDTH = 380
+const MIN_WIDTH = 200
+/** 側邊欄寬度（px）；收合時由 CSS 的 .collapsed 覆蓋，不吃這個值 */
+const width = ref(DEFAULT_WIDTH)
+const resizing = ref(false)
+let startX = 0
+let startWidth = 0
+
+function startResize(e: MouseEvent) {
+  if (!props.open) return
+  resizing.value = true
+  startX = e.clientX
+  startWidth = width.value
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+function onResizeMove(e: MouseEvent) {
+  if (!resizing.value) return
+  // 分隔線在側邊欄左側：游標往左移 = 變寬
+  const raw = startWidth + (startX - e.clientX)
+  if (raw < MIN_WIDTH) {
+    // 與舊版一致：拖得比最小寬度還窄就直接收合側邊欄
+    stopResize()
+    emit('close')
+    return
+  }
+  width.value = Math.min(raw, window.innerWidth * 0.4)
+}
+
+function stopResize() {
+  if (!resizing.value) return
+  resizing.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', stopResize)
+}
+
+// 元件卸載時務必還原 body 樣式並移除全域監聽，否則游標會卡在 col-resize
+onBeforeUnmount(stopResize)
 const chatArea = ref<HTMLElement | null>(null)
 const rulesOpen = ref(true)
 const refOpen = ref(true)
@@ -87,10 +133,22 @@ async function onCsvChange(e: Event) {
 </script>
 
 <template>
-  <aside class="agent-sidebar" :class="{ collapsed: !open }">
-    <div class="agent-header">
+  <!-- 可拖曳分隔線：與舊版一樣放在側邊欄左側，收合時一併隱藏 -->
+  <div
+    class="agent-resizer"
+    :class="{ collapsed: !open, dragging: resizing }"
+    title="拖曳調整寬度"
+    @mousedown="startResize"
+  ></div>
+
+  <aside
+    class="agent-sidebar"
+    :class="{ collapsed: !open }"
+    :style="open ? { width: width + 'px' } : undefined"
+  >
+    <div class="agent-sidebar-header">
       <h3>🤖 AI 助手</h3>
-      <button class="agent-close" @click="emit('close')">&times;</button>
+      <button class="agent-sidebar-close" @click="emit('close')">&times;</button>
     </div>
 
     <!-- 模式 + thinking -->
@@ -239,38 +297,14 @@ async function onCsvChange(e: Event) {
 </template>
 
 <style scoped>
+/*
+  .agent-sidebar / .agent-sidebar-header / .agent-sidebar-close / .agent-resizer
+  一律沿用 main.css 的共用樣式（＝舊版 styles.css），才會跟舊版長得一樣
+  —— 特別是標題列的紫色漸層。這裡只補 main.css 沒有的：讓側邊欄自己捲動。
+*/
 .agent-sidebar {
-  width: 360px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  display: flex;
-  flex-direction: column;
   height: 100vh;
-  transition: width 0.25s ease, opacity 0.2s;
   overflow: hidden;
-}
-.agent-sidebar.collapsed {
-  width: 0;
-  border-left: none;
-}
-.agent-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-color);
-}
-.agent-header h3 {
-  font-size: 16px;
-  font-weight: 600;
-}
-.agent-close {
-  border: none;
-  background: transparent;
-  font-size: 22px;
-  cursor: pointer;
-  color: var(--text-secondary);
 }
 .agent-section {
   padding: 10px 16px;
