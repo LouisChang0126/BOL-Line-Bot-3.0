@@ -343,7 +343,7 @@ async function copyToken(token: string) {
           :disabled="busy"
           @click="openAutoAdd"
         >
-          🔄 自動加入使用者 & 更新服事
+          🔄 自動加入使用者
         </button>
         <button class="btn btn-secondary" @click="exportCsv">📥 匯出邀請碼 Excel</button>
         <input v-model="searchTerm" class="search-box" placeholder="搜尋使用者..." />

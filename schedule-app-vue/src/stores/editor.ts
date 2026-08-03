@@ -19,7 +19,8 @@ import {
   saveScheduleRow,
 } from '@/services/scheduleWrite'
 import { loadFutureRows, loadMetadata, loadPastRows } from '@/services/schedule'
-import { loadAllUsers } from '@/services/users'
+import { generateLoginToken, loadAllUsers, saveUsers } from '@/services/users'
+import { autoApplicableUpdates, planUserSync } from '@/utils/userSync'
 import { doc, setDoc, deleteDoc, getDocs, collection as fsCollection, query, where } from 'firebase/firestore'
 import { db } from '@/firebase'
 import { buildPersonColorMap, colorOf } from '@/utils/colors'
@@ -58,7 +59,10 @@ export const useEditorStore = defineStore('editor', () => {
   const personNames = ref<string[]>([])
   const status = ref('載入中...')
   const isLocked = ref(false)
+  /** 紅點：班表上有名字還沒建檔，需管理員去按「自動加入使用者」 */
   const userAlert = ref(false)
+  /** 尚未建檔的名字，給提示文字用 */
+  const pendingNewUsers = ref<string[]>([])
 
   // 撤銷/重做
   const historyStack = ref<string[]>([])
@@ -137,6 +141,9 @@ export const useEditorStore = defineStore('editor', () => {
   async function load(col: string) {
     collection.value = col
     status.value = '載入資料中...'
+    // 清掉使用者快取：管理員可能剛從使用者管理頁建檔回來，
+    // 沿用舊快取會讓紅點誤判成「還沒建檔」而一直亮著。
+    usersCache = {}
     initTabLock()
     try {
       const meta = await loadMetadata(col)
@@ -155,7 +162,7 @@ export const useEditorStore = defineStore('editor', () => {
 
       snapshotOriginal()
       initHistory()
-      void refreshUsersBadge()
+      void syncUsersFromSchedule()
       status.value = '就緒'
     } catch (e) {
       console.error('載入資料失敗:', e)
@@ -250,7 +257,7 @@ export const useEditorStore = defineStore('editor', () => {
     row[service] = newArr
     addPersonName(person)
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
     return true
   }
 
@@ -270,7 +277,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     row[service] = newArr
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
     return true
   }
 
@@ -318,7 +325,7 @@ export const useEditorStore = defineStore('editor', () => {
     fromRow[fromService] = newFromArr
     toRow[toService] = newToArr
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
     return true
   }
 
@@ -458,7 +465,7 @@ export const useEditorStore = defineStore('editor', () => {
       return
     }
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   function removeFromDisplayConfig(name: string) {
@@ -494,7 +501,7 @@ export const useEditorStore = defineStore('editor', () => {
         if (!isTabLockError(e)) window.alert('更新失敗：' + errMsg(e))
         return
       }
-      void refreshUsersBadge()
+      void syncUsersFromSchedule()
       return
     }
 
@@ -544,7 +551,7 @@ export const useEditorStore = defineStore('editor', () => {
       return
     }
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   async function syncUsersServeRename(oldName: string, newName: string) {
@@ -610,7 +617,7 @@ export const useEditorStore = defineStore('editor', () => {
       if (row) row[service] = []
     }
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   /**
@@ -662,7 +669,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     newPersons.forEach(addPersonName)
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
     return true
   }
 
@@ -689,14 +696,14 @@ export const useEditorStore = defineStore('editor', () => {
     newArr.forEach(addPersonName)
     if (!batch) {
       afterMutation('ai')
-      void refreshUsersBadge()
+      void syncUsersFromSchedule()
     }
     return true
   }
 
   function commitAgentBatch() {
     afterMutation('ai')
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   // ── 顯示分組設定 ──────────────────────────────────────
@@ -770,7 +777,7 @@ export const useEditorStore = defineStore('editor', () => {
       throw e
     }
     afterMutation()
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   /** 建立尚不存在的空白週次（AI 生成週次用） */
@@ -868,7 +875,7 @@ export const useEditorStore = defineStore('editor', () => {
 
     isRestoring = false
     updateEditDifference(null)
-    void refreshUsersBadge()
+    void syncUsersFromSchedule()
   }
 
   // ── 編輯記錄 ──────────────────────────────────────────
@@ -979,17 +986,64 @@ export const useEditorStore = defineStore('editor', () => {
     if (hasEdited) void saveEditLog()
   }
 
-  // ── 使用者警示 badge ──────────────────────────────────
-  async function refreshUsersBadge() {
+  // ── 自動同步使用者 ────────────────────────────────────
+  /**
+   * 依目前班表比對 `users`，分兩級處理：
+   *   - 既有同工被排到新服事 → 直接自動寫入（只是補資料，風險低）
+   *   - 出現沒建檔的新名字   → 不自動建檔，只亮紅點請管理員去確認後手動加入
+   *     （名字打錯時才有機會先改掉，不會立刻在 users 生出一筆錯誤資料）
+   *
+   * 服事只增不減：不會因為某人這次沒被排到就移除他既有的 serve_types，
+   * 與使用者管理頁那顆手動按鈕的行為一致（要移除請到該頁操作）。
+   */
+  let syncInFlight = false
+  let syncQueued = false
+
+  async function syncUsersFromSchedule(): Promise<void> {
+    // 非活躍分頁不該偷偷寫入；避免兩個分頁互相覆蓋
+    if (isLocked.value) return
+    if (syncInFlight) {
+      syncQueued = true
+      return
+    }
+    syncInFlight = true
     try {
       if (Object.keys(usersCache).length === 0) usersCache = await loadAllUsers()
-      userAlert.value = evaluateMissingUsers(usersCache)
+
+      const plan = planUserSync(
+        collectPersonServes(),
+        usersCache,
+        collection.value,
+        generateLoginToken,
+      )
+
+      // 只自動寫入「既有同工補服事」；新名字不自動建檔，改用紅點提醒管理員
+      const auto = autoApplicableUpdates(plan)
+      const autoCount = Object.keys(auto).length
+      if (autoCount > 0) {
+        await saveUsers(auto)
+        for (const [name, data] of Object.entries(auto)) usersCache[name] = data
+        status.value = `已自動更新 ${autoCount} 位同工的服事`
+      }
+
+      // 紅點反映當下實況：只要班表上還有沒建檔的名字就亮著，
+      // 管理員去按「自動加入使用者」建檔後，回到編輯頁重新比對就會自動熄掉。
+      pendingNewUsers.value = plan.created
+      userAlert.value = plan.created.length > 0
     } catch (e) {
-      console.error('檢查未註冊使用者失敗:', e)
+      // 自動同步失敗不該打斷編輯；下一次變更會再試一次
+      console.error('自動同步使用者失敗:', e)
+    } finally {
+      syncInFlight = false
+      if (syncQueued) {
+        syncQueued = false
+        void syncUsersFromSchedule()
+      }
     }
   }
 
-  function evaluateMissingUsers(users: Record<string, UserDoc>): boolean {
+  /** 目前班表中每個人被排到的服事（略過資訊欄位） */
+  function collectPersonServes(): Record<string, Set<string>> {
     const userItems = serviceItems.value.filter((i) => !nonUserColumns.value.includes(i))
     const personServes: Record<string, Set<string>> = {}
     for (const row of scheduleData.value) {
@@ -997,14 +1051,9 @@ export const useEditorStore = defineStore('editor', () => {
         for (const name of cellOf(row, item)) (personServes[name] ??= new Set()).add(item)
       }
     }
-    for (const name of Object.keys(personServes)) {
-      const u = users[name]
-      if (!u) return true
-      const registered = u.serve_types?.[collection.value] || []
-      for (const serve of personServes[name]) if (!registered.includes(serve)) return true
-    }
-    return false
+    return personServes
   }
+
 
   // ── 匯出 Excel ────────────────────────────────────────
   function exportExcel(titleName: string) {
@@ -1032,7 +1081,7 @@ export const useEditorStore = defineStore('editor', () => {
   return {
     // state
     collection, scheduleData, pastData, pastDataLoaded, showingPast,
-    serviceItems, nonUserColumns, displayConfig, status, isLocked, userAlert,
+    serviceItems, nonUserColumns, displayConfig, status, isLocked, userAlert, pendingNewUsers,
     // computed
     personColorMap, canUndo, canRedo, allPersonNames,
     sessionStartTime: () => sessionStartTime,
@@ -1057,6 +1106,6 @@ export const useEditorStore = defineStore('editor', () => {
     // edit log
     updateEditDifference, saveEditLog, flushOnLeave,
     // misc
-    refreshUsersBadge, exportExcel,
+    syncUsersFromSchedule, exportExcel,
   }
 })

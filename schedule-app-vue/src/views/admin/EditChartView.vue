@@ -83,6 +83,13 @@ async function goRecords() {
   await editor.saveEditLog()
   router.push({ name: 'difference', query: { collection: collection.value } })
 }
+/** 紅點提示：列出班表上還沒建檔的名字 */
+const newUserHint = computed(() =>
+  editor.userAlert && editor.pendingNewUsers.length
+    ? `有尚未建檔的同工：${editor.pendingNewUsers.join('、')}，請進來按「🔄 自動加入使用者」`
+    : '管理使用者',
+)
+
 async function goUsers() {
   await editor.saveEditLog()
   router.push({ name: 'users', query: { collection: collection.value } })
@@ -126,7 +133,7 @@ function reclaim() {
             <button class="btn btn-secondary" @click="displayConfigOpen = true">📊 編輯顯示欄位</button>
             <button class="btn btn-secondary" @click="goRecords">📜 編輯記錄</button>
             <button class="btn btn-secondary" @click="editor.exportExcel(title)">📥 匯出 Excel</button>
-            <button class="btn btn-secondary btn-with-badge" @click="goUsers">
+            <button class="btn btn-secondary btn-with-badge" :title="newUserHint" @click="goUsers">
               👥 管理使用者
               <span v-if="editor.userAlert" class="badge-alert">!</span>
             </button>
