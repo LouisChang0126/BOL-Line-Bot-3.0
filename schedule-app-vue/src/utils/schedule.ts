@@ -33,6 +33,45 @@ export function computeMove(fromCell: string[], toCell: string[], person: string
   }
 }
 
+/**
+ * 排序「可點選的人員」清單（格子就地編輯時，空白積木下方那排候選）。
+ *
+ * 優先序（由高到低）：
+ *   1. 跟目前打的字有關 —— 以輸入開頭的排最前，其次是名字中間含有輸入的
+ *   2. 已經出現在其他週的同一個服事（老手）
+ *   3. 其他人
+ * 同一級之內，老手排前面，再依中文筆順（localeCompare）排序。
+ *
+ * 注意這裡只「排序」不「過濾」：打錯字或找不到相符的人時，整份名單仍在，
+ * 只是順序不同，使用者還是能往下找。
+ */
+export function sortPersonCandidates(
+  candidates: string[],
+  opts: { query?: string; veterans?: Set<string> } = {},
+): string[] {
+  const query = (opts.query ?? '').trim()
+  const veterans = opts.veterans ?? new Set<string>()
+
+  const rank = (name: string): number => {
+    if (query) {
+      if (name.startsWith(query)) return 0
+      if (name.includes(query)) return 1
+    }
+    return veterans.has(name) ? 2 : 3
+  }
+
+  return [...candidates].sort((a, b) => {
+    const ra = rank(a)
+    const rb = rank(b)
+    if (ra !== rb) return ra - rb
+    // 同一級：老手優先
+    const va = veterans.has(a)
+    const vb = veterans.has(b)
+    if (va !== vb) return va ? -1 : 1
+    return a.localeCompare(b, 'zh-TW')
+  })
+}
+
 /** 該週是否有任何非空白服事內容 */
 export function isWeekNonEmpty(row: ScheduleRow): boolean {
   return Object.entries(row).some(([k, v]) => {

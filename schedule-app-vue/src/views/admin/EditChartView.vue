@@ -246,9 +246,19 @@ function reclaim() {
   align-items: center;
   justify-content: center;
 }
+/*
+  不要給寬度：header-section 是 flex，撐成 width:100% 會讓 main.css 的
+  `margin-left: auto` 沒有剩餘空間可吸收，狀態文字就會黏在（換行後的）最左邊。
+  維持內容寬度才會被推到最右邊。
+*/
 .status-indicator {
-  width: 100%;
   font-size: 13px;
+}
+/* 手機版按鈕改成整行排列，狀態文字沿用 main.css 的置中呈現 */
+@media (max-width: 768px) {
+  .status-indicator {
+    width: 100%;
+  }
 }
 .agent-review-bar {
   display: flex;

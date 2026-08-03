@@ -9,7 +9,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useEditorStore } from '@/stores/editor'
 import { useAgentStore } from '@/stores/agent'
 import { useMultiSelect, INTERNAL_COPY_MARKER } from '@/composables/editor/useMultiSelect'
-import { cellOf } from '@/utils/schedule'
+import { cellOf, sortPersonCandidates } from '@/utils/schedule'
 import { formatDisplayDate } from '@/utils/dates'
 import type { PendingCellChange, ScheduleRow } from '@/types'
 import PastePreviewModal from './PastePreviewModal.vue'
@@ -177,20 +177,17 @@ function veteransOf(date: string, service: string): Set<string> {
   return set
 }
 
-/** 可點選加入的人員：所有人名扣掉本格已有的，資深者排前面 */
+/**
+ * 可點選加入的人員：所有人名扣掉本格已有的，
+ * 依「跟輸入有關 → 其他週做過同服事 → 其他」排序（見 sortPersonCandidates）。
+ */
 function availableFor(date: string, service: string): string[] {
   const row = editor.scheduleData.find((r) => r.date === date)
   const cur = new Set(cellOf(row, service))
-  const vet = veteransOf(date, service)
-  return [...editor.allPersonNames]
-    .filter((n) => !cur.has(n))
-    .sort((a, b) => {
-      const av = vet.has(a)
-      const bv = vet.has(b)
-      if (av && !bv) return -1
-      if (!av && bv) return 1
-      return a.localeCompare(b, 'zh-TW')
-    })
+  return sortPersonCandidates(
+    [...editor.allPersonNames].filter((n) => !cur.has(n)),
+    { query: draft.value, veterans: veteransOf(date, service) },
+  )
 }
 
 /** 送出空白積木的內容：服事欄 → 加人員；資訊欄 → 加一則資訊 */
