@@ -3,6 +3,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import { useAgentStore } from '@/stores/agent'
+import { LLM_TARGETS, type LlmTarget } from '@/utils/outsource'
+import LlmIcon from './LlmIcon.vue'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -95,6 +97,40 @@ async function onSend() {
   await agent.send(p)
 }
 
+// ── 排班外包 ────────────────────────────────────────────
+const replyText = ref('')
+const outsourceBusy = ref(false)
+
+/** 複製提示詞並開啟該 LLM 的網頁（無法自動貼上，需使用者自行 Ctrl+V） */
+async function onOpenLlm(target: LlmTarget) {
+  if (outsourceBusy.value) return
+  outsourceBusy.value = true
+  try {
+    await agent.openLlmWithPrompt(target, prompt.value)
+  } finally {
+    outsourceBusy.value = false
+  }
+}
+
+/** 只複製提示詞，不開網頁 */
+async function onCopyPrompt() {
+  if (outsourceBusy.value) return
+  outsourceBusy.value = true
+  try {
+    const len = await agent.copyOutsourcePrompt(prompt.value)
+    if (len !== null) {
+      agent.addMessage(`已複製提示詞（${len.toLocaleString()} 字）到剪貼簿。`, 'assistant')
+    }
+  } finally {
+    outsourceBusy.value = false
+  }
+}
+
+/** 套用貼回來的 AI 回覆 */
+function onApplyReply() {
+  if (agent.applyOutsourceReply(replyText.value)) replyText.value = ''
+}
+
 function toggleLeaveDate(rowIndex: number, date: string, checked: boolean) {
   const row = agent.leaveRows[rowIndex]
   if (!row) return
@@ -143,7 +179,7 @@ async function onCsvChange(e: Event) {
 
   <aside
     class="agent-sidebar"
-    :class="{ collapsed: !open }"
+    :class="{ collapsed: !open, 'outsource-mode': agent.isOutsource }"
     :style="open ? { width: width + 'px' } : undefined"
   >
     <div class="agent-sidebar-header">
@@ -157,6 +193,7 @@ async function onCsvChange(e: Event) {
       <select v-model="agent.mode" class="agent-select">
         <option value="edit_qa">編輯 / 問答</option>
         <option value="scheduling">排班</option>
+        <option value="outsource">排班外包</option>
       </select>
       <label class="agent-label">思考</label>
       <label class="switch">
@@ -166,7 +203,7 @@ async function onCsvChange(e: Event) {
     </div>
 
     <!-- 參考範圍（排班模式） -->
-    <div v-if="agent.isScheduling" class="agent-section">
+    <div v-if="agent.isSchedulingLike" class="agent-section">
       <div class="agent-toggle" @click="refOpen = !refOpen">參考範圍 <span>{{ refOpen ? '▼' : '▶' }}</span></div>
       <div v-show="refOpen" class="agent-ranges">
         <div class="range-row">
@@ -197,7 +234,7 @@ async function onCsvChange(e: Event) {
     </div>
 
     <!-- 排班規則 -->
-    <div v-if="agent.isScheduling" class="agent-section">
+    <div v-if="agent.isSchedulingLike" class="agent-section">
       <div class="agent-toggle" @click="rulesOpen = !rulesOpen">排班規則 <span>{{ rulesOpen ? '▼' : '▶' }}</span></div>
       <div v-show="rulesOpen" class="agent-rules">
         <label class="rule-row">
@@ -224,7 +261,7 @@ async function onCsvChange(e: Event) {
     </div>
 
     <!-- 請假區域 -->
-    <div v-if="agent.isScheduling" class="agent-section">
+    <div v-if="agent.isSchedulingLike" class="agent-section">
       <div class="agent-toggle" @click="leaveOpen = !leaveOpen">請假區域 <span>{{ leaveOpen ? '▼' : '▶' }}</span></div>
       <div v-show="leaveOpen" class="agent-leave">
         <div v-for="(row, i) in agent.leaveRows" :key="i" class="leave-row">
@@ -251,7 +288,8 @@ async function onCsvChange(e: Event) {
       <div v-if="agent.messages.length === 0" class="agent-welcome">
         <div class="agent-welcome-icon">🤖</div>
         <p>嗨！我是 AI 助手。</p>
-        <p>{{ agent.isScheduling ? '填入排班需求，我會產生建議供你審核。' : '輸入需求，我會協助你調整班表。' }}</p>
+        <p v-if="agent.isOutsource">選好參考／生成週次後，用下方按鈕把提示詞帶到你自己的 AI，再把結果貼回來。</p>
+        <p v-else>{{ agent.isScheduling ? '填入排班需求，我會產生建議供你審核。' : '輸入需求，我會協助你調整班表。' }}</p>
       </div>
       <div v-for="(m, i) in agent.messages" :key="i" class="agent-msg" :class="m.role">{{ m.content }}</div>
 
@@ -272,14 +310,55 @@ async function onCsvChange(e: Event) {
       </div>
     </div>
 
+    <!-- 排班外包：不打自己的 API，改由使用者拿去自己的 LLM 跑 -->
+    <div v-if="agent.isOutsource" class="agent-input outsource-panel">
+      <textarea
+        v-model="prompt"
+        class="agent-prompt outsource-extra"
+        rows="2"
+        placeholder="額外排班指令（可留空）..."
+      ></textarea>
+
+      <div class="outsource-step">1️⃣ 複製提示詞並開啟 AI</div>
+      <div class="outsource-llms">
+        <button
+          v-for="t in LLM_TARGETS"
+          :key="t.id"
+          class="btn btn-secondary outsource-llm"
+          :disabled="outsourceBusy"
+          @click="onOpenLlm(t)"
+        >
+          <LlmIcon :id="t.id" />
+          {{ t.name }}
+        </button>
+      </div>
+      <button class="btn btn-secondary outsource-copy" :disabled="outsourceBusy" @click="onCopyPrompt">
+        📋 只複製提示詞
+      </button>
+      <div class="outsource-note">
+        開啟後請貼上在對話框並送出，這一步需要自己來。
+      </div>
+
+      <div class="outsource-step">2️⃣ 把 AI 的回覆貼回來</div>
+      <textarea
+        v-model="replyText"
+        class="agent-prompt outsource-reply"
+        rows="3"
+        placeholder="把 AI 回覆的 JSON 整段貼在這裡..."
+      ></textarea>
+      <button class="btn btn-primary outsource-apply" :disabled="!replyText.trim()" @click="onApplyReply">
+        ✅ 套用回覆（進入審核）
+      </button>
+    </div>
+
     <!-- 輸入 -->
-    <div class="agent-input">
+    <div v-else class="agent-input">
       <div v-if="agent.attachedCsv" class="agent-attach">
         📄 {{ agent.attachedCsv.name }}
         <button @click="agent.removeCsv()">&times;</button>
       </div>
       <div class="agent-input-row">
-        <label v-if="!agent.isScheduling" class="agent-attach-btn" title="上傳 Excel / CSV">
+        <label v-if="!agent.isSchedulingLike" class="agent-attach-btn" title="上傳 Excel / CSV">
           📎
           <input type="file" accept=".csv,.xlsx,.xls" hidden @change="onCsvChange" />
         </label>
@@ -579,6 +658,64 @@ async function onCsvChange(e: Event) {
   padding: 8px 10px;
   font-family: inherit;
   max-height: 100px;
+}
+/* ── 排班外包面板 ────────────────────────────────── */
+.outsource-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+/*
+  外包模式把對話區排到最下面：操作面板（複製 / 開 AI / 貼回）是主要動線，
+  對話區只是結果與錯誤訊息，放下面比較順。
+  aside 是 flex column，其餘區塊 order 預設為 0，所以這兩個排在它們之後。
+*/
+.agent-sidebar.outsource-mode .outsource-panel {
+  order: 1;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-color);
+}
+.agent-sidebar.outsource-mode .agent-chat {
+  order: 2;
+  border-top: 1px solid var(--border-color);
+  min-height: 90px;
+}
+.outsource-step {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.outsource-llms {
+  display: flex;
+  gap: 6px;
+}
+.outsource-llm {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 12px;
+  justify-content: center;
+}
+.outsource-copy,
+.outsource-apply {
+  width: 100%;
+  justify-content: center;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.outsource-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-light);
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.outsource-extra,
+.outsource-reply {
+  width: 100%;
+  resize: vertical;
 }
 .agent-send {
   border: none;

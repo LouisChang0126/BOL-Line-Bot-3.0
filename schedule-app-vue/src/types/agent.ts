@@ -1,7 +1,11 @@
 /** AI 排班助手相關型別（前端 ↔ Cloud Function 契約 + agent_log dashboard） */
 import type { ScheduleRow } from './schedule'
 
-export type AgentMode = 'edit_qa' | 'scheduling'
+/**
+ * `outsource`（排班外包）＝ 排班模式的 UI，但不打自己的 Cloud Function，
+ * 而是產生提示詞讓使用者拿去自己訂閱的 LLM 網頁版跑，再把結果貼回來。
+ */
+export type AgentMode = 'edit_qa' | 'scheduling' | 'outsource'
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'error'

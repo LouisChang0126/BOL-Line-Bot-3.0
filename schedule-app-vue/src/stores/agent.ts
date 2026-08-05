@@ -13,6 +13,12 @@ import { useEditorStore } from '@/stores/editor'
 import { buildChangedCellSet, computeConsecutiveContextDates, validateScopedChanges } from '@/utils/ruleEngine'
 import { formatTimestampId, getFutureSundayCandidates } from '@/utils/dates'
 import { cellOf } from '@/utils/schedule'
+import {
+  buildOutsourcePrompt,
+  mergeWithCurrent,
+  parseOutsourceReply,
+  type LlmTarget,
+} from '@/utils/outsource'
 import type {
   ActiveRules,
   AgentMode,
@@ -115,7 +121,11 @@ export const useAgentStore = defineStore('agent', () => {
     ]
   }
 
-  const histories = reactive<Record<AgentMode, ChatMessage[]>>({ edit_qa: [], scheduling: [] })
+  const histories = reactive<Record<AgentMode, ChatMessage[]>>({
+    edit_qa: [],
+    scheduling: [],
+    outsource: [],
+  })
   const messages = computed(() => histories[mode.value])
 
   const rules = reactive<ActiveRules>({
@@ -134,6 +144,9 @@ export const useAgentStore = defineStore('agent', () => {
   const leaveRows = ref<LeaveRow[]>([{ person: '', dates: [] }])
 
   const isScheduling = computed(() => mode.value === 'scheduling')
+  const isOutsource = computed(() => mode.value === 'outsource')
+  /** 排班相關 UI（參考/生成範圍、規則、請假）在這兩種模式都要顯示 */
+  const isSchedulingLike = computed(() => isScheduling.value || isOutsource.value)
   const hasPending = computed(() => !!pendingChanges.value && Object.keys(pendingChanges.value).length > 0)
 
   // ── 下拉候選 ──────────────────────────────────────────
@@ -168,6 +181,8 @@ export const useAgentStore = defineStore('agent', () => {
   // ── 送出 ──────────────────────────────────────────────
   async function send(promptRaw: string): Promise<void> {
     if (isLoading.value) return
+    // 外包模式不打自己的 API，走 openLlmWithPrompt / applyOutsourceReply
+    if (mode.value === 'outsource') return
     if (!AGENT_API_URL) {
       addMessage('未設定 Agent API URL。', 'error')
       return
@@ -205,20 +220,13 @@ export const useAgentStore = defineStore('agent', () => {
     }
 
     // 整理請假
-    const leaveByDate: Record<string, string[]> = {}
+    let leaveByDate: Record<string, string[]> = {}
     if (scheduling) {
-      const errs: string[] = []
-      leaveRows.value.forEach((row, i) => {
-        const p = (row.person || '').trim()
-        const dates = (row.dates || []).filter(Boolean)
-        if (!p && dates.length === 0) return
-        if (!p) return errs.push(`第 ${i + 1} 列：人員未填`)
-        if (dates.length === 0) return errs.push(`第 ${i + 1} 列：未選任何週次`)
-        for (const d of dates) {
-          ;(leaveByDate[d] ??= []).push(p)
-        }
-      })
-      if (errs.length) return addMessage('❌ 請假區域格式錯誤：\n' + errs.join('\n'), 'error', selectedMode)
+      const leave = collectLeaveByDate()
+      if (leave.errors.length) {
+        return addMessage('❌ 請假區域格式錯誤：\n' + leave.errors.join('\n'), 'error', selectedMode)
+      }
+      leaveByDate = leave.byDate
     }
 
     // 組 effective schedule（含 pending 套用 + pastData 前置）
@@ -360,6 +368,140 @@ export const useAgentStore = defineStore('agent', () => {
   }
 
   // ── 待審核變更 ────────────────────────────────────────
+  /** 把請假列 pivot 成 {date: [人名]}，同時回報格式錯誤（scheduling 與 outsource 共用） */
+  function collectLeaveByDate(): { byDate: Record<string, string[]>; errors: string[] } {
+    const byDate: Record<string, string[]> = {}
+    const errors: string[] = []
+    leaveRows.value.forEach((row, i) => {
+      const p = (row.person || '').trim()
+      const dates = (row.dates || []).filter(Boolean)
+      if (!p && dates.length === 0) return
+      if (!p) return errors.push(`第 ${i + 1} 列：人員未填`)
+      if (dates.length === 0) return errors.push(`第 ${i + 1} 列：未選任何週次`)
+      for (const d of dates) (byDate[d] ??= []).push(p)
+    })
+    return { byDate, errors }
+  }
+
+  // ── 排班外包 ──────────────────────────────────────────
+  /** 上次產生提示詞時的生成週次，貼回結果時用來濾掉範圍外的日期 */
+  const outsourceWeeks = ref<string[]>([])
+
+  /**
+   * 依目前設定組出要貼給 LLM 的提示詞。
+   * 與 send() 的 scheduling 分支使用相同的資料組裝規則（參考週次篩選、
+   * 連續週 context、請假 pivot），差別只在輸出成文字而非 API payload。
+   */
+  async function buildOutsourceText(userPrompt: string): Promise<string | null> {
+    if (!refStart.value || !refEnd.value) {
+      addMessage('❌ 請選擇「參考週次」的起始與結束', 'error')
+      return null
+    }
+    if (!genStart.value || !genEnd.value) {
+      addMessage('❌ 請選擇「生成週次」的起始與結束', 'error')
+      return null
+    }
+    const referenceWeeks = expandDateRange(refStart.value, refEnd.value, refCandidates.value)
+    const generateWeeks = expandDateRange(genStart.value, genEnd.value, genCandidates.value)
+
+    // 先把要生成的週次建出來，貼回結果時才有對應的列可以套用
+    try {
+      await editor.ensureWeeks(generateWeeks)
+    } catch (e) {
+      if (!editor.isTabLockError(e)) addMessage('❌ 新增週次失敗：' + msg(e), 'error')
+      return null
+    }
+
+    const leave = collectLeaveByDate()
+    if (leave.errors.length) {
+      addMessage('❌ 請假區域格式錯誤：\n' + leave.errors.join('\n'), 'error')
+      return null
+    }
+
+    let effective: ScheduleRow[] = JSON.parse(JSON.stringify(editor.scheduleData))
+    if (pendingChanges.value) {
+      for (const [date, services] of Object.entries(pendingChanges.value)) {
+        const row = effective.find((r) => r.date === date)
+        if (row) for (const [service, change] of Object.entries(services)) row[service] = [...change.new]
+      }
+    }
+    if (editor.pastData.length > 0) {
+      effective = [...JSON.parse(JSON.stringify(editor.pastData)), ...effective]
+    }
+
+    const consecutiveContextWeeks = rules.consecutive
+      ? computeConsecutiveContextDates(generateWeeks, rules.consecutiveWeeks, effective)
+      : []
+
+    const included = new Set([...referenceWeeks, ...consecutiveContextWeeks])
+    const nonUser = new Set(editor.nonUserColumns)
+    const userColumns = editor.serviceItems.filter((s) => !nonUser.has(s))
+    const clean = effective
+      .filter((r) => included.has(r.date))
+      .map((row) => {
+        const out: ScheduleRow = { date: row.date }
+        for (const s of userColumns) out[s] = cellOf(row, s)
+        return out
+      })
+
+    outsourceWeeks.value = generateWeeks
+
+    return buildOutsourcePrompt({
+      schedule: clean,
+      generateWeeks,
+      consecutiveContextWeeks,
+      leaveByDate: leave.byDate,
+      serviceItems: userColumns,
+      rules,
+      userPrompt,
+    })
+  }
+
+  /** 產生提示詞並複製到剪貼簿；成功回傳文字長度 */
+  async function copyOutsourcePrompt(userPrompt: string): Promise<number | null> {
+    const text = await buildOutsourceText(userPrompt)
+    if (!text) return null
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      addMessage('❌ 無法寫入剪貼簿，請確認已授予權限', 'error')
+      return null
+    }
+    return text.length
+  }
+
+  /**
+   * 複製提示詞並開啟指定的 LLM 網頁。
+   *
+   * 無法自動貼上並送出 —— 瀏覽器同源政策禁止跨網域操作其他分頁的 DOM，
+   * 因此一律「複製 → 開頁面 → 使用者自行 Ctrl+V 送出」。
+   */
+  async function openLlmWithPrompt(target: LlmTarget, userPrompt: string): Promise<void> {
+    const len = await copyOutsourcePrompt(userPrompt)
+    if (len === null) return
+    window.open(target.url, '_blank', 'noopener')
+    addMessage(
+      `已複製提示詞（${len.toLocaleString()} 字）並開啟 ${target.name}。\n` +
+        `請在對話框貼上後送出，再把 AI 回覆的 JSON 整段貼回下方欄位。`,
+      'assistant',
+    )
+  }
+
+  /** 解析使用者貼回來的 LLM 回覆，轉成待審核變更 */
+  function applyOutsourceReply(text: string): boolean {
+    const result = parseOutsourceReply(text, outsourceWeeks.value)
+    if (!result.ok) {
+      addMessage('❌ ' + result.error, 'error')
+      return false
+    }
+    if (result.explanation) addMessage(result.explanation, 'assistant')
+    // LLM 常常只回它有調整的欄位；沒提到的欄位必須沿用原值，否則會被當成清空
+    const nonUser = new Set(editor.nonUserColumns)
+    const userColumns = editor.serviceItems.filter((s) => !nonUser.has(s))
+    setPendingChanges(mergeWithCurrent(result.scheduleData, editor.scheduleData, userColumns))
+    return true
+  }
+
   function setPendingChanges(next: ScheduleRow[]) {
     const changes: PendingAgentChanges = {}
     const nonUser = new Set(editor.nonUserColumns)
@@ -428,11 +570,12 @@ export const useAgentStore = defineStore('agent', () => {
   return {
     mode, enableThinking, isLoading, pendingChanges, attachedCsv, messages, rules,
     refStart, refEnd, genStart, genEnd, leaveRows,
-    isScheduling, hasPending,
+    isScheduling, isOutsource, isSchedulingLike, hasPending,
     progressActive, progressPct, progressElapsedSec,
     refCandidates, genCandidates, generateRangeDates,
     addMessage, attachCsv, removeCsv, addLeaveRow, removeLeaveRow,
     send, acceptCell, rejectCell, acceptAll, rejectAll,
+    copyOutsourcePrompt, openLlmWithPrompt, applyOutsourceReply,
   }
 })
 
